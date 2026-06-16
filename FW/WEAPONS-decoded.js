@@ -102,7 +102,7 @@
         ));
     }
   });
-  (Pip.inv = inv), (Pip.scroller = scroller);
+  (Pip.inv = inv), Pip.bindScrollerEvents(scroller, inv);
   return {
     id: 'WEAPONS',
     remove: () => {

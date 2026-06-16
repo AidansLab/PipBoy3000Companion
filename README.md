@@ -1,6 +1,6 @@
 # Fallout Pip-Boy 3000 — Live Sync
 
-Sync your **Fallout 3** and **Fallout: New Vegas** player stats and inventory to [The Wand Company's Pip-Boy 3000](https://www.thewandcompany.com/pip-boy/) replica in real-time over USB.
+Sync your **Fallout 3** and **Fallout: New Vegas** player stats and inventory to [The Wand Company's Pip-Boy 3000](https://www.thewandcompany.com/pip-boy-3000/) replica in real-time over USB.
 
 > **⚠ DISCLAIMER**: This is an unofficial fan project. Not affiliated with or endorsed by Bethesda Softworks, The Wand Company, or any other entity.
 
@@ -28,6 +28,7 @@ Sync your **Fallout 3** and **Fallout: New Vegas** player stats and inventory to
 ```bash
 cd CompanionApp
 npm install
+npm run build-fw
 npm start          # CLI (terminal)
 npm run ui         # Desktop UI with live console + firmware upload
 ```
@@ -36,12 +37,12 @@ npm run ui         # Desktop UI with live console + firmware upload
 ```bash
 cd CompanionApp
 npm install
-npm run ui                    # Launch the Electron window during development
+npm run build-fw             # Build firmware files for all menus
 npm run build:win             # Build portable .exe in CompanionApp/dist/
 ```
 
 The UI shows live sync console output and an **Upload Firmware to Pip-Boy** button
-that writes modified `FW/*-decoded.js` menu files to the device over USB.
+that writes the companion firmware to the device over USB.
 
 ### Upload firmware (CLI)
 ```bash

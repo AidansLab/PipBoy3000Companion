@@ -84,7 +84,7 @@
           ));
       }
     });
-  (Pip.inv = inv), (Pip.scroller = scroller);
+  (Pip.inv = inv), Pip.bindScrollerEvents(scroller, inv);
   return (
     (inv.onLoaded = (i) => {
       (scroller.updateItemCount(i.count), scroller.render());
@@ -92,7 +92,7 @@
     {
       id: 'AID',
       remove: () => {
-        (delete Pip.inv, delete Pip.scroller, scroller.remove(), inv.sync(), db.close(), imgs.close());
+        (Pip.unbindScrollerEvents(), delete Pip.inv, scroller.remove(), inv.sync(), db.close(), imgs.close());
       }
     }
   );

@@ -460,7 +460,7 @@ class Player {
           success = !0;
           const onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === v;
           if (!onMenu) inv.sync();
-          if (onMenu && Pip.scroller) Pip.scroller.updateItemCount(inv.count);
+          if (onMenu) Pip.emit('scroller:updateCount', inv.count);
         } catch (e) { }
       }),
       success
@@ -1502,12 +1502,28 @@ if (
         o
       );
     }),
+    (Pip.bindScrollerEvents = (scroller, inv) => {
+      Pip.onExclusive('scroller:updateCount', (count) =>
+        scroller.updateItemCount(count)
+      );
+      Pip.onExclusive('scroller:render', (opts) =>
+        scroller.render(opts || {})
+      );
+      Pip.onExclusive('scroller:refresh', () => {
+        scroller.updateItemCount(inv.count);
+        scroller.render({ listOnly: !1 });
+      });
+    }),
+    (Pip.unbindScrollerEvents = () => {
+      ['scroller:updateCount', 'scroller:render', 'scroller:refresh'].forEach(
+        (e) => Pip.removeAllListeners(e)
+      );
+    }),
     (Pip.refreshEquipState = () => {
-      if (!Pip.CURRENT || !Pip.scroller || !Pip.inv) return;
+      if (!Pip.CURRENT) return;
       const tab = Pip.CURRENT.id;
       if (tab !== 'WEAPONS' && tab !== 'APPAREL') return;
-      Pip.scroller.updateItemCount(Pip.inv.count);
-      Pip.scroller.render({ listOnly: !1 });
+      Pip.emit('scroller:refresh');
       if (tab === 'APPAREL') {
         const active = player.getav('equippedApparel') || new Uint32Array(4),
           db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/APPAREL.DAT`);
