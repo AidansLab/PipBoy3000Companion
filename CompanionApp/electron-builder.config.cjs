@@ -25,7 +25,7 @@ module.exports = {
     {
       from: "../FW",
       to: "FW",
-      filter: ["FW Build/**/*.JS"]
+      filter: ["FW Build/**/*.JS", "FW Build/.boot0"]
     }
   ],
   win: {

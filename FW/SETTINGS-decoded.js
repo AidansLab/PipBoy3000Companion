@@ -297,71 +297,11 @@
               settings.theme || setRGB(void 0),
               Pip.audioStart('SOUND/FX/F' + (NV ? 'NV' : '3') + 'THEME.WAV'),
               Pip.renderHeader(),
-              player.setav('equippedApparel', []));
+              player.setav('equippedApparel', [0, 0, 0, 0], !0));
           }
         },
         'Start Demo Mode': () => setTimeout(Pip.demoMode, 500)
       })));
-  }
-  function hasPreSyncBackup(mode) {
-    const fs = require('fs');
-    try {
-      const base = 'INV/PRESYNC/' + mode;
-      fs.statSync(base);
-      const cats = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
-      for (let i = 0; i < cats.length; i++) {
-        const d = fs.readFileSync(base + '/' + cats[i] + '.INV');
-        if (d && d.length) return !0;
-      }
-    } catch (e) {}
-    try {
-      const d = fs.readFileSync('SETTINGS/PRESYNC/PLAYER.JSON');
-      if (d && d.length) return !0;
-    } catch (e) {}
-    try {
-      const d = fs.readFileSync('SETTINGS/PRESYNC/' + mode + '_PERKS.JSON');
-      if (d && d.length) return !0;
-    } catch (e) {}
-    try {
-      const d = fs.readFileSync('SETTINGS/PRESYNC/' + mode + '_SKILLS.JSON');
-      if (d && d.length) return !0;
-    } catch (e) {}
-    return !1;
-  }
-  function clearPreSyncBackup() {
-    const fs = require('fs'),
-      cats = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'],
-      settingsFiles = [
-        'PLAYER.JSON',
-        'F3_PERKS.JSON',
-        'F3_SKILLS.JSON',
-        'NV_PERKS.JSON',
-        'NV_SKILLS.JSON'
-      ],
-      tryUnlink = (p) => {
-        try {
-          fs.unlinkSync(p);
-        } catch (e) {}
-      };
-    settingsFiles.forEach((f) => tryUnlink('SETTINGS/PRESYNC/' + f));
-    ['F3', 'NV'].forEach((m) => {
-      cats.forEach((c) => tryUnlink('INV/PRESYNC/' + m + '/' + c + '.INV'));
-    });
-    tryUnlink('INV/PRESYNC/MANIFEST.JSON');
-  }
-  function readPresyncOrDefault(fs, src, defaults) {
-    let data = '';
-    try {
-      data = fs.readFileSync(src);
-    } catch (e) {}
-    if (data && data.length) return data;
-    for (let i = 0; i < defaults.length; i++) {
-      try {
-        data = fs.readFileSync(defaults[i]);
-        if (data && data.length) return data;
-      } catch (e) {}
-    }
-    return '';
   }
   function showUserMenu() {
     (menu && menu.remove(),
@@ -401,17 +341,25 @@
                   '': { title: 'Cannot Restore', back: showUserMenu },
                   'Not allowed while in companion mode.': () => {}
                 }))
-              : hasPreSyncBackup(mode)
-                ? (menu = showMenu({
-                    '': { title: 'Restore pre-sync data?', back: showUserMenu },
-                    Yes: function () {
-                      (restorePreSyncData(), showUserMenu());
-                    }
-                  }))
-                : (menu = showMenu({
-                    '': { title: 'No Backup', back: showUserMenu },
-                    'No pre-sync data backup found for this mode.': () => {}
-                  })));
+              : (() => {
+                  let ps;
+                  try {
+                    ps = eval(fs.readFileSync('JS/PRESYNC.JS'));
+                  } catch (e) {
+                    ps = null;
+                  }
+                  !ps || !ps.hasPreSyncBackup(mode)
+                    ? (menu = showMenu({
+                        '': { title: 'No Backup', back: showUserMenu },
+                        'No pre-sync data backup found for this mode.': () => {}
+                      }))
+                    : (menu = showMenu({
+                        '': { title: 'Restore pre-sync data?', back: showUserMenu },
+                        Yes: function () {
+                          (ps.restore(mode), showUserMenu());
+                        }
+                      }));
+                })());
         },
         'Reset inventory': function () {
           (menu && menu.remove(),
@@ -423,62 +371,6 @@
             })));
         }
       })));
-  }
-  function restorePreSyncData() {
-    const mode = NV ? 'NV' : 'F3',
-      srcDir = 'INV/PRESYNC/' + mode,
-      dstDir = 'INV/' + mode,
-      cats = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'],
-      refreshIds = ['WEAPONS', 'APPAREL', 'AID', 'MISC', 'AMMO', 'SPECIAL', 'SKILLS', 'PERKS'],
-      fs = require('fs');
-    if (!hasPreSyncBackup(mode)) return !1;
-    if (typeof cmode !== 'undefined' && cmode) return !1;
-    try {
-      fs.statSync(dstDir);
-    } catch (e) {
-      try {
-        fs.mkdirSync(dstDir);
-      } catch (e2) {}
-    }
-    (typeof Pip !== 'undefined' && Pip.inv && (delete Pip.inv, delete Pip.scroller),
-      (() => {
-        let playerData = '';
-        try {
-          playerData = fs.readFileSync('SETTINGS/PRESYNC/PLAYER.JSON');
-        } catch (e) {}
-        if (playerData && playerData.length) {
-          fs.writeFileSync('SETTINGS/PLAYER.JSON', playerData);
-          const restored = JSON.parse(playerData),
-            base = JSON.parse(fs.readFileSync('SETTINGS/DEFAULT/PLAYER.JSON'));
-          for (let k in restored) base[k] = restored[k];
-          player.player = base;
-          player.ephemeral = {};
-          player.modified = !0;
-          player.sync();
-        }
-      })(),
-      [mode + '_PERKS.JSON', mode + '_SKILLS.JSON'].forEach((v) => {
-        let data = '';
-        try {
-          data = fs.readFileSync('SETTINGS/PRESYNC/' + v);
-        } catch (e) {}
-        if (data && data.length > 2) fs.writeFileSync('SETTINGS/' + v, data);
-      }),
-      cats.forEach((v) => {
-        const live = dstDir + '/' + v + '.INV',
-          def = 'INV/DEFAULT/' + mode + '/' + v + '.INV';
-        const data = readPresyncOrDefault(fs, srcDir + '/' + v + '.INV', [def]);
-        fs.writeFileSync(live, data || '');
-      }),
-      player.calculateInvWeight && player.calculateInvWeight(),
-      Pip.renderHeader && Pip.renderHeader(),
-      clearPreSyncBackup(),
-      console.log('PIPSYNC:RESTORE:PRESYNC'),
-      Pip.CURRENT &&
-        refreshIds.indexOf(Pip.CURRENT.id) >= 0 &&
-        Pip.changeMenu &&
-        Pip.changeMenu());
-    return !0;
   }
   function setJitter(v) {
     ((Pip.blitOptions.idleFilter = v

@@ -92,6 +92,9 @@ ipcMain.handle('flash-firmware', async () => {
       forwardLog(entry);
     },
   });
+  if (result.rebooted) {
+    await companion.afterFirmwareFlash();
+  }
   forwardStatus();
   return result;
 });

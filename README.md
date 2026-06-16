@@ -41,10 +41,11 @@ npm run build-fw             # Build firmware files for all menus
 npm run build:win             # Build portable .exe in CompanionApp/dist/
 ```
 
-The UI shows live sync console output and an **Upload Firmware to Pip-Boy** button
-that writes the companion firmware to the device over USB.
+The UI shows live sync console output and an **Install Companion Menus & Boot Patch**
+button that deploys companion changes over USB (menu scripts to the SD card, core
+patches to Storage `.boot0` — stock `FW.JS` is not replaced).
 
-### Upload firmware (CLI)
+### Install companion firmware (CLI)
 ```bash
 npm run flash-fw
 ```
@@ -78,7 +79,7 @@ PipBoy> eval <expr>      Evaluate expression and get result
 │   ├── src/
 │   │   ├── cli.js             # Interactive CLI interface
 │   │   ├── app-core.js        # Shared sync logic (CLI + UI)
-│   │   ├── flash-fw.js        # Firmware upload over USB
+│   │   ├── flash-fw.js        # Menu + .boot0 upload over USB
 │   │   ├── serial-bridge.js   # USB serial communication
 │   │   ├── sync-engine.js     # State diffing & command generation
 │   │   ├── pipe-client.js     # Named Pipe client (reads from game)

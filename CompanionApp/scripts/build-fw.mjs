@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /**
- * Build Pip-Boy firmware from FW/*-decoded.js into FW/FW Build/*.JS
+ * Build Pip-Boy companion files from FW/*-decoded.js into FW/FW Build/
  *
- * Matches stock Pip-Boy JS/*.JS on SD card:
+ *   boot0-decoded.js → FW Build/.boot0   (Storage boot patch; patches stock FW.JS)
+ *   *-decoded.js     → FW Build/*.JS      (menu scripts → SD JS/)
+ *   FW-decoded.js    — not built (stock FW.JS on device is unchanged)
  *   - Minification: off
  *   - Esprima mangle: off (stock menus keep names like params/db/inv)
  *   - Pretokenise: always
@@ -72,6 +74,7 @@ function pretokeniseCode(Espruino, code, name) {
 }
 
 function decodedToOutputName(filename) {
+  if (filename.toLowerCase() === 'boot0-decoded.js') return '.boot0';
   const base = filename.replace(/-decoded\.js$/i, '');
   return `${base.toUpperCase()}.JS`;
 }
@@ -79,7 +82,13 @@ function decodedToOutputName(filename) {
 function listDecodedSources() {
   return fs
     .readdirSync(fwDir)
-    .filter((name) => name.toLowerCase().endsWith('-decoded.js'))
+    .filter((name) => {
+      const lower = name.toLowerCase();
+      if (!lower.endsWith('-decoded.js')) return false;
+      // Stock FW.JS stays on the device; companion patches ship in Storage .boot0
+      if (lower === 'fw-decoded.js') return false;
+      return true;
+    })
     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 }
 

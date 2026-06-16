@@ -5,15 +5,36 @@
       idOrder: db.ids
     }),
     imgs = E.openFile(`DATA/${NV ? 'NV' : 'F3'}/APPAREL.IMG`, 'r');
-  let active = player.getav('equippedApparel') || new Uint32Array(4);
+  function normalizeActive(raw) {
+    if (!raw || typeof raw.length !== 'number') return [0, 0, 0, 0];
+    return [raw[0] || 0, raw[1] || 0, raw[2] || 0, raw[3] || 0];
+  }
+  let active = normalizeActive(player.getav('equippedApparel'));
+  const updateDtDr = () => {
+    if (NV) {
+      let newDT = 0;
+      for (let i = 0; i < active.length; i++) {
+        const item = db.getId(active[i]);
+        item && item.dt && (newDT += item.dt);
+      }
+      player.setav('dt', newDT);
+    } else {
+      let newDR = 0;
+      for (let i = 0; i < active.length; i++) {
+        const item = db.getId(active[i]);
+        item && item.dr && (newDR += item.dr);
+      }
+      player.setav('dr', newDR);
+    }
+    Pip.renderHeader();
+  };
   const scroller = Pip.createScroller({
     hasEquipStates: !0,
     itemCount: inv.count,
     scrollStart: params.scrollTo ? inv.indexOf(params.scrollTo) : 0,
     getItem: (n) => {
       const it = inv.get(n),
-        item = db.getId(it.id),
-        active = player.getav('equippedApparel') || new Uint32Array(4);
+        item = db.getId(it.id);
       return (
         active[item.es] == it.id && (item.activ = !0),
         (item.cnd = it.cnd),
@@ -63,37 +84,27 @@
     onClick: (n) => {
       const it = inv.get(n),
         item = db.getId(it.id);
-      null != item.es &&
-        (active[item.es] === it.id
-          ? ((active[item.es] = void 0),
-            Pip.audioStart('/SOUND/FX/APP/U.WAV'),
-            console.log('PIPSYNC:UNEQUIP:APPAREL:' + Pip.formatId(it.id)))
-          : (() => {
-              const prevId = active[item.es];
-              active[item.es] = it.id;
-              Pip.audioStart('/SOUND/FX/APP/E.WAV');
-              if (prevId != null && prevId !== it.id) {
-                console.log('PIPSYNC:UNEQUIP:APPAREL:' + Pip.formatId(prevId));
-              }
-              console.log('PIPSYNC:EQUIP:APPAREL:' + Pip.formatId(it.id));
-            })(),
-        player.setav('equippedApparel', active, !0),
-        scroller.updateItemCount(inv.count),
-        NV
-          ? (function () {
-              const newDT = active.reduce(function (dt, apparelId) {
-                const item = db.getId(apparelId);
-                return item.dt ? (dt += item.dt) : dt;
-              }, 0);
-              (player.setav('dt', newDT), Pip.renderHeader());
-            })()
-          : (function () {
-              const newDR = active.reduce(function (dr, apparelId) {
-                const item = db.getId(apparelId);
-                return item.dr ? (dr += item.dr) : dr;
-              }, 0);
-              (player.setav('dr', newDR), Pip.renderHeader());
-            })());
+      if (null == item.es) return;
+      const isUnequip = active[item.es] === it.id;
+      Pip.audioStart(isUnequip ? '/SOUND/FX/APP/U.WAV' : '/SOUND/FX/APP/E.WAV');
+      if (isUnequip) {
+        active[item.es] = void 0;
+        setTimeout(function () {
+          console.log('PIPSYNC:UNEQUIP:APPAREL:' + Pip.formatId(it.id));
+        }, 0);
+      } else {
+        const prevId = active[item.es];
+        active[item.es] = it.id;
+        setTimeout(function () {
+          if (prevId != null && prevId !== it.id) {
+            console.log('PIPSYNC:UNEQUIP:APPAREL:' + Pip.formatId(prevId));
+          }
+          console.log('PIPSYNC:EQUIP:APPAREL:' + Pip.formatId(it.id));
+        }, 0);
+      }
+      player.setav('equippedApparel', active, !0, !0);
+      scroller.updateItemCount(inv.count);
+      updateDtDr();
     },
     onLongClick: (n) => {
       if (typeof cmode !== 'undefined' && cmode) return;
@@ -111,7 +122,21 @@
         ));
     }
   });
-  (Pip.inv = inv), Pip.bindScrollerEvents(scroller, inv);
+  const onScroller = (action, arg) => {
+    if (action === 'count') scroller.updateItemCount(arg !== void 0 ? arg : inv.count);
+    else if (action === 'render') scroller.render(arg);
+    else if (action === 'refresh') {
+      scroller.updateItemCount(inv.count);
+      scroller.render(arg);
+    } else if (action === 'refreshEquip') {
+      scroller.updateItemCount(inv.count);
+      scroller.render({ listOnly: !1 });
+      active = normalizeActive(player.getav('equippedApparel'));
+      updateDtDr();
+    }
+  };
+  Pip.onExclusive('scroller', onScroller);
+  Pip.inv = inv;
   return (
     (inv.onLoaded = (i) => {
       (scroller.updateItemCount(i.count), scroller.render());
@@ -119,7 +144,9 @@
     {
       id: 'APPAREL',
       remove: () => {
-        (Pip.unbindScrollerEvents(), delete Pip.inv, scroller.remove(),
+        (Pip.removeListener('scroller', onScroller),
+          delete Pip.inv,
+          scroller.remove(),
           player.sync(),
           inv.sync(),
           imgs.close(),

@@ -21,8 +21,10 @@ const MAX_INVENTORY_DELTA = 50;       // If more than this many items change, do
 const SYNC_DEBOUNCE_MS = 500;
 
 const INVENTORY_CATEGORIES = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
-const CLEAR_INV_CMD = `if(typeof Pip!=='undefined'&&Pip.inv){delete Pip.inv;delete Pip.scroller;}['AID','AMMO','APPAREL','MISC','WEAPONS'].forEach(function(v){require('fs').writeFileSync('INV/'+(NV?'NV':'F3')+'/'+v+'.INV','')})`;
+const CLEAR_INV_CMD = `if(typeof Pip!=='undefined'&&Pip.inv){delete Pip.inv;}['AID','AMMO','APPAREL','MISC','WEAPONS'].forEach(function(v){require('fs').writeFileSync('INV/'+(NV?'NV':'F3')+'/'+v+'.INV','')})`;
 const CLEAR_PERKS_CMD = `require('fs').writeFileSync('SETTINGS/'+(NV?'NV':'F3')+'_PERKS.JSON','{}')`;
+/** Refresh open WEAPONS/APPAREL scroller after remote equip; safe if .boot0 not loaded */
+const REFRESH_EQUIP_CMD = `if(typeof Pip!=='undefined'){if(Pip.refreshEquipState)Pip.refreshEquipState();else Pip.emit('scroller','refreshEquip');}`;
 
 export class SyncEngine extends EventEmitter {
   constructor(serialBridge, formIdMapper) {
@@ -158,7 +160,7 @@ export class SyncEngine extends EventEmitter {
         if (hasInvChanges) {
           const catsArray = Array.from(this._lastChangedCategories || []).map(c => "'" + c + "'").join(',');
           if (catsArray.length > 0) {
-            commands.push(`[${catsArray}].forEach(function(v){var d=new DataFile('DATA/'+(NV?'NV':'F3')+'/'+v+'.DAT');var i=(typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id===v)?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/'+v+'.INV',{idOrder:d.ids});if(i._requiresSort)i.sort(d.ids);if(typeof Pip!=='undefined'&&Pip.scroller&&Pip.CURRENT&&Pip.CURRENT.id===v){Pip.scroller.updateItemCount(i.count);Pip.scroller.render();}d.close();})`);
+            commands.push(`[${catsArray}].forEach(function(v){var d=new DataFile('DATA/'+(NV?'NV':'F3')+'/'+v+'.DAT');var i=(typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id===v)?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/'+v+'.INV',{idOrder:d.ids});if(i._requiresSort)i.sort(d.ids);if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id===v)Pip.emit('scroller','refresh');d.close();})`);
           }
         }
 
@@ -633,7 +635,7 @@ export class SyncEngine extends EventEmitter {
     const currentWeapon = this._toFormIdInt(player.equippedweap) ?? 0;
     const previousWeapon = this._toFormIdInt(prevPlayer.equippedweap) ?? 0;
     if (currentWeapon !== previousWeapon) {
-      commands.push(`player.setav('equippedWeap', ${currentWeapon}, !0)`);
+      commands.push(`player.setav('equippedWeap', ${currentWeapon}, !0);${REFRESH_EQUIP_CMD}`);
     }
 
     const currentApparel = this._normalizeEquippedApparel(player.equippedapparel);
@@ -668,7 +670,7 @@ export class SyncEngine extends EventEmitter {
 
   _buildEquipApparelCommand(apparelIds) {
     const idList = apparelIds.join(',');
-    return `(()=>{var active=new Uint32Array(4),ids=[${idList}],db=new DataFile('DATA/'+(NV?'NV':'F3')+'/APPAREL.DAT');ids.forEach(function(id){var it=db.getId(id);if(it&&it.es!=null)active[it.es]=id;});db.close();player.setav('equippedApparel',active,!0);})()`;
+    return `(()=>{var active=[0,0,0,0],ids=[${idList}],db=new DataFile('DATA/'+(NV?'NV':'F3')+'/APPAREL.DAT');ids.forEach(function(id){var it=db.getId(id);if(it&&it.es!=null)active[it.es]=id;});db.close();player.setav('equippedApparel',active,!0);${REFRESH_EQUIP_CMD}})()`;
   }
 
   _buildSafeAddPerk(formId) {
@@ -682,7 +684,7 @@ export class SyncEngine extends EventEmitter {
   _buildAddItemHealthPercentCommand(formId, count, condition) {
     const cnt = count || 1;
     const cnd = condition !== undefined ? condition : 100;
-    return `(()=>{var id=${formId},cnt=${cnt},cnd=${cnd};if(cnt<=0)return;['AID','AMMO','APPAREL','MISC','WEAPONS'].forEach(function(v){try{var db=new DataFile('DATA/'+(NV?'NV':'F3')+'/'+v+'.DAT'),idx=db.ids.indexOf(id);if(db.close(),idx<0)return;var onMenu=typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id===v,inv=onMenu?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/'+v+'.INV',{idOrder:db.ids}),inx=inv.indexOf(id);if(inx>=0){var it=inv.get(inx);it.cnt+=cnt;inv.set(inx,it);}else inv.add({id:id,cnt:cnt,cnd:cnd});if(!onMenu)inv.sync();if(onMenu&&typeof Pip!=='undefined'&&Pip.scroller&&Pip.CURRENT&&Pip.CURRENT.id===v)Pip.scroller.updateItemCount(inv.count);}catch(e){}});})()`;
+    return `(()=>{var id=${formId},cnt=${cnt},cnd=${cnd};if(cnt<=0)return;['AID','AMMO','APPAREL','MISC','WEAPONS'].forEach(function(v){try{var db=new DataFile('DATA/'+(NV?'NV':'F3')+'/'+v+'.DAT'),idx=db.ids.indexOf(id);if(db.close(),idx<0)return;var onMenu=typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id===v,inv=onMenu?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/'+v+'.INV',{idOrder:db.ids}),inx=inv.indexOf(id);if(inx>=0){var it=inv.get(inx);it.cnt+=cnt;inv.set(inx,it);}else inv.add({id:id,cnt:cnt,cnd:cnd});if(!onMenu)inv.sync();if(onMenu)Pip.emit('scroller','count',inv.count);}catch(e){}});})()`;
   }
 
   _buildAddItemCommand(formId, count) {
@@ -690,7 +692,7 @@ export class SyncEngine extends EventEmitter {
   }
 
   _buildRemoveItemCommand(cat, formId, removeQty) {
-    return `(()=>{var db=new DataFile('DATA/'+(NV?'NV':'F3')+'/${cat}.DAT');if(db.ids.indexOf(${formId})>=0){var onMenu=typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id==='${cat}',inv=onMenu?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/${cat}.INV',{idOrder:db.ids}),i=inv.indexOf(${formId});if(i>=0){var it=inv.get(i);it.cnt-=${removeQty};if(it.cnt>0)inv.set(i,it);else inv.remove(i);if(!onMenu)inv.sync();if(onMenu&&typeof Pip!=='undefined'&&Pip.scroller)Pip.scroller.updateItemCount(inv.count);}}db.close();})()`;
+    return `(()=>{var db=new DataFile('DATA/'+(NV?'NV':'F3')+'/${cat}.DAT');if(db.ids.indexOf(${formId})>=0){var onMenu=typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id==='${cat}',inv=onMenu?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/${cat}.INV',{idOrder:db.ids}),i=inv.indexOf(${formId});if(i>=0){var it=inv.get(i);it.cnt-=${removeQty};if(it.cnt>0)inv.set(i,it);else inv.remove(i);if(!onMenu)inv.sync();if(onMenu)Pip.emit('scroller','count',inv.count);}}db.close();})()`;
   }
 
   /**
@@ -746,7 +748,7 @@ export class SyncEngine extends EventEmitter {
   }
 
   async _getPresyncBackupStatus() {
-    const expr = `(()=>{try{var f=require('fs'),m=NV?'NV':'F3',r={hasManifest:!1,manifestOld:!0,playerMissing:!0,invMissing:!0,perksMissing:!0,skillsMissing:!0};try{var man=JSON.parse(f.readFileSync('INV/PRESYNC/MANIFEST.JSON'));r.hasManifest=!0;r.manifestOld=!man.v||man.v<2}catch(e){}try{var pd=f.readFileSync('SETTINGS/PRESYNC/PLAYER.JSON');r.playerMissing=!(pd&&pd.length>2)}catch(e){}try{f.statSync('INV/PRESYNC/'+m);for(var i=0;i<5;i++){var d=f.readFileSync('INV/PRESYNC/'+m+'/'+['AID','AMMO','APPAREL','MISC','WEAPONS'][i]+'.INV');if(d&&d.length){r.invMissing=!1;break}}}catch(e){}try{var pk=f.readFileSync('SETTINGS/PRESYNC/'+m+'_PERKS.JSON');r.perksMissing=!(pk&&pk.length>2)}catch(e){}try{var sk=f.readFileSync('SETTINGS/PRESYNC/'+m+'_SKILLS.JSON');r.skillsMissing=!(sk&&sk.length>2)}catch(e){}return r}catch(e){return{error:!0}}})()`;
+    const expr = `(()=>{try{var f=require('fs'),m=NV?'NV':'F3',r={hasManifest:!1,manifestOld:!0,playerMissing:!0,invMissing:!0,perksMissing:!0,skillsMissing:!0},cats=['AID','AMMO','APPAREL','MISC','WEAPONS'],i,p;try{var man=JSON.parse(f.readFileSync('INV/PRESYNC/MANIFEST.JSON'));r.hasManifest=!0;r.manifestOld=!man.v||man.v<2}catch(e){}try{f.statSync('SETTINGS/PRESYNC/PLAYER.JSON');r.playerMissing=!1}catch(e){}try{f.statSync('INV/PRESYNC/'+m);for(i=0;i<5;i++){p='INV/PRESYNC/'+m+'/'+cats[i]+'.INV';try{f.statSync(p);r.invMissing=!1;break}catch(e){}}}catch(e){}try{f.statSync('SETTINGS/PRESYNC/'+m+'_PERKS.JSON');r.perksMissing=!1}catch(e){}try{f.statSync('SETTINGS/PRESYNC/'+m+'_SKILLS.JSON');r.skillsMissing=!1}catch(e){}return r}catch(e){return{error:!0}}})()`;
     const raw = await this.bridge.eval(expr);
     return this._parsePresyncBackupStatus(raw);
   }

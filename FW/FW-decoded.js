@@ -400,14 +400,20 @@ class Player {
   }
   setav(av, v, persist) {
     if ('string' != typeof av) throw new Error('av should be string');
-    persist
-      ? ((this.modified = this.player[av.toLowerCase()] !== v),
-        (this.player[av.toLowerCase()] = v))
-      : (this.ephemeral[av.toLowerCase()] = v);
+    const key = av.toLowerCase();
+    if (persist) {
+      delete this.ephemeral[key];
+      if (key === 'equippedapparel' && v && typeof v.length === 'number') {
+        v = [v[0] || 0, v[1] || 0, v[2] || 0, v[3] || 0];
+      }
+      this.modified = this.player[key] !== v;
+      this.player[key] = v;
+    } else {
+      this.ephemeral[key] = v;
+    }
     if (
       persist &&
-      (av.toLowerCase() === 'equippedweap' ||
-        av.toLowerCase() === 'equippedapparel') &&
+      (key === 'equippedweap' || key === 'equippedapparel') &&
       typeof Pip !== 'undefined' &&
       Pip.refreshEquipState
     ) {
@@ -460,7 +466,7 @@ class Player {
           success = !0;
           const onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === v;
           if (!onMenu) inv.sync();
-          if (onMenu) Pip.emit('scroller:updateCount', inv.count);
+          if (onMenu) Pip.emit('scroller', 'count', inv.count);
         } catch (e) { }
       }),
       success
@@ -1502,49 +1508,9 @@ if (
         o
       );
     }),
-    (Pip.bindScrollerEvents = (scroller, inv) => {
-      Pip.onExclusive('scroller:updateCount', (count) =>
-        scroller.updateItemCount(count)
-      );
-      Pip.onExclusive('scroller:render', (opts) =>
-        scroller.render(opts || {})
-      );
-      Pip.onExclusive('scroller:refresh', () => {
-        scroller.updateItemCount(inv.count);
-        scroller.render({ listOnly: !1 });
-      });
-    }),
-    (Pip.unbindScrollerEvents = () => {
-      ['scroller:updateCount', 'scroller:render', 'scroller:refresh'].forEach(
-        (e) => Pip.removeAllListeners(e)
-      );
-    }),
     (Pip.refreshEquipState = () => {
-      if (!Pip.CURRENT) return;
-      const tab = Pip.CURRENT.id;
-      if (tab !== 'WEAPONS' && tab !== 'APPAREL') return;
-      Pip.emit('scroller:refresh');
-      if (tab === 'APPAREL') {
-        const active = player.getav('equippedApparel') || new Uint32Array(4),
-          db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/APPAREL.DAT`);
-        if (NV) {
-          let newDT = 0;
-          for (let i = 0; i < active.length; i++) {
-            const item = db.getId(active[i]);
-            item && item.dt && (newDT += item.dt);
-          }
-          player.setav('dt', newDT);
-        } else {
-          let newDR = 0;
-          for (let i = 0; i < active.length; i++) {
-            const item = db.getId(active[i]);
-            item && item.dr && (newDR += item.dr);
-          }
-          player.setav('dr', newDR);
-        }
-        db.close();
-        Pip.renderHeader();
-      }
+      if (typeof Pip === 'undefined' || !Pip.CURRENT) return;
+      Pip.emit('scroller', 'refreshEquip');
     }),
     (Pip.renderTextOverflow = (text, x, y, width, height) => {
       const IMGUP =

@@ -52,10 +52,16 @@ function renderStatus(status) {
 
   applyTheme(status.gameMode);
 
+  let pipLabel = `Pip-Boy · ${status.pipBoyConnected ? 'Connected' : 'Disconnected'}`;
+  if (status.pipBoyConnected && status.companionPatchInstalled === false) {
+    pipLabel = 'Pip-Boy · Connected (patch required)';
+  }
   setStatusItem(
     pipStatus,
-    `Pip-Boy · ${status.pipBoyConnected ? 'Connected' : 'Disconnected'}`,
-    status.pipBoyConnected ? 'ok' : 'err'
+    pipLabel,
+    status.pipBoyConnected
+      ? (status.companionPatchInstalled === false ? 'warn' : 'ok')
+      : 'err'
   );
   setStatusItem(
     gameStatus,
@@ -78,7 +84,7 @@ clearBtn.addEventListener('click', () => {
 
 flashBtn.addEventListener('click', async () => {
   flashBtn.disabled = true;
-  appendLog({ level: 'info', message: 'Starting firmware upload...' });
+  appendLog({ level: 'info', message: 'Installing companion menus and .boot0 patch...' });
   try {
     await window.pipboyApi.flashFirmware();
   } catch (err) {

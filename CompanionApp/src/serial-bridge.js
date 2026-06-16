@@ -126,6 +126,7 @@ export class SerialBridge extends EventEmitter {
 
       this.port.on('open', () => {
         this.connected = true;
+        this.comPort = path;
         this.emit('connected', path);
         this.emit('status', `Connected to ${path} at ${this.baudRate} baud`);
         resolve();
@@ -361,6 +362,90 @@ export class SerialBridge extends EventEmitter {
   }
 
   /**
+   * True when the companion .boot0 patch is loaded (global cmode exists).
+   * @param {{ maxAttempts?: number, intervalMs?: number }} [options]
+   */
+  async hasCompanionPatch(options = {}) {
+    const maxAttempts = options.maxAttempts ?? 1;
+    const intervalMs = options.intervalMs ?? 1000;
+    let lastErr = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (attempt === 1) {
+        await this._sleep(250);
+      } else {
+        await this._sleep(intervalMs);
+      }
+      try {
+        const result = await this.eval("typeof cmode!=='undefined'");
+        return this._parseEvalBool(result);
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+
+    throw new Error(`Could not verify companion patch: ${lastErr?.message || 'unknown error'}`);
+  }
+
+  /**
+   * Wait for a one-time bridge event.
+   */
+  waitForEvent(event, timeoutMs) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.removeListener(event, handler);
+        reject(new Error(`Timeout waiting for ${event}`));
+      }, timeoutMs);
+      const handler = (...args) => {
+        clearTimeout(timer);
+        resolve(args);
+      };
+      this.once(event, handler);
+    });
+  }
+
+  async waitForDisconnect(timeoutMs = 15000) {
+    if (!this.connected) return;
+    await this.waitForEvent('disconnected', timeoutMs);
+  }
+
+  async waitForConnected(timeoutMs = 60000) {
+    if (this.connected) return;
+    await this.waitForEvent('connected', timeoutMs);
+  }
+
+  /**
+   * Close the serial port without disabling auto-reconnect.
+   */
+  async closePortKeepAutoReconnect() {
+    if (this.port && this.port.isOpen) {
+      return new Promise((resolve) => {
+        this.port.close(() => {
+          this.connected = false;
+          resolve();
+        });
+      });
+    }
+  }
+
+  /**
+   * After E.reboot(), wait for USB disconnect then reconnect.
+   */
+  async awaitReconnectAfterReboot(totalTimeoutMs = 90000) {
+    const start = Date.now();
+    try {
+      await this.waitForDisconnect(Math.min(15000, totalTimeoutMs));
+    } catch (_) {
+      await this.closePortKeepAutoReconnect();
+    }
+    const remaining = totalTimeoutMs - (Date.now() - start);
+    if (remaining <= 0) {
+      throw new Error('Timed out waiting for Pip-Boy to reconnect after reboot');
+    }
+    await this.waitForConnected(remaining);
+  }
+
+  /**
    * Auto-detect which game mode the Pip-Boy is currently in.
    * Reads Pip.settings.nv from DEVICE.JSON (the NV script variable is let-scoped
    * and is not visible to the USB REPL).
@@ -497,7 +582,8 @@ export class SerialBridge extends EventEmitter {
     const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8');
     const CHUNK = options.chunkSize || 1024;
     const progressHandler = options.progress || (() => { });
-    const packetOptions = { noACK: !!options.noACK };
+    const packetTimeout = options.timeout || 8000;
+    const packetOptions = { noACK: !!options.noACK, timeout: packetTimeout };
 
     const fileSendOptions = {
       fn: filename,
@@ -513,7 +599,9 @@ export class SerialBridge extends EventEmitter {
     progressHandler({ chunk: 0, totalChunks: packetTotal, bytes: buffer.length });
 
     // Send FILE_SEND packet (always wait for ACK)
-    await this.espruinoSendPacket('FILE_SEND', JSON.stringify(fileSendOptions));
+    await this.espruinoSendPacket('FILE_SEND', JSON.stringify(fileSendOptions), {
+      timeout: packetTimeout,
+    });
 
     // Send DATA packets
     let offset = 0;

@@ -13,6 +13,9 @@ import { FormIdMapper } from './form-id-mapper.js';
 export const PRESYNC_RESTORE_HINT =
   'To restore pre-sync data, disconnect the companion app, then go to Settings>User>Restore pre-sync data';
 
+export const COMPANION_PATCH_REQUIRED_MSG =
+  'Companion patch not installed. Use "Install Companion Menus & Boot Patch" before syncing.';
+
 export class CompanionApp extends EventEmitter {
   constructor(options = {}) {
     super();
@@ -35,6 +38,9 @@ export class CompanionApp extends EventEmitter {
     this._initialSyncHintShown = false;
     this._deviceReady = false;
     this._deviceSetupChain = null;
+    this._companionPatchInstalled = false;
+    this._postFlashSetupPending = false;
+    this._inventoryResyncPending = false;
   }
 
   log(level, message) {
@@ -46,6 +52,7 @@ export class CompanionApp extends EventEmitter {
       pipBoyConnected: this.bridge.connected,
       gameConnected: this.pipeClient.connected,
       syncEnabled: this.syncEngine.enabled,
+      companionPatchInstalled: this._companionPatchInstalled,
       gameMode: this.syncEngine.gameMode,
       stats: this.syncEngine.getStats(),
       mapper: this.mapper.getStats(),
@@ -70,38 +77,150 @@ export class CompanionApp extends EventEmitter {
     }
   }
 
-  async _handleDeviceConnected() {
+  async _verifyCompanionPatch(options = {}) {
+    const afterFlash = !!options.afterFlash;
+    const maxAttempts = options.maxAttempts ?? (afterFlash ? 24 : 8);
+    const intervalMs = options.intervalMs ?? (afterFlash ? 1500 : 1000);
+
+    try {
+      this._companionPatchInstalled = await this.bridge.hasCompanionPatch({
+        maxAttempts,
+        intervalMs,
+      });
+    } catch (err) {
+      this._companionPatchInstalled = false;
+      this.log('warn', err.message);
+    }
+
+    if (this._companionPatchInstalled) {
+      const wasInstalled = !!options.wasInstalled;
+      if (!wasInstalled && afterFlash) {
+        this.log('status', 'Companion patch detected');
+      }
+    } else {
+      this.log('warn', COMPANION_PATCH_REQUIRED_MSG);
+    }
+    return this._companionPatchInstalled;
+  }
+
+  async _handleDeviceConnected(options = {}) {
+    const wasInstalled = this._companionPatchInstalled;
     this._deviceReady = false;
-    this.syncEngine.setEnabled(false);
+    if (!options.skipSyncPause) {
+      this.syncEngine.setEnabled(false);
+    }
+    if (!(await this._verifyCompanionPatch({ ...options, wasInstalled }))) {
+      this._emitStatus();
+      return;
+    }
     if (!this.options.game) {
       await this.autoDetectGameMode();
     }
     this._deviceReady = true;
     if (this.pipeClient.connected) {
-      await this._tryEnableSync();
-    } else {
+      await this._tryEnableSync({
+        requestResync:
+          !!options.afterFlash ||
+          (!!this.pipeClient.lastSnapshot &&
+            this.syncEngine.getStats().snapshotsProcessed === 0),
+      });
+    } else if (this._companionPatchInstalled) {
       await this.bridge.sendCommand('cmode = !1');
     }
     this._emitStatus();
   }
 
-  async _tryEnableSync() {
-    if (!this.bridge.connected || !this.pipeClient.connected || !this._deviceReady) {
+  /**
+   * Run device setup after firmware upload + reboot (retries patch detection while booting).
+   */
+  async afterFirmwareFlash() {
+    this._postFlashSetupPending = true;
+    this.log('status', 'Waiting for Pip-Boy to reboot...');
+    this._deviceReady = false;
+    this._companionPatchInstalled = false;
+    this.syncEngine.setEnabled(false);
+
+    try {
+      await this.bridge.awaitReconnectAfterReboot(90000);
+      this.log('status', 'Pip-Boy reconnected after reboot');
+    } catch (err) {
+      this.log('warn', `${err.message} — will retry setup if already connected`);
+    }
+
+    try {
+      await this._queueDeviceSetup({ afterFlash: true, skipSyncPause: true });
+    } finally {
+      this._postFlashSetupPending = false;
+    }
+    this._emitStatus();
+  }
+
+  _queueDeviceSetup(options = {}) {
+    this._deviceSetupChain = (this._deviceSetupChain || Promise.resolve())
+      .then(() => this._handleDeviceConnected(options))
+      .catch((err) => {
+        this.log('warn', `Device setup failed: ${err.message}`);
+      });
+    return this._deviceSetupChain;
+  }
+
+  async _requestInventoryResync() {
+    if (this._inventoryResyncPending || !this.pipeClient.connected || !this.syncEngine.enabled) {
       return;
     }
-    this.syncEngine.setEnabled(true);
-    await this.bridge.sendCommand('cmode = !0');
+    this._inventoryResyncPending = true;
+    try {
+      this.log('status', 'Requesting inventory sync from game...');
+      this.syncEngine.forceFullSync();
+      const snap = this.pipeClient.lastSnapshot;
+      if (snap) {
+        await this.syncEngine.processSnapshot(snap);
+        return;
+      }
+      await this.pipeClient.reconnect();
+    } catch (err) {
+      this.log('warn', `Could not refresh game pipe: ${err.message}`);
+      const snap = this.pipeClient.lastSnapshot;
+      if (snap) {
+        this.syncEngine.forceFullSync();
+        await this.syncEngine.processSnapshot(snap);
+      }
+    } finally {
+      this._inventoryResyncPending = false;
+    }
+  }
+
+  async _tryEnableSync(options = {}) {
+    if (
+      !this._companionPatchInstalled ||
+      !this.bridge.connected ||
+      !this.pipeClient.connected ||
+      !this._deviceReady
+    ) {
+      return;
+    }
+
+    if (!this.syncEngine.enabled) {
+      this.syncEngine.setEnabled(true);
+      await this.bridge.sendCommand('cmode = !0');
+    }
+
+    if (options.requestResync) {
+      await this._requestInventoryResync();
+    }
   }
 
   _wireEvents() {
     this.bridge.on('status', (msg) => this.log('status', msg));
     this.bridge.on('connected', (port) => {
       this.log('status', `Pip-Boy connected on ${port}`);
-      this._deviceSetupChain = this._handleDeviceConnected();
+      if (this._postFlashSetupPending) return;
+      this._queueDeviceSetup();
     });
     this.bridge.on('disconnected', () => {
       this.log('warn', 'Pip-Boy disconnected');
       this._deviceReady = false;
+      this._companionPatchInstalled = false;
       this.syncEngine.setEnabled(false);
       if (!this.options.game) {
         this.syncEngine.clearGameMode();
@@ -119,6 +238,15 @@ export class CompanionApp extends EventEmitter {
         if (line.includes('PIPSYNC:')) continue;
         if (line === '>' || line === '=>') continue;
         if (/^(true|false)\x04?$/.test(line.trim())) continue;
+        if (this.bridge._firmwareUploadInProgress) {
+          if (
+            /ERROR:|Ctrl-C|CALLBACK|Execution Interrupted|New interpreter error|^\s*\^/.test(
+              line
+            )
+          ) {
+            continue;
+          }
+        }
         this.log('device', line);
       }
     });
@@ -140,7 +268,7 @@ export class CompanionApp extends EventEmitter {
       if (this.pipeClient.connected) {
         this.pipeClient.send(`${evt.action.toUpperCase()} ${gameFormId}`);
         this.log('sync', `Pip-Boy → game: ${evt.action} ${evt.category} ${gameFormId}`);
-      } else {
+      } else if (this._companionPatchInstalled) {
         this.log('warn', `Pip-Boy ${evt.action} ${evt.category} ${gameFormId} ignored (game not connected)`);
       }
     });
@@ -166,15 +294,17 @@ export class CompanionApp extends EventEmitter {
 
     this.pipeClient.on('status', (msg) => this.log('status', msg));
     this.pipeClient.on('connected', async () => {
-      this.log('status', 'Connected to Fallout game plugin');
+      if (!this._deviceReady || !this._companionPatchInstalled) return;
       await this._tryEnableSync();
       this._emitStatus();
     });
-    this.pipeClient.on('disconnected', () => {
+    this.pipeClient.on('disconnected', async () => {
       this.log('warn', 'Game connection lost');
       this.syncEngine.setEnabled(false);
-      if (this.bridge.connected) {
-        this.bridge.sendCommand('cmode = !1');
+      if (this.bridge.connected && this._companionPatchInstalled) {
+        try {
+          await this.bridge.sendCommand('cmode = !1');
+        } catch (_) {}
       }
       this._emitStatus();
     });
@@ -223,6 +353,9 @@ export class CompanionApp extends EventEmitter {
     this.syncEngine.setEnabled(false);
     if (this.bridge.connected) {
       try {
+        if (this._companionPatchInstalled) {
+          await this.bridge.sendCommand('cmode = !1');
+        }
         await this.bridge.sendCommand('player.sync()');
       } catch (_) {}
       await this.bridge.disconnect();

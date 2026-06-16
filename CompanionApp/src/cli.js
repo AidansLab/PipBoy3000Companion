@@ -15,7 +15,7 @@ import { SerialBridge } from './serial-bridge.js';
 import { SyncEngine } from './sync-engine.js';
 import { PipeClient } from './pipe-client.js';
 import { FormIdMapper } from './form-id-mapper.js';
-import { PRESYNC_RESTORE_HINT } from './app-core.js';
+import { PRESYNC_RESTORE_HINT, COMPANION_PATCH_REQUIRED_MSG } from './app-core.js';
 
 // ─── ANSI Color Helpers ────────────────────────────────────────────────────────
 const C = {
@@ -135,6 +135,28 @@ async function main() {
   const syncEngine = new SyncEngine(bridge, mapper);
   const pipeClient = new PipeClient({ autoReconnect: true });
   let initialSyncHintShown = false;
+  let companionPatchInstalled = false;
+
+  async function verifyCompanionPatch() {
+    try {
+      companionPatchInstalled = await bridge.hasCompanionPatch();
+    } catch (err) {
+      companionPatchInstalled = false;
+      logWarn(`Could not verify companion patch: ${err.message}`);
+    }
+    if (!companionPatchInstalled) {
+      logWarn(COMPANION_PATCH_REQUIRED_MSG);
+    }
+    return companionPatchInstalled;
+  }
+
+  async function tryEnableSync() {
+    if (!companionPatchInstalled || !bridge.connected || !pipeClient.connected) {
+      return;
+    }
+    syncEngine.setEnabled(true);
+    await bridge.sendCommand('cmode = !0');
+  }
 
   // Set game mode if specified via CLI arg (otherwise auto-detected after connect)
   if (gameArg) {
@@ -161,15 +183,22 @@ async function main() {
   bridge.on('status', logStatus);
   bridge.on('connected', async (port) => {
     logStatus(`${C.green}✓ Pip-Boy connected on ${port}${C.reset}`);
+    if (!(await verifyCompanionPatch())) {
+      return;
+    }
     if (!gameArg) {
       await autoDetectGameMode();
     }
     if (pipeClient.connected) {
-      syncEngine.setEnabled(true);
+      await tryEnableSync();
+    } else {
+      await bridge.sendCommand('cmode = !1');
     }
   });
   bridge.on('disconnected', () => {
     logWarn('Pip-Boy disconnected');
+    companionPatchInstalled = false;
+    syncEngine.setEnabled(false);
     if (!gameArg) {
       syncEngine.clearGameMode();
     }
@@ -227,18 +256,16 @@ async function main() {
   });
 
   pipeClient.on('status', logStatus);
-  pipeClient.on('connected', () => {
-    logStatus(`${C.green}✓ Connected to Fallout game plugin${C.reset}`);
-    // Enable sync once game connection is established
-    if (bridge.connected) {
-      syncEngine.setEnabled(true);
-    }
+  pipeClient.on('connected', async () => {
+    await tryEnableSync();
   });
-  pipeClient.on('disconnected', () => {
+  pipeClient.on('disconnected', async () => {
     logWarn('Game connection lost');
     syncEngine.setEnabled(false);
-    if (bridge.connected) {
-      // Logic handled in app-core
+    if (bridge.connected && companionPatchInstalled) {
+      try {
+        await bridge.sendCommand('cmode = !1');
+      } catch (_) {}
     }
   });
   pipeClient.on('snapshot', (snapshot) => {
@@ -275,7 +302,9 @@ async function main() {
     syncEngine.setEnabled(false);
     if (bridge.connected) {
       try {
-        await bridge.sendCommand('cmode = !1');
+        if (companionPatchInstalled) {
+          await bridge.sendCommand('cmode = !1');
+        }
         await bridge.sendCommand('player.sync()');
         await bridge.disconnect();
       } catch (e) {}
@@ -319,6 +348,7 @@ async function main() {
           console.log(`
 ${C.bold}Connection Status:${C.reset}
   Pip-Boy:    ${bridge.connected ? `${C.green}Connected${C.reset}` : `${C.red}Disconnected${C.reset}`}
+  Patch:      ${companionPatchInstalled ? `${C.green}Installed${C.reset}` : `${C.yellow}Not installed${C.reset}`}
   Game Pipe:  ${pipeClient.connected ? `${C.green}Connected${C.reset}` : `${C.red}Disconnected${C.reset}`}
   Sync:       ${syncEngine.enabled ? `${C.green}Active${C.reset}` : `${C.yellow}Paused${C.reset}`}
   Game Mode:  ${syncEngine.gameMode || `${C.dim}Not set${C.reset}`}
@@ -388,7 +418,11 @@ ${C.bold}Item Database:${C.reset}
 
         case 'sync':
           if (argStr.toLowerCase() === 'on') {
-            syncEngine.setEnabled(true);
+            if (!companionPatchInstalled) {
+              logWarn(COMPANION_PATCH_REQUIRED_MSG);
+            } else {
+              await tryEnableSync();
+            }
           } else if (argStr.toLowerCase() === 'off') {
             syncEngine.setEnabled(false);
           } else {

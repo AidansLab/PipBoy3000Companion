@@ -83,7 +83,7 @@
             }
             console.log('PIPSYNC:EQUIP:WEAPONS:' + Pip.formatId(it.id));
           })(),
-        player.setav('equippedWeap', active, !0),
+        player.setav('equippedWeap', active, !0, !0),
         scroller.updateItemCount(inv.count));
     },
     onLongClick: (n) => {
@@ -102,11 +102,29 @@
         ));
     }
   });
-  (Pip.inv = inv), Pip.bindScrollerEvents(scroller, inv);
+  const onScroller = (action, arg) => {
+    if (action === 'count') scroller.updateItemCount(arg !== void 0 ? arg : inv.count);
+    else if (action === 'render') scroller.render(arg);
+    else if (action === 'refresh') {
+      scroller.updateItemCount(inv.count);
+      scroller.render(arg);
+    } else if (action === 'refreshEquip') {
+      scroller.updateItemCount(inv.count);
+      scroller.render({ listOnly: !1 });
+    }
+  };
+  Pip.onExclusive('scroller', onScroller);
+  Pip.inv = inv;
   return {
     id: 'WEAPONS',
     remove: () => {
-      (delete Pip.inv, delete Pip.scroller, scroller.remove(), inv.sync(), db.close(), ammoDb.close(), imgs.close());
+      (Pip.removeListener('scroller', onScroller),
+        delete Pip.inv,
+        scroller.remove(),
+        inv.sync(),
+        db.close(),
+        ammoDb.close(),
+        imgs.close());
     }
   };
 });

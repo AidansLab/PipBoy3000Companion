@@ -67,15 +67,30 @@
         ));
     }
   });
-  (Pip.inv = inv), Pip.bindScrollerEvents(scroller, inv);
+  const itemCount = (c) => appn + (c !== void 0 ? c : inv.count);
+  const onScroller = (action, arg) => {
+    if (action === 'count') scroller.updateItemCount(itemCount(arg));
+    else if (action === 'render') scroller.render(arg);
+    else if (action === 'refresh') {
+      scroller.updateItemCount(itemCount());
+      scroller.render(arg);
+    }
+  };
+  Pip.onExclusive('scroller', onScroller);
+  Pip.inv = inv;
   return (
     (inv.onLoaded = (i) => {
-      (scroller.updateItemCount(i.count), scroller.render());
+      (scroller.updateItemCount(itemCount(i.count)), scroller.render());
     }),
     {
       id: 'MISC',
       remove: () => {
-        (Pip.unbindScrollerEvents(), delete Pip.inv, scroller.remove(), inv.sync(), imgs.close(), db.close());
+        (Pip.removeListener('scroller', onScroller),
+          delete Pip.inv,
+          scroller.remove(),
+          inv.sync(),
+          imgs.close(),
+          db.close());
       }
     }
   );

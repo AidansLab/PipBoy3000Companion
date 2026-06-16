@@ -26,6 +26,7 @@ export class PipeClient extends EventEmitter {
     this.buffer = '';
     this._reconnectTimer = null;
     this._destroyed = false;
+    this.lastSnapshot = null;
   }
 
   /**
@@ -94,6 +95,7 @@ export class PipeClient extends EventEmitter {
 
       try {
         const snapshot = JSON.parse(line);
+        this.lastSnapshot = snapshot;
         this.emit('snapshot', snapshot);
       } catch (err) {
         this.emit('warning', `Invalid JSON from game: ${err.message}`);
@@ -113,6 +115,43 @@ export class PipeClient extends EventEmitter {
     }
     this.client.write(line.endsWith('\n') ? line : line + '\n');
     return true;
+  }
+
+  /**
+   * Drop and re-open the pipe so the game plugin pushes a fresh snapshot
+   * (it only writes when the snapshot changes or the client reconnects).
+   */
+  async reconnect() {
+    if (this._destroyed) return;
+
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
+
+    if (this.client) {
+      this.client.removeAllListeners();
+      this.client.destroy();
+      this.client = null;
+    }
+
+    this.connected = false;
+    this.buffer = '';
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.removeListener('connected', onConnected);
+        reject(new Error('Game pipe reconnect timed out'));
+      }, 15000);
+
+      const onConnected = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+
+      this.once('connected', onConnected);
+      this.connect();
+    });
   }
 
   /**

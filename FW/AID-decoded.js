@@ -84,7 +84,16 @@
           ));
       }
     });
-  (Pip.inv = inv), Pip.bindScrollerEvents(scroller, inv);
+  const onScroller = (action, arg) => {
+    if (action === 'count') scroller.updateItemCount(arg !== void 0 ? arg : inv.count);
+    else if (action === 'render') scroller.render(arg);
+    else if (action === 'refresh') {
+      scroller.updateItemCount(inv.count);
+      scroller.render(arg);
+    }
+  };
+  Pip.onExclusive('scroller', onScroller);
+  Pip.inv = inv;
   return (
     (inv.onLoaded = (i) => {
       (scroller.updateItemCount(i.count), scroller.render());
@@ -92,7 +101,12 @@
     {
       id: 'AID',
       remove: () => {
-        (Pip.unbindScrollerEvents(), delete Pip.inv, scroller.remove(), inv.sync(), db.close(), imgs.close());
+        (Pip.removeListener('scroller', onScroller),
+          delete Pip.inv,
+          scroller.remove(),
+          inv.sync(),
+          db.close(),
+          imgs.close());
       }
     }
   );
