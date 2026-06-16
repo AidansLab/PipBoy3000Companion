@@ -1,0 +1,22 @@
+[
+  { "formId": "0x00031DC4", "name": "Computer Whiz" },
+  { "formId": "0x00031DB7", "name": "Strong Back" },
+  { "formId": "0x00031DD3", "name": "Toughness" },
+  { "formId": "0x00031DDE", "name": "Action Boy" },
+  { "formId": "0x00031DBC", "name": "Bloody Mess" },
+  { "formId": "0x00031DAD", "name": "Educated" },
+  { "formId": "0x00031DC1", "name": "Intense Training" },
+  { "formId": "0x00031DDB", "name": "Finesse" },
+  { "formId": "0x00031DCC", "name": "Sniper" },
+  { "formId": "0x00031DD6", "name": "Commando" },
+  { "formId": "0x00031DD5", "name": "Gunslinger" },
+  { "formId": "0x00031DD8", "name": "Adamantium Skeleton" },
+  { "formId": "0x00031DBA", "name": "Comprehension" },
+  { "formId": "0x00031DBD", "name": "Cannibal" },
+  { "formId": "0x00031DA9", "name": "Gun Nut" },
+  { "formId": "0x00031DA8", "name": "Little Leaguer" },
+  { "formId": "0x00031DAA", "name": "Thief" },
+  { "formId": "0x00044CAB", "name": "Swift Learner" },
+  { "formId": "0x00031DB3", "name": "Animal Friend" },
+  { "formId": "0x00031DC3", "name": "Infiltrator" }
+]

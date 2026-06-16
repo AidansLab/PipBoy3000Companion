@@ -1,0 +1,40 @@
+{
+  "name": "fallout-pipboy-sync",
+  "version": "0.8.7",
+  "description": "Sync Fallout 3 / New Vegas player stats and inventory to The Wand Company's Pip-Boy 3000 over USB",
+  "main": "electron/main.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/cli.js",
+    "ui": "electron .",
+    "flash-fw": "node src/flash-fw-cli.js",
+    "build-fw": "node scripts/build-fw.mjs",
+    "build:win": "node scripts/generate-icon.mjs && node scripts/prebuild-win.mjs && electron-builder --win portable --config electron-builder.config.cjs --config.win.signAndEditExecutable=false",
+    "generate-icon": "node scripts/generate-icon.mjs",
+    "test": "node --test test/*.test.js",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "keywords": [
+    "fallout",
+    "pipboy",
+    "pip-boy",
+    "wand-company",
+    "espruino",
+    "serial",
+    "mod"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "serialport": "^12.0.0"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "png-to-ico": "^3.0.1",
+    "sharp": "^0.35.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

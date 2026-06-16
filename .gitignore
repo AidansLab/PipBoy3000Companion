@@ -1,0 +1,19 @@
+# Node.js
+CompanionApp/node_modules/
+CompanionApp/dist/
+CompanionApp/release/
+
+# C++ Build outputs
+GamePlugin/build/
+GamePlugin/x64/
+GamePlugin/.vs/
+*.db
+*.exe
+*.dll
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Other outputs
+FW Build/

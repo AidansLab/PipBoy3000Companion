@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="f3">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+  <title>Pip-Boy 3000 Sync</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="header">
+    <div class="title">
+      <h1>PIP-BOY 3000 SYNC</h1>
+      <p class="subtitle">Fallout 3 &amp; New Vegas Live Companion</p>
+    </div>
+    <div class="status-bar" id="statusBar">
+      <span class="status-item" id="pipStatus">
+        <span class="status-dot"></span>
+        <span class="status-label">Pip-Boy · …</span>
+      </span>
+      <span class="status-item" id="gameStatus">
+        <span class="status-dot"></span>
+        <span class="status-label">Game · …</span>
+      </span>
+      <span class="status-item dim" id="modeStatus">
+        <span class="status-dot"></span>
+        <span class="status-label">Mode · …</span>
+      </span>
+    </div>
+  </header>
+
+  <main class="main">
+    <div class="actions">
+      <button type="button" id="flashBtn" class="btn btn-primary">
+        Upload Companion Firmware to Pip-Boy
+      </button>
+    </div>
+
+    <section class="console-panel">
+      <div class="panel-head">
+        <span>Console</span>
+        <button type="button" id="clearBtn" class="btn btn-ghost">Clear</button>
+      </div>
+      <div id="console" class="console" role="log" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

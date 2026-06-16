@@ -1,0 +1,203 @@
+Pip-Boy 3000 Player Documentation
+Player
+Documentation
+Player Methods
+Console Commands
+All player methods are related to setting particular values
+about the user and their inventory.
+Player Methods
+player.sync()
+Method
+
+---PAGE BREAK---
+Saves any modified and persistent player attribute values
+to disk. Shouldn't be called too frequently to avoid
+thrashing the SD card. If you make a page that uses the
+player class and you set attribute values that should be
+persistent, call this in the remove() function of your app
+to flush them to disk.
+player.getinfo()
+Method — R eturns: object
+Returns all player attributes that are in the state. At
+minimum this includes:
+Attribute Descr iption
+name Player name
+level Current level
+
+---PAGE BREAK---
+Attribute Descr iption
+xpNextAmount of XP needed to reach the next
+level
+maxHP Maximum hit points
+maxAP Maximum action points
+maxWg Maximum carry weight
+hpCurrent hit points (determined by the
+sum of limb conditions)
+wgCurrent carry weight (weight of
+inventory)
+Also returns any other values set against player attribute
+values.
+
+---PAGE BREAK---
+player.resetinventory()
+Method
+Resets all inventory items back to their default inventory
+state for both F allout 3 and New V egas game modes.
+player.calculateInvWeight()
+Method
+Recalculates the player wg value — the total mass of all
+items in their inventories. Users probably won't need this.
+Console Commands
+Methods that mirror F allout 3 console commands.
+player.getav(av)
+Method
+
+---PAGE BREAK---
+Takes a string av, the attribute value name, and returns
+the value of that key from the player object.
+Paramet ers
+Name Type Default Descr iption
+av string —The attribute value
+name to look up
+from the player
+object
+Example
+const name = player.getav('name');
+// name = "Albert"
+const karma = player.getav('karma');
+// karma = 250
+
+---PAGE BREAK---
+player.setav(av, value,
+persist)
+Method
+The set version of player.getav(). Takes an attribute
+value name and the value to set it to.
+The optional third parameter persist is non-standard
+(not in the game commands). If set to true, the value
+will be persisted to disk when player.sync() is called.
+Defaults to false. It's best not to persist unless you
+really need something to survive a reboot.
+Paramet ers
+Name Type Default Descr iption
+av string — The attribute
+value name to set
+
+---PAGE BREAK---
+Name Type Default Descr iption
+on the player
+object
+valueany — The value to set
+persistbooleanfalseIf true, persists
+this value to disk
+on
+player.sync()
+player.addperk(formId)
+Method
+Adds a perk by its form ID. The formId is a numeric
+value and can be passed as hex to match game
+conventions.
+
+---PAGE BREAK---
+Which perk IDs are valid depends on the current game
+mode of the Pip-Boy. If it's in New V egas mode, it'll take
+New V egas perk IDs and add them to a New V egas
+specific version of PERKS.JSON. Both player.addperk()
+and player.removeperk() modify values in mode-
+specific PERKS.JSON files.
+Paramet ers
+Name Type Default Descr iption
+formIdnumber —The perk's form ID
+(e.g. 0x00031DC4 for
+"Computer Whiz")
+Example
+player.removeperk(formId)player.addperk(0x00031DC4);
+
+---PAGE BREAK---
+Method
+Removes a perk by its form ID. The same as
+player.addperk() but removes the perk instead of
+adding it.
+Which perk IDs are valid depends on the current game
+mode of the Pip-Boy. If it's in New V egas mode, it'll use
+New V egas perk IDs from a New V egas specific version of
+PERKS.JSON. Both methods modify values in mode-
+specific PERKS.JSON files.
+Paramet ers
+Name Type Default Descr iption
+formIdnumber —The perk's form ID
+(e.g. 0x00031DC4 for
+"Computer Whiz")
+Example
+
+---PAGE BREAK---
+player.advlevel()
+Method
+Advances the player level by 1. T akes no parameters.
+player.setlevel(level)
+Method
+Sets the player's level to the given number.
+Paramet ers
+Name Type Default Descr iption
+levelnumber —The level to set the
+player toplayer.removeperk(0x00031DC4);
+
+---PAGE BREAK---
+player.additem(formId, count)
+Method
+Adds items to the player's inventory by form ID and
+count. Which form IDs are valid depends on the current
+game mode of the Pip-Boy (e.g. F allout 3 vs New V egas).
+Paramet ers
+Name Type Default Descr iption
+formIdnumber —The item's form ID
+(e.g. 0x0001519E for
+Nuka-Cola)
+countnumber —The number of
+items to add
+Example
+
+---PAGE BREAK---
+player.additemhealthpercent(formI
+d, count, condition)
+Method
+Same as player.additem() but also takes a condition
+percentage for the items. Which form IDs are valid
+depends on the current game mode of the Pip-Boy.
+Paramet ers
+Name Type Default Descr iption
+formId number —The item's form
+ID
+count number —The number of
+items to addplayer.additem(0x0001519E, 6);
+
+---PAGE BREAK---
+Name Type Default Descr iption
+conditionnumber —Item condition
+as a percentage
+(0 – 100)
+Example
+player.removeitem(formId,
+count)
+Method
+Removes items from the player's inventory by form ID
+and count.
+⚠ Not y et implement ed.player.additemhealthpercent(0x0001519E, 6, 75);
+
+---PAGE BREAK---
+Paramet ers
+Name Type Default Descr iption
+formIdnumber — The item's form ID
+countnumber —The number of
+items to remove
+player.equipitem(formId)
+Method
+Equips an item by its form ID.
+⚠ Not y et implement ed.
+Paramet ers
+
+---PAGE BREAK---
+Name Type Default Descr iption
+formIdnumber — The item's form ID
+
+---PAGE BREAK---

@@ -1,0 +1,201 @@
+/* Fallout 3 — classic green Pip-Boy */
+:root,
+[data-theme="f3"] {
+  --bg: #0a120a;
+  --panel: #0f1a0f;
+  --border: #1e3a1e;
+  --text: #37fa37;
+  --text-dim: #2a9e2a;
+  --accent: #37fa37;
+  --header-top: #122012;
+  --btn-bg: #143014;
+  --btn-bg-hover: #1a401a;
+  --device-log: #88cc88;
+  --warn: #ffb000;
+}
+
+/* Fallout: New Vegas — amber Pip-Boy */
+[data-theme="fnv"] {
+  --bg: #100c08;
+  --panel: #1a1208;
+  --border: #3d2e14;
+  --text: #ffb000;
+  --text-dim: #c88a00;
+  --accent: #ffb000;
+  --header-top: #1a1208;
+  --btn-bg: #2a1c08;
+  --btn-bg-hover: #3d2a0c;
+  --device-log: #cc9944;
+  --warn: #ffcc66;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Consolas, "Courier New", monospace;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.8rem;
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--header-top) 0%, var(--bg) 100%);
+}
+
+.title h1 {
+  margin: 0;
+  font-size: 0.88rem;
+  letter-spacing: 0.12em;
+  color: var(--text);
+}
+
+.subtitle {
+  margin: 0.2rem 0 0;
+  color: var(--text-dim);
+  font-size: 0.64rem;
+}
+
+.status-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+/* Read-only indicators — flat dot + label, not button-like */
+.status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.36rem;
+  font-size: 0.58rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  user-select: none;
+  pointer-events: none;
+}
+
+.status-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.55;
+}
+
+.status-item.ok { color: var(--text); }
+.status-item.ok .status-dot { opacity: 1; box-shadow: 0 0 5px var(--text); }
+
+.status-item.warn { color: var(--warn); }
+.status-item.warn .status-dot { opacity: 1; box-shadow: 0 0 5px var(--warn); }
+
+.status-item.err { color: #ff5555; }
+.status-item.err .status-dot { opacity: 1; box-shadow: 0 0 5px #ff5555; }
+
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  height: calc(100vh - 70px);
+  padding: 0.8rem 1rem 1rem;
+}
+
+.console-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 0.64rem;
+}
+
+.console {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.6rem;
+  font-size: 0.66rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.log-line { margin: 0 0 0.15rem; }
+.log-status { color: #5fdfff; }
+.log-sync { color: var(--text); }
+.log-warn { color: var(--warn); }
+.log-error { color: #ff5555; }
+.log-cmd { color: var(--text-dim); }
+.log-device { color: var(--device-log); }
+.log-info { color: var(--text); }
+
+.actions {
+  flex-shrink: 0;
+}
+
+.actions .btn-primary {
+  width: 100%;
+}
+
+.btn {
+  border: 1px solid var(--text-dim);
+  background: var(--btn-bg);
+  color: var(--text);
+  padding: 0.52rem 0.72rem;
+  font: inherit;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--btn-bg-hover);
+  border-color: var(--text);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  font-weight: bold;
+  letter-spacing: 0.04em;
+}
+
+.btn-ghost {
+  padding: 0.16rem 0.4rem;
+  font-size: 0.6rem;
+  background: transparent;
+}
+
+.hint {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 0.58rem;
+  line-height: 1.5;
+}
+
+.hint code {
+  color: var(--text);
+}
