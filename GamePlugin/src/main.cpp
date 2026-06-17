@@ -307,6 +307,30 @@ std::string BuildPlayerSnapshot() {
   // player state hasn't changed, so the pipe thread can skip redundant sends.
   json.keyStr("game", "FNV");
 
+  // Load order — runtime mod index to plugin filename. The companion app uses
+  // this to remap form IDs to the Pip-Boy's fixed plugin offsets (e.g. GRA at
+  // 0x08) which do not follow the player's live load order.
+  json.key("loadOrder");
+  json.beginArray();
+  {
+    DataHandler *dataHandler = DataHandler::Get();
+    if (dataHandler) {
+      const ModInfo **activeMods = dataHandler->GetActiveModList();
+      const UInt32 modCount = dataHandler->modList.modInfoList.Count();
+      for (UInt32 i = 0; i < modCount; i++) {
+        const ModInfo *mod = activeMods[i];
+        if (!mod)
+          continue;
+        json.arrayElement();
+        json.beginObject();
+        json.keyInt("index", (int)i);
+        json.keyStr("name", mod->name);
+        json.endObject();
+      }
+    }
+  }
+  json.endArray();
+
   // ─── Player attributes ─────────────────────────────────────────────
   json.key("player");
   json.beginObject();

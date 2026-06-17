@@ -153,8 +153,17 @@ export class SyncEngine extends EventEmitter {
     this._processingSnapshot = true;
     this.stats.snapshotsProcessed++;
 
-    // Fallback only when the Pip-Boy is not connected (device settings are authoritative)
-    if (!this.gameMode && snapshot.game && !this.bridge.connected) {
+    // Remap form IDs when runtime load order differs from Pip-Boy fixed offsets.
+    if (snapshot.loadOrder && this.mapper?.setLoadOrder) {
+      const loadOrderChanged = this.mapper.setLoadOrder(snapshot.loadOrder);
+      if (loadOrderChanged && this.previousState) {
+        this.previousState = null;
+        this.emit('status', 'Load order updated — forcing full resync');
+      }
+    }
+
+    // Use snapshot game id when mode not set yet (e.g. before Pip-Boy detection).
+    if (!this.gameMode && snapshot.game) {
       this.setGameMode(snapshot.game);
     }
 
@@ -176,9 +185,12 @@ export class SyncEngine extends EventEmitter {
         // Refresh open inventory tab UI; disk writes happen in add/remove commands
         // only when that category is not the active menu (page exit syncs otherwise).
         if (hasInvChanges) {
-          const catsArray = Array.from(this._lastChangedCategories || []).map(c => "'" + c + "'").join(',');
+          const catsArray = Array.from(this._lastChangedCategories || [])
+            .filter((c) => INVENTORY_CATEGORIES.includes(c))
+            .map((c) => "'" + c + "'")
+            .join(',');
           if (catsArray.length > 0) {
-            commands.push(`[${catsArray}].forEach(function(v){var d=new DataFile('DATA/'+(NV?'NV':'F3')+'/'+v+'.DAT');var i=(typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id===v)?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/'+v+'.INV',{idOrder:d.ids});if(i._requiresSort)i.sort(d.ids);if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id===v)Pip.emit('scroller','refresh');d.close();})`);
+            commands.push(`[${catsArray}].forEach(function(v){try{var d=new DataFile('DATA/'+(NV?'NV':'F3')+'/'+v+'.DAT');var i=(typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id===v)?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/'+v+'.INV',{idOrder:d.ids});if(i._requiresSort)i.sort(d.ids);if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id===v)Pip.emit('scroller','refresh');d.close();}catch(e){}})`);
           }
           // Caps and carry weight live in the ITEMS header, which only reads them
           // on render — refresh it so caps update on buy/sell without a tab switch.
@@ -512,11 +524,13 @@ export class SyncEngine extends EventEmitter {
 
   /**
    * Map game record type to Pip-Boy inventory category folder name.
+   * Returns null for item types the Pip-Boy has no .DAT file for (books, keys, etc.).
    */
   _toPipBoyCategory(gameType) {
     if (gameType === 'WEAP') return 'WEAPONS';
     if (gameType === 'ARMO') return 'APPAREL';
-    return gameType;
+    if (INVENTORY_CATEGORIES.includes(gameType)) return gameType;
+    return null;
   }
 
   /**
@@ -574,7 +588,7 @@ export class SyncEngine extends EventEmitter {
       const formId = this._resolveFormId(item.formId);
       if (formId === null) continue;
       const cat = this._toPipBoyCategory(item.type);
-      this._lastChangedCategories.add(cat);
+      if (cat) this._lastChangedCategories.add(cat);
 
       if (item.condition !== undefined && item.condition !== 100) {
         commands.push(
@@ -597,7 +611,7 @@ export class SyncEngine extends EventEmitter {
           const formId = this._resolveFormId(id);
           if (formId === null) continue;
           const cat = this._toPipBoyCategory(currentItem.type);
-          this._lastChangedCategories.add(cat);
+          if (cat) this._lastChangedCategories.add(cat);
           commands.push(this._buildAddItemCommand(formId, countDelta));
         } else if (countDelta < 0) {
           // Skip decrements the device already applied to itself (item used
@@ -608,7 +622,7 @@ export class SyncEngine extends EventEmitter {
           const formId = this._resolveFormId(id);
           if (formId === null) continue;
           const cat = this._toPipBoyCategory(currentItem.type);
-          this._lastChangedCategories.add(cat);
+          if (cat) this._lastChangedCategories.add(cat);
           const removeCmd = this._buildRemoveItemCommand(cat, formId, removeQty);
           commands.push(removeCmd);
         }
@@ -618,7 +632,7 @@ export class SyncEngine extends EventEmitter {
           const formId = this._resolveFormId(id);
           if (formId !== null) {
             const cat = this._toPipBoyCategory(currentItem.type);
-            this._lastChangedCategories.add(cat);
+            if (cat) this._lastChangedCategories.add(cat);
             const removeQty = currentItem.count || 1;
             const removeCmd = this._buildRemoveItemCommand(cat, formId, removeQty);
             commands.push(removeCmd);
@@ -639,7 +653,7 @@ export class SyncEngine extends EventEmitter {
       const formId = this._resolveFormId(id);
       if (formId !== null) {
         const cat = this._toPipBoyCategory(prevItem.type);
-        this._lastChangedCategories.add(cat);
+        if (cat) this._lastChangedCategories.add(cat);
         const removeCmd = this._buildRemoveItemCommand(cat, formId, removeQty);
         commands.push(removeCmd);
       }
@@ -819,7 +833,7 @@ export class SyncEngine extends EventEmitter {
   }
 
   _buildRemoveItemCommand(cat, formId, removeQty) {
-    return `(()=>{var db=new DataFile('DATA/'+(NV?'NV':'F3')+'/${cat}.DAT');if(db.ids.indexOf(${formId})>=0){var onMenu=typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id==='${cat}',inv=onMenu?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/${cat}.INV',{idOrder:db.ids}),i=inv.indexOf(${formId});if(i>=0){var it=inv.get(i);it.cnt-=${removeQty};if(it.cnt>0)inv.set(i,it);else inv.remove(i);if(!onMenu)inv.sync();if(onMenu)Pip.emit('scroller','count',inv.count);}}db.close();})()`;
+    return `(()=>{var id=${formId},qty=${removeQty};if(qty<=0)return;['AID','AMMO','APPAREL','MISC','WEAPONS'].forEach(function(v){try{var db=new DataFile('DATA/'+(NV?'NV':'F3')+'/'+v+'.DAT');if(db.ids.indexOf(id)<0){db.close();return;}var onMenu=typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id===v,inv=onMenu?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/'+v+'.INV',{idOrder:db.ids}),i=inv.indexOf(id);if(i>=0){var it=inv.get(i);it.cnt-=qty;if(it.cnt>0)inv.set(i,it);else inv.remove(i);if(!onMenu)inv.sync();if(onMenu)Pip.emit('scroller','count',inv.count);}db.close();}catch(e){}});})()`;
   }
 
   /**
@@ -831,10 +845,21 @@ export class SyncEngine extends EventEmitter {
 
     let resolved = gameFormId;
     if (this.mapper) {
-      const mapped = this.mapper.resolve(gameFormId, this.gameMode);
+      const mapped = this.mapper.resolve(gameFormId, this.gameMode || 'FNV');
       if (mapped === null) {
         this.emit('warning', `Unknown form ID: ${gameFormId}`);
         return null;
+      }
+      if (mapped !== gameFormId) {
+        const fromHex =
+          typeof gameFormId === 'number'
+            ? `0x${(gameFormId >>> 0).toString(16)}`
+            : String(gameFormId);
+        const toHex =
+          typeof mapped === 'number'
+            ? `0x${(mapped >>> 0).toString(16)}`
+            : String(mapped);
+        this.emit('status', `Form ID ${fromHex} → ${toHex}`);
       }
       resolved = mapped;
     }
