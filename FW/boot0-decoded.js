@@ -7,12 +7,43 @@
 global.cmode = !1;
 
 (function pipCompanionBoot0() {
-  if (typeof Pip === 'undefined' || typeof Player === 'undefined') {
+  if (
+    typeof Pip === 'undefined' ||
+    typeof Player === 'undefined' ||
+    typeof h === 'undefined' ||
+    typeof Pip.createScroller !== 'function'
+  ) {
     setTimeout(pipCompanionBoot0, 50);
     return;
   }
   if (Pip._companionBoot0) return;
   Pip._companionBoot0 = !0;
+
+  // Make `cmode` an accessor so that ANY path which clears it repaints the open
+  // menu. The stock firmware clears cmode itself on USB unplug (checkChargeStatus)
+  // and the companion clears it over serial on disconnect — without this, a menu
+  // like AMMO keeps its companion-only styling (dimmed rows / equip squares)
+  // cached until the next tab switch, because nothing invalidates the scroller's
+  // row cache. Repainting on the true→false transition fixes that everywhere.
+  (function () {
+    let _cmode = !!global.cmode;
+    try {
+      Object.defineProperty(global, 'cmode', {
+        configurable: !0,
+        get: function () {
+          return _cmode;
+        },
+        set: function (v) {
+          v = !!v;
+          if (_cmode === v) return;
+          _cmode = v;
+          if (!v && typeof Pip !== 'undefined' && Pip.CURRENT && Pip.emit) {
+            Pip.emit('scroller', 'refreshEquip');
+          }
+        }
+      });
+    } catch (e) {}
+  })();
 
   const _emit = Pip.emit;
   Pip.emit = function (event, a, b, c) {
@@ -31,8 +62,17 @@ global.cmode = !1;
   const _getinfo = Player.prototype.getinfo;
   Player.prototype.getinfo = function (refresh) {
     const p = _getinfo.call(this, refresh);
-    if ((typeof cmode !== 'undefined' && cmode) && void 0 !== this.getav('hp')) {
-      p.hp = E.clip(this.getav('hp'), 0, p.maxHP) / p.maxHP;
+    if (typeof cmode !== 'undefined' && cmode) {
+      const hp = this.getav('hp');
+      if (void 0 !== hp) p.hp = E.clip(hp, 0, p.maxHP) / p.maxHP;
+      // Carry weight is copied straight from the game (see sync-engine
+      // _diffWeight). The game counts every carried item — including modded
+      // items the Pip-Boy has no weight data for — so prefer it over the
+      // locally summed inventory weight whenever the companion is connected.
+      const wg = this.getav('wg');
+      if (void 0 !== wg) p.wg = wg;
+      const maxWg = this.getav('maxwg');
+      if (void 0 !== maxWg) p.maxWg = maxWg;
     }
     return p;
   };
@@ -62,32 +102,30 @@ global.cmode = !1;
 
   Player.prototype.additemhealthpercent = function (id, cnt, cnd) {
     if (cnt <= 0) return;
-    let success = !1;
-    return (
-      ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'].forEach((v) => {
-        try {
-          const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/${v}.DAT`),
-            i = db.ids.indexOf(id);
-          if ((db.close(), i < 0)) return;
-          const inv =
-              Pip.inv && Pip.CURRENT && Pip.CURRENT.id === v
-                ? Pip.inv
-                : new InvFile(`INV/${NV ? 'NV' : 'F3'}/${v}.INV`, {
-                    idOrder: db.ids,
-                  }),
-            inx = inv.indexOf(id);
-          if (inx >= 0) {
-            let it = inv.get(inx);
-            ((it.cnt += cnt), inv.set(inx, it));
-          } else inv.add({ id: id, cnt: cnt, cnd: cnd });
-          success = !0;
-          const onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === v;
-          if (!onMenu) inv.sync();
-          if (onMenu) Pip.emit('scroller', 'count', inv.count);
-        } catch (e) {}
-      }),
-      success
-    );
+    // A form ID belongs to exactly one category, so stop opening DataFiles as
+    // soon as we find the match (saves up to 4 file opens per added item).
+    const cats = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
+    for (let ci = 0; ci < cats.length; ci++) {
+      const v = cats[ci];
+      try {
+        const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/${v}.DAT`),
+          i = db.ids.indexOf(id);
+        if ((db.close(), i < 0)) continue;
+        const onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === v;
+        const inv = onMenu
+          ? Pip.inv
+          : new InvFile(`INV/${NV ? 'NV' : 'F3'}/${v}.INV`, { idOrder: db.ids });
+        const inx = inv.indexOf(id);
+        if (inx >= 0) {
+          let it = inv.get(inx);
+          ((it.cnt += cnt), inv.set(inx, it));
+        } else inv.add({ id: id, cnt: cnt, cnd: cnd });
+        if (onMenu) Pip.emit('scroller', 'count', inv.count);
+        else inv.sync();
+        return !0;
+      } catch (e) {}
+    }
+    return !1;
   };
 
   Pip.refreshEquipState = function () {
@@ -95,6 +133,46 @@ global.cmode = !1;
     Pip.emit('scroller', 'refreshEquip');
   };
 
+  // Dimmed list rows. A scroller item may set item.dim to be drawn
+  // de-emphasised (e.g. ammo the equipped weapon can't use). The stock
+  // scroller only caches txt/activ/rtxt, so we smuggle the flag through the row
+  // text with a leading sentinel char and recolour that row at draw time. This
+  // keeps the device's real scroller untouched (only its text colour changes).
+  const DIM_SENTINEL = '\x01';
+  const _createScroller = Pip.createScroller;
+  Pip.createScroller = function (options) {
+    if (options && typeof options.getItem === 'function') {
+      const _getItem = options.getItem;
+      options.getItem = function (n) {
+        const item = _getItem(n);
+        if (
+          item &&
+          item.dim &&
+          typeof item.txt === 'string' &&
+          item.txt.charCodeAt(0) !== 1
+        ) {
+          item.txt = DIM_SENTINEL + item.txt;
+        }
+        return item;
+      };
+    }
+    return _createScroller.call(this, options);
+  };
+
+  const _drawString = h.drawString;
+  h.drawString = function (str, x, y, solid) {
+    if (typeof str === 'string' && str.charCodeAt(0) === 1) {
+      // Palette index 1 is a dim green; 3 is the normal bright text colour.
+      const prev = this.getColor ? this.getColor() : 3;
+      this.setColor(1);
+      const r = _drawString.call(this, str.substr(1), x, y, solid);
+      this.setColor(prev);
+      return r;
+    }
+    return _drawString.apply(this, arguments);
+  };
+
+  // Clearing cmode is enough to repaint the open menu (see the accessor above).
   function companionClearCmodeOnUsbDisconnect() {
     if (typeof VUSB_PRESENT === 'undefined') return;
     setWatch(

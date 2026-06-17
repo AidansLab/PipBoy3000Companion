@@ -152,10 +152,73 @@ html, body {
 
 .actions {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
 }
 
 .actions .btn-primary {
-  width: 100%;
+  flex: 1;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-dim);
+  font-size: 0.62rem;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-track {
+  position: relative;
+  width: 32px;
+  height: 16px;
+  border: 1px solid var(--text-dim);
+  border-radius: 9px;
+  background: var(--btn-bg);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.toggle-thumb {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: left 0.15s, background 0.15s;
+}
+
+.toggle input:checked + .toggle-track {
+  border-color: var(--text);
+  background: var(--btn-bg-hover);
+}
+
+.toggle input:checked + .toggle-track .toggle-thumb {
+  left: 17px;
+  background: var(--accent);
+  box-shadow: 0 0 5px var(--accent);
+}
+
+.toggle input:focus-visible + .toggle-track {
+  outline: 1px solid var(--text);
+  outline-offset: 1px;
+}
+
+.toggle input:checked ~ .toggle-label {
+  color: var(--text);
 }
 
 .btn {

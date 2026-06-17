@@ -3,13 +3,23 @@
   const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/AID.DAT`),
     inv = new InvFile(`INV/${NV ? 'NV' : 'F3'}/AID.INV`, { idOrder: db.ids }),
     imgs = E.openFile(`DATA/${NV ? 'NV' : 'F3'}/AID.IMG`, 'r'),
+    clampScrollerSelection = (count) => {
+      if (count <= 0) return;
+      const maxIdx = count - 1;
+      if (scroller.selectedIndex > maxIdx) {
+        scroller.selectedIndex = maxIdx;
+        scroller.scrollIndex = Math.min(scroller.scrollIndex, maxIdx);
+        scroller.scrollY = 0;
+      }
+    },
     scroller = Pip.createScroller({
       hasEquipStates: !0,
       itemCount: inv.count,
       scrollStart: params.scrollTo ? inv.indexOf(params.scrollTo) : 0,
       getItem: (n) => {
-        const it = inv.get(n),
-          item = db.getId(it.id);
+        const it = inv.get(n);
+        if (!it) return { txt: '' };
+        const item = db.getId(it.id);
         return (it.cnt > 1 && (item.txt = `${item.txt} (${it.cnt})`), item);
       },
       width: 185,
@@ -96,7 +106,8 @@
   Pip.inv = inv;
   return (
     (inv.onLoaded = (i) => {
-      (scroller.updateItemCount(i.count), scroller.render());
+      (scroller.updateItemCount(i.count),
+        i.count > 0 && (clampScrollerSelection(i.count), scroller.render()));
     }),
     {
       id: 'AID',

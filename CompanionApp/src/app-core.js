@@ -52,6 +52,7 @@ export class CompanionApp extends EventEmitter {
       pipBoyConnected: this.bridge.connected,
       gameConnected: this.pipeClient.connected,
       syncEnabled: this.syncEngine.enabled,
+      torchSyncEnabled: this.syncEngine.torchSyncEnabled,
       companionPatchInstalled: this._companionPatchInstalled,
       gameMode: this.syncEngine.gameMode,
       stats: this.syncEngine.getStats(),
@@ -61,6 +62,17 @@ export class CompanionApp extends EventEmitter {
 
   _emitStatus() {
     this.emit('status', this.getStatus());
+  }
+
+  /**
+   * Toggle whether the in-game flashlight drives the Pip-Boy torch LED.
+   * @param {boolean} enabled
+   */
+  setTorchSyncEnabled(enabled) {
+    // syncEngine.setTorchSyncEnabled emits a 'status' event that is already
+    // forwarded to the log, so don't log again here (avoids duplicate lines).
+    this.syncEngine.setTorchSyncEnabled(enabled);
+    this._emitStatus();
   }
 
   async autoDetectGameMode() {
@@ -287,6 +299,14 @@ export class CompanionApp extends EventEmitter {
       this.log('status', PRESYNC_RESTORE_HINT);
       this.emit('initial-sync-complete', { message: PRESYNC_RESTORE_HINT });
     });
+    // Lock the game (disable controls + "please wait" pop-up) while the heavy
+    // initial sync runs, then release it. No-op if the game isn't connected.
+    this.syncEngine.on('initial-sync-start', () => {
+      if (this.pipeClient.connected) this.pipeClient.send('SYNC_LOCK');
+    });
+    this.syncEngine.on('initial-sync-end', () => {
+      if (this.pipeClient.connected) this.pipeClient.send('SYNC_UNLOCK');
+    });
     this.syncEngine.on('flushed', () => this.log('sync', 'Flushed to Pip-Boy SD card'));
     this.syncEngine.on('warning', (msg) => this.log('warn', msg));
     this.syncEngine.on('error', (err) => this.log('error', `Sync: ${err.message}`));
@@ -307,6 +327,9 @@ export class CompanionApp extends EventEmitter {
         } catch (_) {}
       }
       this._emitStatus();
+    });
+    this.pipeClient.on('save-load', () => {
+      this.syncEngine.handleSaveLoad();
     });
     this.pipeClient.on('snapshot', (snapshot) => {
       this.syncEngine.processSnapshot(snapshot);

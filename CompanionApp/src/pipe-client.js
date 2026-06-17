@@ -94,9 +94,13 @@ export class PipeClient extends EventEmitter {
       if (line.length === 0) continue;
 
       try {
-        const snapshot = JSON.parse(line);
-        this.lastSnapshot = snapshot;
-        this.emit('snapshot', snapshot);
+        const msg = JSON.parse(line);
+        if (msg.event === 'saveLoad') {
+          this.emit('save-load', msg);
+          continue;
+        }
+        this.lastSnapshot = msg;
+        this.emit('snapshot', msg);
       } catch (err) {
         this.emit('warning', `Invalid JSON from game: ${err.message}`);
       }

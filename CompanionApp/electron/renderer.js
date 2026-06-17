@@ -4,6 +4,14 @@ const flashBtn = document.getElementById('flashBtn');
 const pipStatus = document.getElementById('pipStatus');
 const gameStatus = document.getElementById('gameStatus');
 const modeStatus = document.getElementById('modeStatus');
+const torchSyncToggle = document.getElementById('torchSyncToggle');
+
+const TORCH_SYNC_PREF_KEY = 'torchSyncEnabled';
+
+// Defaults to on; only off when the user explicitly stored false.
+function getTorchSyncPref() {
+  return localStorage.getItem(TORCH_SYNC_PREF_KEY) !== 'false';
+}
 
 const MAX_LINES = 2000;
 let lineCount = 0;
@@ -75,6 +83,10 @@ function renderStatus(status) {
   );
 
   flashBtn.disabled = !status.pipBoyConnected;
+
+  if (typeof status.torchSyncEnabled === 'boolean') {
+    torchSyncToggle.checked = status.torchSyncEnabled;
+  }
 }
 
 clearBtn.addEventListener('click', () => {
@@ -95,7 +107,26 @@ flashBtn.addEventListener('click', async () => {
   }
 });
 
+torchSyncToggle.addEventListener('change', async () => {
+  const enabled = torchSyncToggle.checked;
+  localStorage.setItem(TORCH_SYNC_PREF_KEY, String(enabled));
+  try {
+    const status = await window.pipboyApi.setTorchSync(enabled);
+    renderStatus(status);
+  } catch (err) {
+    appendLog({ level: 'error', message: `Failed to update flashlight sync: ${err.message}` });
+  }
+});
+
 window.pipboyApi.onLog(appendLog);
 window.pipboyApi.onStatus(renderStatus);
+
+// Apply the saved preference on startup, pushing it to the sync engine so the
+// engine's default matches what the UI shows.
+torchSyncToggle.checked = getTorchSyncPref();
+window.pipboyApi
+  .setTorchSync(torchSyncToggle.checked)
+  .then(renderStatus)
+  .catch(() => {});
 
 window.pipboyApi.getStatus().then(renderStatus);

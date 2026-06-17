@@ -83,6 +83,7 @@ enum ActorValueCode {
   kAV_CarryWeight = 13,
   kAV_Health = 16,
   kAV_Karma = 23,
+  kAV_InventoryWeight = 46,
 
   kAV_PerceptionCondition = 25,
   kAV_EnduranceCondition = 26,
@@ -121,6 +122,14 @@ static std::string g_latestSnapshot;
 static std::thread g_pipeThread;
 static bool g_gameLoaded = false;
 static DWORD g_lastSnapshotTime = 0;
+static std::atomic<bool> g_saveLoadPending(false);
+
+// Set by the companion app (SYNC_LOCK / SYNC_UNLOCK) while it performs the
+// initial Pip-Boy sync. Disables player controls and shows a "please wait"
+// message so the player can't move or act mid-sync. Reconciled on the main
+// thread in MainGameLoop; auto-cleared if the companion disconnects so the
+// player is never left stuck.
+static std::atomic<bool> g_syncLockRequested(false);
 
 // Commands received from the companion app (Pip-Boy initiated actions).
 // Queued by the pipe thread, executed on the main thread in MainGameLoop —
@@ -263,6 +272,24 @@ static const char *GetFormTypeString(UInt8 typeID) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// PIP-BOY LIGHT (in-game flashlight)
+// Same approach as JIP LN NVSE TogglePipBoyLight: check whether the PipBoyLight
+// spell effect is active on the player.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+static bool IsPipBoyLightOn(PlayerCharacter *player) {
+  if (!player)
+    return false;
+
+  SpellItem *pipBoyLight = *(SpellItem **)0x11C358C;
+  if (!pipBoyLight)
+    return false;
+
+  return ThisStdCall<bool>(0x822B90, &player->magicTarget, &pipBoyLight->magicItem,
+                           1);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // PLAYER SNAPSHOT
 // Build a JSON snapshot of the player's current state.
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -312,11 +339,15 @@ std::string BuildPlayerSnapshot() {
     json.keyFloat("maxAP", maxAP);
 
     // Carry Weight
+    // maxWg is the max carry weight AV (includes Strong Back / implants / buffs).
     float maxWg = player->avOwner.Fn_01(kAV_CarryWeight);
-    // Current carry weight needs to be calculated from inventory
-    // For now, use the actor value which includes buffs
-    float curWg = player->avOwner.Fn_03(kAV_CarryWeight);
-    json.keyFloat("maxWg", maxWg);
+    json.keyInt("maxWg", (int)(maxWg + 0.5f));
+    // wg is the player's actual carried inventory weight, taken straight from
+    // the engine (AV 46). This is authoritative — it counts every item the
+    // player is carrying, including modded items the Pip-Boy doesn't know about.
+    // Rounded to a whole number so float jitter doesn't spam the pipe/serial.
+    float curWg = player->avOwner.Fn_03(kAV_InventoryWeight);
+    json.keyInt("wg", (int)(curWg + 0.5f));
 
     // Karma
     float karma = player->avOwner.Fn_03(kAV_Karma);
@@ -335,6 +366,10 @@ std::string BuildPlayerSnapshot() {
                   player->avOwner.Fn_03(kAV_LeftMobilityCondition));
     json.keyFloat("rightmobilitycondition",
                   player->avOwner.Fn_03(kAV_RightMobilityCondition));
+
+    // Pip-Boy flashlight (hold Pip-Boy key / toggle hotkey in-game)
+    json.key("torch");
+    json.valueBool(IsPipBoyLightOn(player));
 
     // XP — xNVSE doesn't expose this directly via simple AV,
     // but we can try to read it from the player's level data.
@@ -379,6 +414,45 @@ std::string BuildPlayerSnapshot() {
     // ─── Equipped items (integer form IDs for Pip-Boy sync) ──────────
     TESObjectWEAP *eqWeapon = player->GetEquippedWeapon();
     json.keyInt("equippedweap", eqWeapon ? (int)eqWeapon->refID : 0);
+
+    // ─── Weapon ammo (for Pip-Boy ammo selection) ────────────────────
+    // A weapon's ammo is a BGSAmmoForm whose inner form is either a single
+    // TESAmmo or a BGSListForm of several TESAmmo (e.g. the 10mm pistol can
+    // take standard / JHP / hand load). "current" is the ammo actually loaded
+    // right now; "usable" is every ammo type the equipped weapon accepts. The
+    // Pip-Boy uses these to restrict selection and dim unusable ammo.
+    json.key("weaponammo");
+    json.beginObject();
+    {
+      UInt32 currentAmmo = 0;
+      if (player->baseProcess) {
+        BaseProcess::AmmoInfo *ammoInfo = player->baseProcess->GetAmmoInfo();
+        if (ammoInfo && ammoInfo->ammo)
+          currentAmmo = ammoInfo->ammo->refID;
+      }
+      json.keyInt("current", (int)currentAmmo);
+
+      json.key("usable");
+      json.beginArray();
+      if (eqWeapon) {
+        TESForm *ammoForm = eqWeapon->ammo.ammo;
+        if (ammoForm) {
+          if (ammoForm->typeID == kFormType_BGSListForm) {
+            BGSListForm *ammoList = (BGSListForm *)ammoForm;
+            UInt32 ammoCount = ammoList->Count();
+            for (UInt32 i = 0; i < ammoCount; i++) {
+              TESForm *f = ammoList->GetNthForm(i);
+              if (f)
+                json.arrayElementInt((int)f->refID);
+            }
+          } else if (ammoForm->typeID == kFormType_TESAmmo) {
+            json.arrayElementInt((int)ammoForm->refID);
+          }
+        }
+      }
+      json.endArray();
+    }
+    json.endObject();
 
     json.key("equippedapparel");
     json.beginArray();
@@ -535,6 +609,43 @@ static bool RunVanillaItemCommand(PlayerCharacter *player, TESForm *form,
 // MUST be called from the main game thread.
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// INITIAL-SYNC LOCK
+// While the companion app runs the initial sync it sends SYNC_LOCK; we disable
+// the player's controls and keep a "please wait" message on screen until it
+// sends SYNC_UNLOCK (or disconnects). Must run on the main game thread.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+static const char *SYNC_WAIT_MESSAGE = "Please wait for initial Pip-Boy sync";
+static bool g_syncControlsDisabled = false;
+static DWORD g_lastSyncMsgTime = 0;
+
+static void ApplySyncLock(bool wantLock) {
+  PlayerCharacter *player = PlayerCharacter::GetSingleton();
+  if (!player)
+    return;
+
+  if (wantLock) {
+    if (!g_syncControlsDisabled) {
+      // Disable movement, Pip-Boy, fighting, POV switch, looking, rollover and
+      // sneaking — a full "cutscene" style lock so nothing can be done.
+      Script::RunScriptLine2("DisablePlayerControls 1 1 1 1 1 1 1", player, true);
+      g_syncControlsDisabled = true;
+      g_lastSyncMsgTime = 0; // show the message immediately
+    }
+    // HUD messages fade out, so re-post periodically to keep it on screen for
+    // the whole sync.
+    DWORD now = GetTickCount();
+    if (now - g_lastSyncMsgTime >= 3500) {
+      g_lastSyncMsgTime = now;
+      QueueUIMessage(SYNC_WAIT_MESSAGE, 0, NULL, NULL, 4.0f, true);
+    }
+  } else if (g_syncControlsDisabled) {
+    Script::RunScriptLine2("EnablePlayerControls 1 1 1 1 1 1 1", player, true);
+    g_syncControlsDisabled = false;
+  }
+}
+
 static void ExecutePipBoyCommand(const std::string &line) {
   size_t space = line.find(' ');
   if (space == std::string::npos)
@@ -599,6 +710,13 @@ void PipeServerThread() {
       std::string lastSent;
       std::string readBuffer;
       while (g_running) {
+        if (g_saveLoadPending.exchange(false)) {
+          const char *loadMsg = "{\"event\":\"saveLoad\"}\n";
+          DWORD written = 0;
+          WriteFile(hPipe, loadMsg, (DWORD)strlen(loadMsg), &written, NULL);
+          lastSent.clear();
+        }
+
         std::string snapshot;
         {
           std::lock_guard<std::mutex> lock(g_snapshotMutex);
@@ -634,7 +752,11 @@ void PipeServerThread() {
               readBuffer.erase(0, newline + 1);
               if (!line.empty() && line.back() == '\r')
                 line.pop_back();
-              if (!line.empty()) {
+              if (line == "SYNC_LOCK") {
+                g_syncLockRequested = true;
+              } else if (line == "SYNC_UNLOCK") {
+                g_syncLockRequested = false;
+              } else if (!line.empty()) {
                 std::lock_guard<std::mutex> lock(g_commandMutex);
                 g_commandQueue.push_back(line);
               }
@@ -645,6 +767,11 @@ void PipeServerThread() {
         Sleep(PIPE_POLL_INTERVAL_MS);
       }
     }
+
+    // Companion disconnected — drop any sync lock so the player isn't left with
+    // disabled controls if the app closed mid-sync. The main loop re-enables
+    // them on the next frame.
+    g_syncLockRequested = false;
 
     DisconnectNamedPipe(hPipe);
     CloseHandle(hPipe);
@@ -662,9 +789,19 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
   switch (msg->type) {
   case NVSEMessagingInterface::kMessage_PostLoadGame:
     g_gameLoaded = true;
+    g_saveLoadPending = true;
+    {
+      std::lock_guard<std::mutex> lock(g_snapshotMutex);
+      g_latestSnapshot.clear();
+    }
     break;
   case NVSEMessagingInterface::kMessage_NewGame:
     g_gameLoaded = true;
+    g_saveLoadPending = true;
+    {
+      std::lock_guard<std::mutex> lock(g_snapshotMutex);
+      g_latestSnapshot.clear();
+    }
     break;
   case NVSEMessagingInterface::kMessage_ExitGame:
     g_gameLoaded = false;
@@ -674,6 +811,12 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
     break;
   case NVSEMessagingInterface::kMessage_MainGameLoop:
     if (g_gameLoaded) {
+      // Apply/clear the initial-sync control lock (main thread only)
+      try {
+        ApplySyncLock(g_syncLockRequested.load());
+      } catch (...) {
+      }
+
       // Execute Pip-Boy-initiated commands on the main thread
       {
         std::vector<std::string> commands;

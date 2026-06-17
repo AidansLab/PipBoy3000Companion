@@ -35,6 +35,9 @@ export class SyncEngine extends EventEmitter {
     this.lastSyncFlush = 0;
     this.gameMode = null; // 'F3' or 'FNV'
     this.enabled = false;
+    // When on, the in-game flashlight drives the Pip-Boy's torch LED. Defaults
+    // to on; the app exposes a toggle to disable it.
+    this.torchSyncEnabled = true;
     this._processingSnapshot = false;
     this._pendingSnapshot = null;
     this._debounceTimer = null;
@@ -82,6 +85,18 @@ export class SyncEngine extends EventEmitter {
     } else {
       this.emit('status', 'Sync active');
     }
+  }
+
+  /**
+   * Enable or disable mirroring the in-game flashlight to the Pip-Boy torch LED.
+   * @param {boolean} enabled
+   */
+  setTorchSyncEnabled(enabled) {
+    this.torchSyncEnabled = !!enabled;
+    this.emit(
+      'status',
+      this.torchSyncEnabled ? 'Flashlight sync enabled' : 'Flashlight sync disabled'
+    );
   }
 
   /**
@@ -143,9 +158,12 @@ export class SyncEngine extends EventEmitter {
       this.setGameMode(snapshot.game);
     }
 
+    const isFullSync = !this.previousState;
     try {
-      const isFullSync = !this.previousState;
       if (isFullSync) {
+        // Lock the game (disable controls + "please wait" message) for the
+        // heavy initial sync. Incremental syncs are tiny and don't lock.
+        this.emit('initial-sync-start');
         await this._backupPresyncData();
       }
 
@@ -162,6 +180,9 @@ export class SyncEngine extends EventEmitter {
           if (catsArray.length > 0) {
             commands.push(`[${catsArray}].forEach(function(v){var d=new DataFile('DATA/'+(NV?'NV':'F3')+'/'+v+'.DAT');var i=(typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id===v)?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/'+v+'.INV',{idOrder:d.ids});if(i._requiresSort)i.sort(d.ids);if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id===v)Pip.emit('scroller','refresh');d.close();})`);
           }
+          // Caps and carry weight live in the ITEMS header, which only reads them
+          // on render — refresh it so caps update on buy/sell without a tab switch.
+          commands.push(`if(typeof Pip!=='undefined'&&Pip.renderHeader)Pip.renderHeader();`);
         }
 
         /* SYNC-DISABLED: batch inv.sync + sort stack guard
@@ -206,6 +227,11 @@ export class SyncEngine extends EventEmitter {
       this.stats.errors++;
       this.emit('error', err);
     } finally {
+      // Always release the game lock for a full sync, even if it errored, so
+      // the player is never left with disabled controls.
+      if (isFullSync) {
+        this.emit('initial-sync-end');
+      }
       this._processingSnapshot = false;
     }
 
@@ -276,6 +302,13 @@ export class SyncEngine extends EventEmitter {
           }
         }
       }
+
+      // Carry weight — taken straight from the game (authoritative). The game
+      // counts every carried item, including modded ones the Pip-Boy may not
+      // know about, so this is more accurate than summing the local inventory.
+      // Stored ephemerally (!1) so it never persists to PLAYER.JSON; the
+      // firmware's getinfo override uses it instead of calculating weight.
+      commands.push(...this._diffWeight(player, prevPlayer));
     }
 
     // --- Inventory diffs (before equip so items exist on the device) ---
@@ -289,12 +322,22 @@ export class SyncEngine extends EventEmitter {
       // --- Equipped item diffs ---
       commands.push(...this._diffEquipped(player, prevPlayer));
 
+      // --- Weapon ammo (current + usable set for ammo selection) ---
+      commands.push(...this._diffWeaponAmmo(player, prevPlayer));
+
       // --- Perk diffs ---
       const perkCommands = this._diffPerks(
         snapshot.perks || [],
         prev.perks || []
       );
       commands.push(...perkCommands);
+    }
+
+    // Pip-Boy flashlight LED — game → device only (independent of inventory pause)
+    if (this.torchSyncEnabled && player.torch !== undefined && player.torch !== prevPlayer.torch) {
+      commands.push(
+        `if(typeof Pip!=='undefined'&&Pip.setTorch)Pip.setTorch(${player.torch ? '!0' : '!1'});`
+      );
     }
 
     // Force STATS tab refresh only when stats changed (not equip/inventory)
@@ -362,6 +405,9 @@ export class SyncEngine extends EventEmitter {
         }
       }
 
+      // Carry weight — game-authoritative, stored ephemerally (see _diffWeight)
+      commands.push(...this._diffWeight(player, {}));
+
       /* Skills - Disabled for now, cannot use setav
       if (player.skills) {
         for (const [stat, value] of Object.entries(player.skills)) {
@@ -392,6 +438,9 @@ export class SyncEngine extends EventEmitter {
       // Equipped items — after inventory is populated
       commands.push(...this._diffEquipped(player, {}));
 
+      // Weapon ammo — current loaded ammo + the set the weapon can use
+      commands.push(...this._diffWeaponAmmo(player, {}));
+
       // Add all perks (clear existing first)
       commands.push(CLEAR_PERKS_CMD);
       const perks = snapshot.perks || [];
@@ -405,6 +454,13 @@ export class SyncEngine extends EventEmitter {
 
     // Force UI refresh if currently on any STATS tab or INVENTORY tab
     commands.push(`if(typeof Pip!=='undefined' && Pip.CURRENT && (Pip.MODE===0 || ['WEAPONS','APPAREL','AID','MISC','AMMO'].indexOf(Pip.CURRENT.id)>=0) && Pip.changeMenu) Pip.changeMenu();`);
+
+    // Match in-game flashlight to the physical torch LED
+    if (this.torchSyncEnabled && player.torch !== undefined) {
+      commands.push(
+        `if(typeof Pip!=='undefined'&&Pip.setTorch)Pip.setTorch(${player.torch ? '!0' : '!1'});`
+      );
+    }
 
     return commands;
   }
@@ -626,6 +682,36 @@ export class SyncEngine extends EventEmitter {
   }
 
   /**
+   * Generate carry-weight commands from game → Pip-Boy.
+   *
+   * The current weight (`wg`) and max weight (`maxWg`) are copied directly from
+   * the game and stored as ephemeral player values (persist = !1) so they never
+   * get written to PLAYER.JSON. The firmware's getinfo override reads these
+   * instead of summing the local inventory, which keeps the displayed weight
+   * accurate even when the Pip-Boy is missing items or has modded items that
+   * carry no weight data on-device.
+   *
+   * Refreshes the ITEMS header (MODE 1) so the Wg value updates without needing
+   * a tab switch.
+   */
+  _diffWeight(player, prevPlayer) {
+    const commands = [];
+    const refreshHeader = `if(typeof Pip!=='undefined' && Pip.CURRENT && Pip.MODE===1 && Pip.renderHeader){Pip.renderHeader();}`;
+
+    if (player.wg !== undefined && player.wg !== prevPlayer.wg) {
+      commands.push(`player.setav('wg', ${JSON.stringify(player.wg)}, !1)`);
+    }
+    if (player.maxWg !== undefined && player.maxWg !== prevPlayer.maxWg) {
+      commands.push(`player.setav('maxwg', ${JSON.stringify(player.maxWg)}, !1)`);
+    }
+    if (commands.length > 0) {
+      commands.push(refreshHeader);
+    }
+
+    return commands;
+  }
+
+  /**
    * Generate equip/unequip commands from game → Pip-Boy equipped state.
    * Apparel slots are resolved on-device via APPAREL.DAT (item.es).
    */
@@ -648,6 +734,47 @@ export class SyncEngine extends EventEmitter {
   }
 
   _normalizeEquippedApparel(value) {
+    if (!Array.isArray(value)) return [];
+    return value
+      .map((id) => this._toFormIdInt(id))
+      .filter((id) => id !== null && id !== 0)
+      .sort((a, b) => a - b);
+  }
+
+  /**
+   * Push the equipped weapon's ammo state to the device for ammo selection:
+   *   ammoActive — the ammo currently loaded (so AMMO.JS can mark it equipped)
+   *   ammoUsable — every ammo form the weapon accepts (others are dimmed and
+   *                cannot be selected)
+   * Both are stored ephemerally (!1) so they never persist to PLAYER.JSON. When
+   * the AMMO tab is open, re-read + re-render it so the change shows immediately.
+   */
+  _diffWeaponAmmo(player, prevPlayer) {
+    const commands = [];
+    const wa = player.weaponammo || {};
+    const prevWa = prevPlayer.weaponammo || {};
+
+    const currentAmmo = this._toFormIdInt(wa.current) ?? 0;
+    const prevAmmo = this._toFormIdInt(prevWa.current) ?? 0;
+    const usable = this._normalizeAmmoList(wa.usable);
+    const prevUsable = this._normalizeAmmoList(prevWa.usable);
+
+    if (currentAmmo !== prevAmmo) {
+      commands.push(`player.setav('ammoActive', ${currentAmmo}, !1)`);
+    }
+    if (JSON.stringify(usable) !== JSON.stringify(prevUsable)) {
+      commands.push(`player.setav('ammoUsable', [${usable.join(',')}], !1)`);
+    }
+    if (commands.length > 0) {
+      commands.push(
+        `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id==='AMMO'){if(Pip.refreshEquipState)Pip.refreshEquipState();else Pip.emit('scroller','refreshEquip');}`
+      );
+    }
+
+    return commands;
+  }
+
+  _normalizeAmmoList(value) {
     if (!Array.isArray(value)) return [];
     return value
       .map((id) => this._toFormIdInt(id))
@@ -819,7 +946,18 @@ export class SyncEngine extends EventEmitter {
   async forceFullSync() {
     this._inventorySyncPaused = false;
     this.previousState = null;
+    this._deviceConsumed.clear();
     this.emit('status', 'Forced full resync on next snapshot');
+  }
+
+  /**
+   * Game loaded a save or started a new game — discard cached state.
+   */
+  handleSaveLoad() {
+    this._inventorySyncPaused = false;
+    this.previousState = null;
+    this._deviceConsumed.clear();
+    this.emit('status', 'Game save loaded — full resync on next snapshot');
   }
 
   /**

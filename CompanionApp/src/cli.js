@@ -247,6 +247,14 @@ async function main() {
     initialSyncHintShown = true;
     console.log(`\n${C.bold}${C.pipGreen}★ ${PRESYNC_RESTORE_HINT}${C.reset}\n`);
   });
+  // Lock the game (disable controls + "please wait" pop-up) during the heavy
+  // initial sync, then release it.
+  syncEngine.on('initial-sync-start', () => {
+    if (pipeClient.connected) pipeClient.send('SYNC_LOCK');
+  });
+  syncEngine.on('initial-sync-end', () => {
+    if (pipeClient.connected) pipeClient.send('SYNC_UNLOCK');
+  });
   syncEngine.on('flushed', () => {
     logSync(`${C.dim}Flushed to Pip-Boy SD card${C.reset}`);
   });
@@ -267,6 +275,9 @@ async function main() {
         await bridge.sendCommand('cmode = !1');
       } catch (_) {}
     }
+  });
+  pipeClient.on('save-load', () => {
+    syncEngine.handleSaveLoad();
   });
   pipeClient.on('snapshot', (snapshot) => {
     syncEngine.processSnapshot(snapshot);

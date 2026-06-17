@@ -131,6 +131,162 @@ describe('SyncEngine', () => {
       assert.ok(!bridge.sentCommands.some(c => c.includes("'name'")));
     });
 
+    it('should sync flashlight LED when torch state changes', async () => {
+      // Snapshots are debounced (500ms); wait out the window between sends.
+      const settle = () => new Promise((r) => setTimeout(r, 550));
+
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: { name: 'Test', torch: false },
+        inventory: [],
+        perks: [],
+      });
+      await settle();
+
+      bridge.sentCommands.length = 0;
+
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: { name: 'Test', torch: true },
+        inventory: [],
+        perks: [],
+      });
+      await settle();
+
+      assert.ok(bridge.sentCommands.some(c => c.includes('Pip.setTorch(!0)')));
+
+      bridge.sentCommands.length = 0;
+
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: { name: 'Test', torch: true },
+        inventory: [],
+        perks: [],
+      });
+      await settle();
+
+      assert.ok(!bridge.sentCommands.some(c => c.includes('Pip.setTorch')));
+    });
+
+    it('should sync flashlight on the first (full) sync when enabled by default', async () => {
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: { name: 'Test', torch: true },
+        inventory: [],
+        perks: [],
+      });
+
+      assert.ok(bridge.sentCommands.some(c => c.includes('Pip.setTorch(!0)')));
+    });
+
+    it('should not sync flashlight when torch sync is disabled', async () => {
+      engine.setTorchSyncEnabled(false);
+
+      // Full sync with the flashlight on — must not touch the torch LED.
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: { name: 'Test', torch: true },
+        inventory: [],
+        perks: [],
+      });
+
+      assert.ok(!bridge.sentCommands.some(c => c.includes('Pip.setTorch')));
+    });
+
+    it('should copy carry weight from the game when it changes', async () => {
+      // Snapshots are debounced (500ms); wait out the window between sends so
+      // each one is processed on the leading edge.
+      const settle = () => new Promise((r) => setTimeout(r, 550));
+
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: { name: 'Test', wg: 100, maxWg: 200 },
+        inventory: [],
+        perks: [],
+      });
+      await settle();
+
+      bridge.sentCommands.length = 0;
+
+      // Only current weight changes
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: { name: 'Test', wg: 125, maxWg: 200 },
+        inventory: [],
+        perks: [],
+      });
+      await settle();
+
+      assert.ok(bridge.sentCommands.some(c => c.includes("setav('wg', 125, !1)")));
+      assert.ok(!bridge.sentCommands.some(c => c.includes("setav('maxwg'")));
+
+      bridge.sentCommands.length = 0;
+
+      // Unchanged weight — nothing sent
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: { name: 'Test', wg: 125, maxWg: 200 },
+        inventory: [],
+        perks: [],
+      });
+      await settle();
+
+      assert.ok(!bridge.sentCommands.some(c => c.includes("setav('wg'")));
+    });
+
+    it('should push usable ammo and the loaded ammo type to the device', async () => {
+      const settle = () => new Promise((r) => setTimeout(r, 550));
+
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: {
+          name: 'Test',
+          weaponammo: { current: 5, usable: [5, 6, 7] },
+        },
+        inventory: [],
+        perks: [],
+      });
+      await settle();
+
+      // Full sync sends both the active ammo and the usable set.
+      assert.ok(bridge.sentCommands.some(c => c.includes("setav('ammoActive', 5, !1)")));
+      assert.ok(bridge.sentCommands.some(c => c.includes("setav('ammoUsable', [5,6,7], !1)")));
+
+      bridge.sentCommands.length = 0;
+
+      // Only the loaded ammo changes (player switched type); usable set is the same.
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: {
+          name: 'Test',
+          weaponammo: { current: 6, usable: [5, 6, 7] },
+        },
+        inventory: [],
+        perks: [],
+      });
+      await settle();
+
+      assert.ok(bridge.sentCommands.some(c => c.includes("setav('ammoActive', 6, !1)")));
+      assert.ok(!bridge.sentCommands.some(c => c.includes("setav('ammoUsable'")));
+
+      bridge.sentCommands.length = 0;
+
+      // Nothing changed — no ammo commands.
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: {
+          name: 'Test',
+          weaponammo: { current: 6, usable: [5, 6, 7] },
+        },
+        inventory: [],
+        perks: [],
+      });
+      await settle();
+
+      assert.ok(!bridge.sentCommands.some(c => c.includes("setav('ammoActive'")));
+      assert.ok(!bridge.sentCommands.some(c => c.includes("setav('ammoUsable'")));
+    });
+
     it('should ignore sub-whole-number hp changes (regen ticks)', async () => {
       await engine.processSnapshot({
         game: 'F3',

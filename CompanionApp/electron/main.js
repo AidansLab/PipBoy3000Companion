@@ -79,6 +79,14 @@ app.on('window-all-closed', async () => {
 
 ipcMain.handle('get-status', () => companion?.getStatus() ?? null);
 
+ipcMain.handle('set-torch-sync', (_event, enabled) => {
+  if (!companion) {
+    throw new Error('App not ready');
+  }
+  companion.setTorchSyncEnabled(!!enabled);
+  return companion.getStatus();
+});
+
 ipcMain.handle('flash-firmware', async () => {
   if (!companion) {
     throw new Error('App not ready');
