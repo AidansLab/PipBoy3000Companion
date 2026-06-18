@@ -37,7 +37,7 @@ global.cmode = !1;
           v = !!v;
           if (_cmode === v) return;
           _cmode = v;
-          if (!v && typeof Pip !== 'undefined' && Pip.CURRENT && Pip.emit) {
+          if (typeof Pip !== 'undefined' && Pip.CURRENT && Pip.emit) {
             Pip.emit('scroller', 'refreshEquip');
           }
         }
@@ -140,6 +140,7 @@ global.cmode = !1;
   // keeps the device's real scroller untouched (only its text colour changes).
   const DIM_SENTINEL = '\x01';
   const _createScroller = Pip.createScroller;
+  // Patch returned scrollers so sync handlers can flush stale row caches.
   Pip.createScroller = function (options) {
     if (options && typeof options.getItem === 'function') {
       const _getItem = options.getItem;
@@ -156,7 +157,17 @@ global.cmode = !1;
         return item;
       };
     }
-    return _createScroller.call(this, options);
+    const scroller = _createScroller.call(this, options);
+    let count = (options && options.itemCount) || 0;
+    const _updateItemCount = scroller.updateItemCount;
+    scroller.updateItemCount = function (c) {
+      count = c;
+      return _updateItemCount.call(this, c);
+    };
+    scroller.invalidateCache = function () {
+      return _updateItemCount.call(this, count);
+    };
+    return scroller;
   };
 
   const _drawString = h.drawString;
@@ -197,4 +208,33 @@ global.cmode = !1;
   };
 
   companionClearCmodeOnUsbDisconnect();
+
+  // In companion mode (cmode), long-press ITEMS toggles the torch LED only — never
+  // the full-screen TORCH overlay (torchMode Screen / LED+Screen). User-initiated
+  // toggles (no explicit on/off arg) emit PIPSYNC:TORCH so the game flashlight
+  // mirrors the device. Sync-driven setTorch(on) passes an explicit arg and does
+  // not emit PIPSYNC (avoids game↔device feedback loops).
+  if (typeof Pip.setTorch === 'function') {
+    const _setTorch = Pip.setTorch;
+    Pip.setTorch = function (on) {
+      const explicit = void 0 !== on;
+      const wasOn = !!Pip.torchOn;
+      if (typeof cmode !== 'undefined' && cmode) {
+        const nextOn = explicit ? !!on : !wasOn;
+        if (Pip.CURRENT && Pip.CURRENT.id === 'TORCH') {
+          if (Pip.CURRENT.turnOff) Pip.CURRENT.turnOff();
+          else if (Pip.changeMenu) Pip.changeMenu();
+        }
+        Pip.torchOn = nextOn;
+        Pip.audioStart(`SOUND/FX/LIGHT_${nextOn ? 'ON' : 'OFF'}.WAV`);
+        Pip.fadeTo({ pin: LED_TORCH, target: nextOn ? 1 : 0 });
+        Pip.drawIcons();
+        if (!explicit && nextOn !== wasOn) {
+          console.log('PIPSYNC:TORCH:' + (nextOn ? 'ON' : 'OFF'));
+        }
+        return;
+      }
+      return _setTorch.apply(this, arguments);
+    };
+  }
 })();

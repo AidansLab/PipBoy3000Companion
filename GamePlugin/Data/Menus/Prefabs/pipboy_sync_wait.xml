@@ -1,0 +1,45 @@
+<!-- Centered HUD overlay shown during companion initial sync (no OK button). -->
+<rect name="PipBoySyncWait">
+	<visible> &true; </visible>
+	<depth> 2500 </depth>
+	<locus> &true; </locus>
+	<x>
+		<copy src="screen" trait="width"/>
+		<sub src="me" trait="width"/>
+		<div>2</div>
+	</x>
+	<y>
+		<copy src="screen" trait="height"/>
+		<sub src="me" trait="height"/>
+		<div>2</div>
+	</y>
+	<width> 600 </width>
+	<height> 200 </height>
+	<systemcolor> &hudmain; </systemcolor>
+	<target> 0 </target>
+
+	<text name="sync_title">
+		<string> Pip-Boy Sync </string>
+		<x>
+			<copy src="parent" trait="width"/>
+			<div>2</div>
+		</x>
+		<y> 24 </y>
+		<font> 3 </font>
+		<justify> &center; </justify>
+		<width> 600 </width>
+	</text>
+
+	<text name="sync_body">
+		<string> Please wait while your Pip-Boy syncs with the companion app. </string>
+		<x>
+			<copy src="parent" trait="width"/>
+			<div>2</div>
+		</x>
+		<y> 72 </y>
+		<font> 1 </font>
+		<justify> &center; </justify>
+		<width> 600 </width>
+		<wrapwidth> 560 </wrapwidth>
+	</text>
+</rect>

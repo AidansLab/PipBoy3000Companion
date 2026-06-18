@@ -1,23 +1,65 @@
-/**
- * Electron main process — runs sync engine + serial I/O, exposes IPC to UI.
- */
-
-import { app, BrowserWindow, ipcMain, Menu, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, dialog, screen } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'node:fs';
 import { CompanionApp, PRESYNC_RESTORE_HINT } from '../src/app-core.js';
 import { flashFirmware } from '../src/flash-fw.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const iconPath = path.join(__dirname, '..', 'build', 'icon.png');
+const stateFilePath = path.join(app.getPath('userData'), 'window-state.json');
 
 let mainWindow = null;
 let companion = null;
 
+function loadWindowState() {
+  try {
+    if (fs.existsSync(stateFilePath)) {
+      const data = fs.readFileSync(stateFilePath, 'utf8');
+      const state = JSON.parse(data);
+      if (typeof state.x === 'number' && typeof state.y === 'number') {
+        const displays = screen.getAllDisplays();
+        const isVisible = displays.some(display => {
+          const bounds = display.bounds;
+          return (
+            state.x >= bounds.x &&
+            state.x < bounds.x + bounds.width &&
+            state.y >= bounds.y &&
+            state.y < bounds.y + bounds.height
+          );
+        });
+        if (isVisible) {
+          return { x: state.x, y: state.y };
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load window state:', err);
+  }
+  return null;
+}
+
+function saveWindowState() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    if (!mainWindow.isMinimized() && !mainWindow.isMaximized()) {
+      const bounds = mainWindow.getBounds();
+      const state = { x: bounds.x, y: bounds.y };
+      fs.writeFileSync(stateFilePath, JSON.stringify(state), 'utf8');
+    }
+  } catch (err) {
+    console.error('Failed to save window state:', err);
+  }
+}
+
 function createWindow() {
+  const windowState = loadWindowState();
+
   mainWindow = new BrowserWindow({
     width: 614,
     height: 410,
+    x: windowState ? windowState.x : undefined,
+    y: windowState ? windowState.y : undefined,
     resizable: false,
     title: 'Pip-Boy 3000 Sync',
     icon: iconPath,
@@ -32,6 +74,10 @@ function createWindow() {
 
   mainWindow.setMenuBarVisibility(false);
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
+
+  mainWindow.on('close', () => {
+    saveWindowState();
+  });
 }
 
 function forwardLog(entry) {

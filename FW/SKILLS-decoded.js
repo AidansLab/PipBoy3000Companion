@@ -61,6 +61,18 @@
         scroller.render());
     }
   });
+  function onSkillsSync() {
+    Object.assign(
+      uSkil,
+      loadJSONWithDefaults(
+        `SETTINGS/${NV ? 'NV' : 'F3'}_SKILLS.JSON`,
+        `SETTINGS/DEFAULT/${NV ? 'NV' : 'F3'}_SKILLS.JSON`
+      )
+    );
+    scroller.invalidateCache();
+    scroller.render();
+  }
+  Pip.on('skills', onSkillsSync);
   function onKnob2(dir) {
     const id = Pip.formatId(sSkil[scroller.selectedIndex]),
       v = E.clip(uSkil[id] + dir, 1, 100);
@@ -74,6 +86,7 @@
     id: 'SKILLS',
     remove: () => {
       (Pip.removeListener('knob2', onKnob2),
+        Pip.removeListener('skills', onSkillsSync),
         skillsChanged &&
           (debug('Writing to SKILLS.JSON'),
           fs.writeFileSync(

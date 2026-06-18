@@ -219,6 +219,7 @@ export class SerialBridge extends EventEmitter {
    *   PIPSYNC:USE:AID:0001519E
    *   PIPSYNC:EQUIP:WEAPONS:0000434F
    *   PIPSYNC:UNEQUIP:APPAREL:000340C8
+   *   PIPSYNC:TORCH:ON / PIPSYNC:TORCH:OFF
    * when the user uses/equips an item on the device. These are emitted as
    * 'device-event' so the app can mirror the action in-game.
    */
@@ -237,6 +238,15 @@ export class SerialBridge extends EventEmitter {
           action: match[1].toLowerCase(),                       // 'use' | 'equip' | 'unequip'
           category: match[2],                                   // 'AID' | 'APPAREL' | 'WEAPONS'
           formId: '0x' + match[3].toLowerCase().padStart(8, '0'),
+        });
+        continue;
+      }
+
+      const torchMatch = line.match(/PIPSYNC:TORCH:(ON|OFF)/);
+      if (torchMatch) {
+        this.emit('device-event', {
+          action: 'torch',
+          state: torchMatch[1] === 'ON',
         });
         continue;
       }

@@ -17,7 +17,10 @@ const MAX_LINES = 2000;
 let lineCount = 0;
 
 function stripAnsi(text) {
-  return String(text).replace(/\x1b\[[0-9;]*m/g, '');
+  return String(text)
+    .replace(/\r/g, '')
+    .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
+    .replace(/\x1b\[[0-9;]*m/g, '');
 }
 
 function appendLog(entry) {

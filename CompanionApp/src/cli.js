@@ -218,6 +218,16 @@ async function main() {
       return;
     }
 
+    if (evt.action === 'torch') {
+      if (pipeClient.connected) {
+        pipeClient.send(evt.state ? 'TORCH ON' : 'TORCH OFF');
+        logSync(`Pip-Boy → game: flashlight ${evt.state ? 'on' : 'off'}`);
+      } else {
+        logWarn('Pip-Boy flashlight toggle ignored (game not connected)');
+      }
+      return;
+    }
+
     const gameMode = syncEngine.gameMode || 'FNV';
     const gameFormId = mapper.resolveToGame(evt.formId, gameMode);
     const pipeFormId = formatGameFormId(gameFormId);

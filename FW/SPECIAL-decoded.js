@@ -47,13 +47,19 @@
       }, 500)),
       Pip.playSound('HIGHLIGHT'));
   }
+  function onSpecialSync() {
+    scroller.invalidateCache();
+    scroller.render();
+  }
   return (
     Pip.onExclusive('knob2', onKnob2),
+    Pip.on('special', onSpecialSync),
     {
       id: 'SPECIAL',
       remove: () => {
         (scroller.remove(),
           Pip.removeListener('knob2', onKnob2),
+          Pip.removeListener('special', onSpecialSync),
           player.sync(),
           imgs.close(),
           db.close());

@@ -20,6 +20,36 @@ const MAX_INVENTORY_DELTA = 50;       // If more than this many items change, do
 // 500ms is a good balance — 250ms matches the game poll and can queue serial work faster.
 const SYNC_DEBOUNCE_MS = 500;
 
+// player.setav markers for S.P.E.C.I.A.L. — refreshed softly on the SPECIAL tab.
+const SPECIAL_SETAV_MARKERS = [
+  "player.setav('strength'",
+  "player.setav('perception'",
+  "player.setav('endurance'",
+  "player.setav('charisma'",
+  "player.setav('intelligence'",
+  "player.setav('agility'",
+  "player.setav('luck'",
+];
+
+const SPECIAL_SOFT_REFRESH_CMD =
+  `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id==='SPECIAL'&&Pip.emit)Pip.emit('special');`;
+
+const SKILLS_SOFT_REFRESH_CMD =
+  `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id==='SKILLS'&&Pip.emit)Pip.emit('skills');`;
+
+/** Full menu rebuild for STATS sub-tabs except GENERAL/SPECIAL/SKILLS (soft refresh). */
+const STATS_TAB_FULL_REFRESH_CMD =
+  `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.MODE===0&&Pip.changeMenu&&` +
+  `Pip.CURRENT.id!=='GENERAL'&&Pip.CURRENT.id!=='SPECIAL'&&Pip.CURRENT.id!=='SKILLS')Pip.changeMenu();`;
+
+/** Used after full sync — inventory tabs still get changeMenu; STATS uses soft where possible. */
+const FULL_SYNC_UI_REFRESH_CMD =
+  `if(typeof Pip!=='undefined'&&Pip.CURRENT){` +
+  `if(Pip.CURRENT.id==='SPECIAL'&&Pip.emit)Pip.emit('special');` +
+  `else if(Pip.CURRENT.id==='SKILLS'&&Pip.emit)Pip.emit('skills');` +
+  `else if(Pip.MODE===0&&Pip.CURRENT.id!=='GENERAL'&&Pip.changeMenu)Pip.changeMenu();` +
+  `else if(['WEAPONS','APPAREL','AID','MISC','AMMO'].indexOf(Pip.CURRENT.id)>=0&&Pip.changeMenu)Pip.changeMenu();}`;
+
 const INVENTORY_CATEGORIES = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
 const CLEAR_INV_CMD = `if(typeof Pip!=='undefined'&&Pip.inv){delete Pip.inv;}['AID','AMMO','APPAREL','MISC','WEAPONS'].forEach(function(v){require('fs').writeFileSync('INV/'+(NV?'NV':'F3')+'/'+v+'.INV','')})`;
 const CLEAR_PERKS_CMD = `require('fs').writeFileSync('SETTINGS/'+(NV?'NV':'F3')+'_PERKS.JSON','{}')`;
@@ -43,6 +73,7 @@ export class SyncEngine extends EventEmitter {
     this._debounceTimer = null;
     this._debouncedSnapshot = null;
     this._inventorySyncPaused = false;
+    this._needsWeaponAmmoRefresh = false;
     // Device-initiated consumptions (e.g. stimpak used on the Pip-Boy) that
     // we expect to see echoed back in an upcoming game snapshot.
     // gameFormId (lowercase) -> { count, time }
@@ -178,9 +209,27 @@ export class SyncEngine extends EventEmitter {
 
       const commands = this._generateCommands(snapshot);
 
+      if (isFullSync && this.gameMode === 'FNV' && !this._getFactions(snapshot).length) {
+        this.emit(
+          'warning',
+          'Game plugin did not send faction data — rebuild FalloutPipBoySync.dll (v6+) and restart the game'
+        );
+      }
+
       if (commands.length > 0) {
+        const factionCmd = commands.find((c) => c.includes('REP_VISIBLE.JSON'));
+        if (factionCmd) {
+          const discovered = this._normalizeFactions(this._getFactions(snapshot)).filter(
+            (f) => f.discovered
+          );
+          this.emit(
+            'status',
+            `Faction sync: ${discovered.length} discovered (${discovered.map((f) => f.name).join(', ') || 'none'})`
+          );
+        }
+
         // Automatically refresh Pip-Boy inventory UI if needed
-        const hasInvChanges = commands.some(c => c.includes('InvFile') || c.includes('resetinventory') || c.includes('fs.writeFileSync') || c.includes('additem'));
+        const hasInvChanges = commands.some((c) => this._isInventoryRefreshCommand(c));
 
         // Refresh open inventory tab UI; disk writes happen in add/remove commands
         // only when that category is not the active menu (page exit syncs otherwise).
@@ -192,9 +241,8 @@ export class SyncEngine extends EventEmitter {
           if (catsArray.length > 0) {
             commands.push(`[${catsArray}].forEach(function(v){try{var d=new DataFile('DATA/'+(NV?'NV':'F3')+'/'+v+'.DAT');var i=(typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id===v)?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/'+v+'.INV',{idOrder:d.ids});if(i._requiresSort)i.sort(d.ids);if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id===v)Pip.emit('scroller','refresh');d.close();}catch(e){}})`);
           }
-          // Caps and carry weight live in the ITEMS header, which only reads them
-          // on render — refresh it so caps update on buy/sell without a tab switch.
-          commands.push(`if(typeof Pip!=='undefined'&&Pip.renderHeader)Pip.renderHeader();`);
+          // Caps and carry weight live in the ITEMS header — only refresh on inventory tabs.
+          commands.push(`if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.MODE===1&&Pip.renderHeader)Pip.renderHeader();`);
         }
 
         /* SYNC-DISABLED: batch inv.sync + sort stack guard
@@ -310,7 +358,7 @@ export class SyncEngine extends EventEmitter {
         for (const [stat, value] of Object.entries(player.special)) {
           if (value !== prevSpecial[stat]) {
             const mappedStat = specialMap[stat] || stat;
-            commands.push(`player.setav('${mappedStat}', ${value}, !0)`);
+            commands.push(`player.setav('${mappedStat}', ${value}, !1)`);
           }
         }
       }
@@ -330,12 +378,12 @@ export class SyncEngine extends EventEmitter {
     );
     commands.push(...invCommands);
 
+    // Weapon ammo — ephemeral UI state; always sync (not gated on inventory pause)
+    commands.push(...this._diffWeaponAmmo(player, prevPlayer));
+
     if (!this._inventorySyncPaused) {
       // --- Equipped item diffs ---
       commands.push(...this._diffEquipped(player, prevPlayer));
-
-      // --- Weapon ammo (current + usable set for ammo selection) ---
-      commands.push(...this._diffWeaponAmmo(player, prevPlayer));
 
       // --- Perk diffs ---
       const perkCommands = this._diffPerks(
@@ -343,7 +391,13 @@ export class SyncEngine extends EventEmitter {
         prev.perks || []
       );
       commands.push(...perkCommands);
+
+      // --- Skill diffs (written to SETTINGS/*_SKILLS.JSON on device) ---
+      commands.push(...this._diffSkills(player, prevPlayer));
     }
+
+    // Faction reputation — always sync (not gated on inventory pause)
+    commands.push(...this._diffFactions(this._getFactions(snapshot), this._getFactions(prev)));
 
     // Pip-Boy flashlight LED — game → device only (independent of inventory pause)
     if (this.torchSyncEnabled && player.torch !== undefined && player.torch !== prevPlayer.torch) {
@@ -352,26 +406,35 @@ export class SyncEngine extends EventEmitter {
       );
     }
 
-    // Force STATS tab refresh only when stats changed (not equip/inventory)
-    const hasStatsChange = commands.some(
-      (c) => c.includes("player.setav('hp'") ||
-        c.includes('player.setlevel') ||
-        c.includes("player.setav('name'") ||
-        c.includes("player.setav('strength'") ||
-        c.includes("player.setav('perception'") ||
-        c.includes("player.setav('endurance'") ||
-        c.includes("player.setav('charisma'") ||
-        c.includes("player.setav('intelligence'") ||
-        c.includes("player.setav('agility'") ||
-        c.includes("player.setav('luck'") ||
-        c.includes('perceptioncondition') ||
-        c.includes('endurancecondition') ||
-        c.includes('attackcondition') ||
-        c.includes('mobilitycondition') ||
-        c.includes("player.setav('karma'")
+    // Force STATS tab refresh only when stats changed (not equip/inventory).
+    // SPECIAL/SKILLS use Pip.emit soft refresh when already on that screen.
+    const hasSpecialChange = commands.some((c) =>
+      SPECIAL_SETAV_MARKERS.some((m) => c.includes(m))
     );
-    if (hasStatsChange) {
-      commands.push(`if(typeof Pip!=='undefined' && Pip.CURRENT && Pip.MODE===0 && Pip.changeMenu) Pip.changeMenu();`);
+    const hasOtherStatsChange = commands.some(
+      (c) =>
+        (c.includes("player.setav('hp'") ||
+          c.includes('player.setlevel') ||
+          c.includes("player.setav('name'") ||
+          c.includes('perceptioncondition') ||
+          c.includes('endurancecondition') ||
+          c.includes('attackcondition') ||
+          c.includes('mobilitycondition') ||
+          c.includes("player.setav('karma'")) &&
+        !SPECIAL_SETAV_MARKERS.some((m) => c.includes(m))
+    );
+    if (hasSpecialChange) {
+      commands.push(SPECIAL_SOFT_REFRESH_CMD);
+    }
+    if (hasOtherStatsChange) {
+      if (this.gameMode === 'FNV') {
+        commands.push(STATS_TAB_FULL_REFRESH_CMD);
+      } else {
+        commands.push(
+          `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.MODE===0&&Pip.changeMenu&&` +
+            `Pip.CURRENT.id!=='SPECIAL'&&Pip.CURRENT.id!=='SKILLS')Pip.changeMenu();`
+        );
+      }
     }
 
     return commands;
@@ -413,20 +476,18 @@ export class SyncEngine extends EventEmitter {
       if (player.special) {
         for (const [stat, value] of Object.entries(player.special)) {
           const mappedStat = specialMapFull[stat] || stat;
-          commands.push(`player.setav('${mappedStat}', ${value}, !0)`);
+          commands.push(`player.setav('${mappedStat}', ${value}, !1)`);
         }
       }
 
       // Carry weight — game-authoritative, stored ephemerally (see _diffWeight)
       commands.push(...this._diffWeight(player, {}));
 
-      /* Skills - Disabled for now, cannot use setav
+      // Skills — stored in SETTINGS/*_SKILLS.JSON (not player.setav)
       if (player.skills) {
-        for (const [stat, value] of Object.entries(player.skills)) {
-          commands.push(`player.setav('${stat}', ${value})`);
-        }
+        const skillCmd = this._buildSyncSkillsCommand(player.skills);
+        if (skillCmd) commands.push(skillCmd);
       }
-      */
 
       // Add all inventory items
       const inventory = snapshot.inventory || [];
@@ -449,10 +510,12 @@ export class SyncEngine extends EventEmitter {
 
       // Equipped items — after inventory is populated
       commands.push(...this._diffEquipped(player, {}));
+    }
 
-      // Weapon ammo — current loaded ammo + the set the weapon can use
-      commands.push(...this._diffWeaponAmmo(player, {}));
+    // Weapon ammo — ephemeral UI state for AMMO tab dimming/selection
+    commands.push(...this._diffWeaponAmmo(player, {}));
 
+    if (!this._inventorySyncPaused) {
       // Add all perks (clear existing first)
       commands.push(CLEAR_PERKS_CMD);
       const perks = snapshot.perks || [];
@@ -464,8 +527,15 @@ export class SyncEngine extends EventEmitter {
       }
     }
 
+    // Faction reputation — always sync (not gated on inventory pause)
+    const factions = this._getFactions(snapshot);
+    if (factions.length) {
+      const factionCmd = this._buildSyncFactionsCommand(factions);
+      if (factionCmd) commands.push(factionCmd);
+    }
+
     // Force UI refresh if currently on any STATS tab or INVENTORY tab
-    commands.push(`if(typeof Pip!=='undefined' && Pip.CURRENT && (Pip.MODE===0 || ['WEAPONS','APPAREL','AID','MISC','AMMO'].indexOf(Pip.CURRENT.id)>=0) && Pip.changeMenu) Pip.changeMenu();`);
+    commands.push(FULL_SYNC_UI_REFRESH_CMD);
 
     // Match in-game flashlight to the physical torch LED
     if (this.torchSyncEnabled && player.torch !== undefined) {
@@ -498,7 +568,17 @@ export class SyncEngine extends EventEmitter {
    */
   async notifyPresyncRestored() {
     this._inventorySyncPaused = true;
+    this.requestWeaponAmmoRefresh();
     this.emit('status', 'Pre-sync data restored on Pip-Boy (run resync after reconnecting to resume sync)');
+  }
+
+  /** Re-push ammoActive/ammoUsable on next snapshot (e.g. after Pip-Boy reconnect). */
+  requestWeaponAmmoRefresh() {
+    this._needsWeaponAmmoRefresh = true;
+  }
+
+  isInventorySyncPaused() {
+    return this._inventorySyncPaused;
   }
 
   /**
@@ -663,6 +743,163 @@ export class SyncEngine extends EventEmitter {
   }
 
   /**
+   * Filter game skill levels for the active Pip-Boy mode (FO3 has no Survival).
+   */
+  _filterSkillsForMode(skills) {
+    if (!skills || typeof skills !== 'object') return {};
+    const out = {};
+    const isF3 = this.gameMode === 'F3';
+    for (const [key, value] of Object.entries(skills)) {
+      if (isF3 && key === 'survival') continue;
+      if (typeof value === 'number' && !Number.isNaN(value)) {
+        out[key] = value;
+      }
+    }
+    return out;
+  }
+
+  _skillsChanged(current, previous) {
+    const cur = this._filterSkillsForMode(current);
+    const prev = this._filterSkillsForMode(previous);
+    const keys = new Set([...Object.keys(cur), ...Object.keys(prev)]);
+    for (const key of keys) {
+      if (cur[key] !== prev[key]) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Write skill levels to SETTINGS/*_SKILLS.JSON on the Pip-Boy.
+   * Matches game actor-value keys (e.g. "energyweapons") to SKILLS.DAT display names.
+   */
+  _buildSyncSkillsCommand(skills) {
+    const filtered = this._filterSkillsForMode(skills);
+    if (Object.keys(filtered).length === 0) return null;
+
+    const payload = JSON.stringify(filtered);
+    return (
+      `(()=>{try{var g=${payload},m=NV?'NV':'F3',` +
+      `db=new DataFile('DATA/'+m+'/SKILLS.DAT'),` +
+      `p='SETTINGS/'+m+'_SKILLS.JSON',` +
+      `u=loadJSONWithDefaults(p,'SETTINGS/DEFAULT/'+m+'_SKILLS.JSON'),` +
+      `chg=!1,nm=function(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'')},` +
+      `i,id,dat,k,lvl,dt;` +
+      `for(i=0;i<db.ids.length;i++){id=db.ids[i];dat=db.getId(id);dt=nm(dat.txt);` +
+      `for(k in g){if(dt===nm(k)){lvl=E.clip(Math.round(g[k]),1,100);` +
+      `if(u[Pip.formatId(id)]!==lvl){u[Pip.formatId(id)]=lvl;chg=!0}break}}}` +
+      `db.close();` +
+      `if(chg){fs.writeFileSync(p,JSON.stringify(u));` +
+      SKILLS_SOFT_REFRESH_CMD + `}}` +
+      `catch(e){debug('skill sync',e)}})()`
+    );
+  }
+
+  _diffSkills(currentPlayer, previousPlayer) {
+    const commands = [];
+    if (!this._skillsChanged(currentPlayer?.skills, previousPlayer?.skills)) {
+      return commands;
+    }
+    const cmd = this._buildSyncSkillsCommand(currentPlayer.skills);
+    if (cmd) commands.push(cmd);
+    return commands;
+  }
+
+  /** True when a command mutates inventory files (not SETTINGS/REP or skills). */
+  _isInventoryRefreshCommand(cmd) {
+    if (cmd.includes('InvFile') || cmd.includes('resetinventory') || cmd.includes('additem')) {
+      return true;
+    }
+    if (!cmd.includes('fs.writeFileSync')) return false;
+    if (cmd.includes('SETTINGS/REP') || cmd.includes('_SKILLS')) return false;
+    return true;
+  }
+
+  /** Plugin emits factions under player; accept top-level for tests. */
+  _getFactions(snapshot) {
+    if (!snapshot) return [];
+    const nested = snapshot.player?.factions;
+    if (Array.isArray(nested) && nested.length > 0) return nested;
+    const top = snapshot.factions;
+    if (Array.isArray(top)) return top;
+    return [];
+  }
+
+  _normalizeFactions(factions) {
+    if (!Array.isArray(factions)) return [];
+    return factions
+      .filter((f) => f && typeof f.name === 'string')
+      .map((f) => {
+        const fame = typeof f.fame === 'number' ? f.fame : 0;
+        const infamy = typeof f.infamy === 'number' ? f.infamy : 0;
+        const tier = typeof f.tier === 'number' ? f.tier : 5;
+        return {
+          name: f.name,
+          tier,
+          discovered:
+            !!f.discovered || fame > 0 || infamy > 0 || tier !== 5,
+        };
+      });
+  }
+
+  _factionsChanged(current, previous) {
+    const cur = this._normalizeFactions(current);
+    const prev = this._normalizeFactions(previous);
+    if (cur.length !== prev.length) return true;
+    const prevByName = new Map(prev.map((f) => [f.name, f]));
+    for (const f of cur) {
+      const p = prevByName.get(f.name);
+      if (!p || p.tier !== f.tier || p.discovered !== f.discovered) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Write faction reputation tiers and discovered list for the Pip-Boy GENERAL screen.
+   * Only discovered factions are written to REP.JSON; REP_VISIBLE.JSON drives the scroller.
+   */
+  _buildSyncFactionsCommand(factions, previous = null) {
+    if (this.gameMode !== 'FNV') return null;
+    const normalized = this._normalizeFactions(factions);
+    if (normalized.length === 0) return null;
+
+    const curVis = normalized.filter((f) => f.discovered).map((f) => f.name);
+    let visListChanged = !previous;
+    if (previous) {
+      const prevVis = this._normalizeFactions(previous)
+        .filter((f) => f.discovered)
+        .map((f) => f.name);
+      visListChanged =
+        curVis.length !== prevVis.length ||
+        curVis.some((n, i) => n !== prevVis[i]);
+    }
+
+    const payload = JSON.stringify(normalized);
+    const generalRefresh = visListChanged
+      ? `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id==='GENERAL'&&Pip.changeMenu)Pip.changeMenu();`
+      : `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id==='GENERAL')Pip.emit('factions');`;
+
+    return (
+      `(()=>{try{var d=${payload},rep={},vis=[],i,f,t;` +
+      `for(i=0;i<d.length;i++){f=d[i];if(!f.discovered)continue;` +
+      `t=E.clip(Math.round(f.tier),0,15);rep[f.name]=t;vis.push(f.name);}` +
+      `fs.writeFileSync('SETTINGS/REP.JSON',JSON.stringify(rep));` +
+      `fs.writeFileSync('SETTINGS/REP_VISIBLE.JSON',JSON.stringify(vis));` +
+      `${generalRefresh}` +
+      `}catch(e){debug('faction sync',e)}})()`
+    );
+  }
+
+  _diffFactions(current, previous) {
+    const commands = [];
+    if (this.gameMode !== 'FNV') return commands;
+    if (!Array.isArray(current) || current.length === 0) return commands;
+    if (!this._factionsChanged(current, previous)) return commands;
+    const cmd = this._buildSyncFactionsCommand(current, previous);
+    if (cmd) commands.push(cmd);
+    return commands;
+  }
+
+  /**
    * Diff two perk arrays and generate add/remove commands
    */
   _diffPerks(current, previous) {
@@ -772,12 +1009,19 @@ export class SyncEngine extends EventEmitter {
     const prevAmmo = this._toFormIdInt(prevWa.current) ?? 0;
     const usable = this._normalizeAmmoList(wa.usable);
     const prevUsable = this._normalizeAmmoList(prevWa.usable);
+    const force = this._needsWeaponAmmoRefresh;
+    if (force) this._needsWeaponAmmoRefresh = false;
 
-    if (currentAmmo !== prevAmmo) {
+    if (force) {
       commands.push(`player.setav('ammoActive', ${currentAmmo}, !1)`);
-    }
-    if (JSON.stringify(usable) !== JSON.stringify(prevUsable)) {
       commands.push(`player.setav('ammoUsable', [${usable.join(',')}], !1)`);
+    } else {
+      if (currentAmmo !== prevAmmo) {
+        commands.push(`player.setav('ammoActive', ${currentAmmo}, !1)`);
+      }
+      if (JSON.stringify(usable) !== JSON.stringify(prevUsable)) {
+        commands.push(`player.setav('ammoUsable', [${usable.join(',')}], !1)`);
+      }
     }
     if (commands.length > 0) {
       commands.push(

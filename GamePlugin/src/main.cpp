@@ -29,6 +29,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 #include <windows.h>
 
@@ -54,7 +55,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #define PLUGIN_NAME "FalloutPipBoySync"
-#define PLUGIN_VERSION 1
+#define PLUGIN_VERSION 16
 
 // How often to snapshot player state (in milliseconds)
 #define SNAPSHOT_INTERVAL_MS 250
@@ -137,6 +138,179 @@ static std::atomic<bool> g_syncLockRequested(false);
 static std::mutex g_commandMutex;
 static std::vector<std::string> g_commandQueue;
 
+static NVSEScriptInterface *g_scriptInterface = nullptr;
+
+// Pip-Boy GENERAL screen order (must match FW/GENERAL-decoded.js and REP.IMG).
+struct FactionRepDef {
+  const char *name;
+  UInt32 repFormId; // REPU form ID (vanilla base-game)
+};
+
+static const FactionRepDef kFactionReps[] = {
+    {"Boomers", 0x000FFAE8},
+    {"Brotherhood of Steel", 0x0011E662},
+    {"Caesar's Legion", 0x000F43DD},
+    {"Followers of the Apocalypse", 0x00124AD1},
+    {"Freeside", 0x00129A7A},
+    {"Goodsprings", 0x00104C22},
+    {"Great Khans", 0x0011989B},
+    {"NCR", 0x000F43DE},
+    {"Novac", 0x00129A79},
+    {"Powder Gangers", 0x001558E6},
+    {"Primm", 0x000F2406},
+    {"The Strip", 0x00118F61},
+    {"White Glove Society", 0x00116F16},
+};
+
+static const char *GetReputationEditorId(UInt32 formId) {
+  TESForm *form = LookupFormByID(formId);
+  if (!form)
+    return nullptr;
+  const char *edid = form->GetEditorID();
+  if (!edid || !edid[0])
+    return nullptr;
+  return edid;
+}
+
+static std::unordered_map<std::string, Script *> g_exprScriptCache;
+
+// Evaluate a one-line NVSE expression (SetFunctionValue wrapper) on the player.
+static bool EvalExprNumber(const char *expr, double *out) {
+  PlayerCharacter *player = PlayerCharacter::GetSingleton();
+  if (!g_scriptInterface || !player || !expr || !out)
+    return false;
+
+  Script *scr = nullptr;
+  auto it = g_exprScriptCache.find(expr);
+  if (it != g_exprScriptCache.end()) {
+    scr = it->second;
+  } else {
+    scr = g_scriptInterface->CompileExpression(expr);
+    if (!scr)
+      return false;
+    g_exprScriptCache[expr] = scr;
+  }
+
+  NVSEArrayVarInterface::Element result;
+  if (!g_scriptInterface->CallFunction(scr, player, nullptr, &result, 0))
+    return false;
+  if (result.GetType() != NVSEArrayVarInterface::Element::kType_Numeric)
+    return false;
+
+  *out = result.GetNumber();
+  return true;
+}
+
+static int EvalReputationValue(UInt32 repFormId, const char *repEditorId,
+                               int fameOrInfamy) {
+  char expr[128];
+  double v = 0.0;
+
+  // Console/GECK use the REPU form ID (e.g. GetReputation 001558E6 0).
+  _snprintf_s(expr, _TRUNCATE, "GetReputation %08X %d",
+              repFormId & 0x00FFFFFF, fameOrInfamy);
+  if (EvalExprNumber(expr, &v))
+    goto done;
+
+  if (repEditorId) {
+    _snprintf_s(expr, _TRUNCATE, "GetReputation %s %d", repEditorId,
+                fameOrInfamy);
+    if (EvalExprNumber(expr, &v))
+      goto done;
+  }
+  return 0;
+
+done:
+  if (v < 0.0)
+    v = 0.0;
+  if (v > 100.0)
+    v = 100.0;
+  return (int)(v + 0.5);
+}
+
+static int EvalReputationThreshold(UInt32 repFormId, const char *repEditorId,
+                                   int axis) {
+  char expr[128];
+  double v = 0.0;
+
+  _snprintf_s(expr, _TRUNCATE, "GetReputationThreshold %08X %d",
+              repFormId & 0x00FFFFFF, axis);
+  if (EvalExprNumber(expr, &v))
+    goto done;
+
+  if (repEditorId) {
+    _snprintf_s(expr, _TRUNCATE, "GetReputationThreshold %s %d", repEditorId,
+                axis);
+    if (EvalExprNumber(expr, &v))
+      goto done;
+  }
+  return 1;
+
+done:
+  if (v < 0.0)
+    v = 0.0;
+  if (v > 6.0)
+    v = 6.0;
+  return (int)(v + 0.5);
+}
+
+static bool IsFactionDiscovered(int fame, int infamy, int goodThr, int badThr,
+                                int mixedThr) {
+  return fame > 0 || infamy > 0 || goodThr > 1 || badThr > 1 || mixedThr > 1;
+}
+
+// Map game reputation thresholds to Pip-Boy REP.JSON tier index (0–15).
+static int ComputePipRepTier(int fame, int infamy, int goodThr, int badThr,
+                             int mixedThr) {
+  if (badThr >= 2) {
+    switch (badThr) {
+    case 6:
+      return 15; // Vilified
+    case 5:
+      return 14; // Hated
+    case 4:
+      return 11; // Shunned
+    case 3:
+      return 13; // Merciful Thug
+    case 2:
+      return 12; // Sneering Punk
+    default:
+      return 5;
+    }
+  }
+  if (goodThr >= 2) {
+    switch (goodThr) {
+    case 6:
+      return 0; // Idolized
+    case 5:
+      return 1; // Liked
+    case 4:
+      return 2; // Accepted
+    case 3:
+      return 3; // Good-Natured Rascal
+    case 2:
+      return 4; // Smiling Troublemaker
+    default:
+      return 5;
+    }
+  }
+  if (mixedThr >= 2) {
+    switch (mixedThr) {
+    case 5:
+      return 9; // Wild Child
+    case 4:
+      return 8; // Unpredictable
+    case 3:
+      return 6; // Mixed
+    case 2:
+      return (fame >= infamy) ? 7 : 10; // Dark Hero / Soft-Hearted Devil
+    default:
+      return 5;
+    }
+  }
+  return 5; // Neutral
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // JSON HELPER (Minimal — no external dependencies)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -181,6 +355,10 @@ public:
   void keyFloat(const std::string &k, float v) {
     key(k);
     valueFloat(v);
+  }
+  void keyBool(const std::string &k, bool v) {
+    key(k);
+    valueBool(v);
   }
 
   // For array elements (no key, just comma-separated values)
@@ -289,6 +467,129 @@ static bool IsPipBoyLightOn(PlayerCharacter *player) {
                            1);
 }
 
+static SpellItem *GetPipBoyLightSpell() {
+  return *(SpellItem **)0x11C358C;
+}
+
+#if defined(_M_IX86)
+// Globals for the asm toggle — do NOT read turnON from the stack inside the naked
+// function; calling it from __try shifts the frame and breaks OFF (UI refresh was
+// re-enabling the light with a garbage edx value).
+static UInt32 s_turnONForToggle = 0;
+static void *s_pipboyManagerForToggle = nullptr;
+
+// Engine-native Pip-Boy light toggle — copied from JIP LN NVSE TogglePipBoyLight.
+__declspec(naked) static void __fastcall
+EngineTogglePipBoyLight(PlayerCharacter *thePlayer, SpellItem *pipBoyLight,
+                        UInt32 turnON) {
+  __asm {
+    push 0
+    cmp dword ptr s_turnONForToggle, 0
+    jz turnOFF
+    push edx
+    add ecx, 0x88
+    mov eax, [ecx]
+    call dword ptr [eax]
+    jmp finish
+  turnOFF:
+    push 0
+    add edx, 0x18
+    push edx
+    add ecx, 0x94
+    mov eax, 0x824400
+    call eax
+  finish:
+    mov ecx, dword ptr s_pipboyManagerForToggle
+    mov edx, dword ptr s_turnONForToggle
+    push 1
+    push edx
+    push 0
+    push ecx
+    push 1
+    push edx
+    push 1
+    mov eax, 0x7FA310
+    call eax
+    pop ecx
+    mov eax, 0x7FA310
+    call eax
+    ret 4
+  }
+}
+#endif
+
+static void PlayPipBoyLightSound(PlayerCharacter *player, bool wantOn) {
+  if (!player)
+    return;
+  // SystemSound flag (1) so the UI click plays even in menu mode.
+  const char *cmd =
+      wantOn ? "PlaySound UIPipboyLightOn 1" : "PlaySound UIPipboyLightOff 1";
+  Script::RunScriptLine2(cmd, player, true);
+}
+
+static void SetPipBoyLightScriptFallback(PlayerCharacter *player, bool wantOn) {
+  if (!player)
+    return;
+  SpellItem *pipBoyLight = GetPipBoyLightSpell();
+  if (wantOn) {
+    Script::RunScriptLine2("TogglePipBoyLight 1", player, true);
+    if (!IsPipBoyLightOn(player))
+      Script::RunScriptLine2("cios PipBoyLight", player, true);
+    if (!IsPipBoyLightOn(player) && pipBoyLight) {
+      std::stringstream ss;
+      ss << "cios " << std::hex << std::uppercase << std::setfill('0')
+         << std::setw(8) << pipBoyLight->refID;
+      Script::RunScriptLine2(ss.str().c_str(), player, true);
+    }
+  } else {
+    Script::RunScriptLine2("TogglePipBoyLight 0", player, true);
+    if (IsPipBoyLightOn(player))
+      Script::RunScriptLine2("dispel PipBoyLight", player, true);
+    if (IsPipBoyLightOn(player) && pipBoyLight) {
+      std::stringstream ss;
+      ss << "dispel " << std::hex << std::uppercase << std::setfill('0')
+         << std::setw(8) << pipBoyLight->refID;
+      Script::RunScriptLine2(ss.str().c_str(), player, true);
+    }
+  }
+}
+
+// Turn the in-game Pip-Boy flashlight on or off (companion-initiated).
+static void SetPipBoyLight(PlayerCharacter *player, bool wantOn) {
+  if (!player)
+    return;
+
+  SpellItem *pipBoyLight = GetPipBoyLightSpell();
+  if (!pipBoyLight)
+    return;
+
+  const UInt32 turnON = wantOn ? 1 : 0;
+  if ((IsPipBoyLightOn(player) ? 1u : 0u) == turnON)
+    return;
+
+  InterfaceManager *im = InterfaceManager::GetSingleton();
+  if (!im || !im->pipboyManager)
+    return;
+
+#if defined(_M_IX86)
+  s_turnONForToggle = turnON;
+  s_pipboyManagerForToggle = im->pipboyManager;
+  __try {
+    EngineTogglePipBoyLight(player, pipBoyLight, turnON);
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    SetPipBoyLightScriptFallback(player, wantOn);
+  }
+#else
+  SetPipBoyLightScriptFallback(player, wantOn);
+#endif
+
+  // Belt-and-suspenders if the engine path did not reach the desired state.
+  if ((IsPipBoyLightOn(player) ? 1u : 0u) != turnON)
+    SetPipBoyLightScriptFallback(player, wantOn);
+
+  PlayPipBoyLightSound(player, wantOn);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // PLAYER SNAPSHOT
 // Build a JSON snapshot of the player's current state.
@@ -377,6 +678,39 @@ std::string BuildPlayerSnapshot() {
     float karma = player->avOwner.Fn_03(kAV_Karma);
     json.keyFloat("karma", karma);
 
+    // Faction reputation (FNV Pip-Boy GENERAL screen)
+    json.key("factions");
+    json.beginArray();
+    for (const FactionRepDef &fac : kFactionReps) {
+      const char *repEdid = GetReputationEditorId(fac.repFormId);
+      int fame = 0;
+      int infamy = 0;
+      int goodThr = 1;
+      int badThr = 1;
+      int mixedThr = 1;
+      if (g_scriptInterface) {
+        fame = EvalReputationValue(fac.repFormId, repEdid, 1);
+        infamy = EvalReputationValue(fac.repFormId, repEdid, 0);
+        goodThr = EvalReputationThreshold(fac.repFormId, repEdid, 1);
+        badThr = EvalReputationThreshold(fac.repFormId, repEdid, 2);
+        mixedThr = EvalReputationThreshold(fac.repFormId, repEdid, 0);
+      }
+      int tier = ComputePipRepTier(fame, infamy, goodThr, badThr, mixedThr);
+      bool discovered =
+          IsFactionDiscovered(fame, infamy, goodThr, badThr, mixedThr) ||
+          tier != 5;
+
+      json.arrayElement();
+      json.beginObject();
+      json.keyStr("name", fac.name);
+      json.keyInt("tier", tier);
+      json.keyBool("discovered", discovered);
+      json.keyInt("fame", fame);
+      json.keyInt("infamy", infamy);
+      json.endObject();
+    }
+    json.endArray();
+
     // Limb Conditions (0-100 percentage)
     json.keyFloat("perceptioncondition",
                   player->avOwner.Fn_03(kAV_PerceptionCondition));
@@ -400,38 +734,39 @@ std::string BuildPlayerSnapshot() {
     // For now we'll set a placeholder; this needs refinement.
     json.keyInt("xpNext", 0);
 
-    // S.P.E.C.I.A.L. stats (Base Levels)
+    // S.P.E.C.I.A.L. — effective values (GetActorValue), includes equipment
+    // modifiers such as Metal Armor's AGILITY -1. Fn_01 is base only.
     json.key("special");
     json.beginObject();
     {
-      json.keyInt("ST", (int)player->avOwner.Fn_01(kAV_Strength));
-      json.keyInt("PE", (int)player->avOwner.Fn_01(kAV_Perception));
-      json.keyInt("EN", (int)player->avOwner.Fn_01(kAV_Endurance));
-      json.keyInt("CH", (int)player->avOwner.Fn_01(kAV_Charisma));
-      json.keyInt("IN", (int)player->avOwner.Fn_01(kAV_Intelligence));
-      json.keyInt("AG", (int)player->avOwner.Fn_01(kAV_Agility));
-      json.keyInt("LK", (int)player->avOwner.Fn_01(kAV_Luck));
+      json.keyInt("ST", (int)player->avOwner.Fn_03(kAV_Strength));
+      json.keyInt("PE", (int)player->avOwner.Fn_03(kAV_Perception));
+      json.keyInt("EN", (int)player->avOwner.Fn_03(kAV_Endurance));
+      json.keyInt("CH", (int)player->avOwner.Fn_03(kAV_Charisma));
+      json.keyInt("IN", (int)player->avOwner.Fn_03(kAV_Intelligence));
+      json.keyInt("AG", (int)player->avOwner.Fn_03(kAV_Agility));
+      json.keyInt("LK", (int)player->avOwner.Fn_03(kAV_Luck));
     }
     json.endObject();
 
-    // Skills (Base Levels)
+    // Skills — effective values (GetActorValue), includes equipment bonuses.
     json.key("skills");
     json.beginObject();
     {
-      json.keyInt("barter", (int)player->avOwner.Fn_01(kAV_Barter));
+      json.keyInt("barter", (int)player->avOwner.Fn_03(kAV_Barter));
       json.keyInt("energyweapons",
-                  (int)player->avOwner.Fn_01(kAV_EnergyWeapons));
-      json.keyInt("explosives", (int)player->avOwner.Fn_01(kAV_Explosives));
-      json.keyInt("lockpick", (int)player->avOwner.Fn_01(kAV_Lockpick));
-      json.keyInt("medicine", (int)player->avOwner.Fn_01(kAV_Medicine));
-      json.keyInt("meleeweapons", (int)player->avOwner.Fn_01(kAV_MeleeWeapons));
-      json.keyInt("repair", (int)player->avOwner.Fn_01(kAV_Repair));
-      json.keyInt("science", (int)player->avOwner.Fn_01(kAV_Science));
-      json.keyInt("guns", (int)player->avOwner.Fn_01(kAV_Guns));
-      json.keyInt("sneak", (int)player->avOwner.Fn_01(kAV_Sneak));
-      json.keyInt("speech", (int)player->avOwner.Fn_01(kAV_Speech));
-      json.keyInt("survival", (int)player->avOwner.Fn_01(kAV_Survival));
-      json.keyInt("unarmed", (int)player->avOwner.Fn_01(kAV_Unarmed));
+                  (int)player->avOwner.Fn_03(kAV_EnergyWeapons));
+      json.keyInt("explosives", (int)player->avOwner.Fn_03(kAV_Explosives));
+      json.keyInt("lockpick", (int)player->avOwner.Fn_03(kAV_Lockpick));
+      json.keyInt("medicine", (int)player->avOwner.Fn_03(kAV_Medicine));
+      json.keyInt("meleeweapons", (int)player->avOwner.Fn_03(kAV_MeleeWeapons));
+      json.keyInt("repair", (int)player->avOwner.Fn_03(kAV_Repair));
+      json.keyInt("science", (int)player->avOwner.Fn_03(kAV_Science));
+      json.keyInt("guns", (int)player->avOwner.Fn_03(kAV_Guns));
+      json.keyInt("sneak", (int)player->avOwner.Fn_03(kAV_Sneak));
+      json.keyInt("speech", (int)player->avOwner.Fn_03(kAV_Speech));
+      json.keyInt("survival", (int)player->avOwner.Fn_03(kAV_Survival));
+      json.keyInt("unarmed", (int)player->avOwner.Fn_03(kAV_Unarmed));
     }
     json.endObject();
 
@@ -630,19 +965,172 @@ static bool RunVanillaItemCommand(PlayerCharacter *player, TESForm *form,
 //   "USE 0x0001519e"      — consume an aid item (EquipItem on an ingestible)
 //   "EQUIP 0x0000434f"    — equip a weapon/apparel
 //   "UNEQUIP 0x000340c8"  — unequip a weapon/apparel
+//   "TORCH ON" / "TORCH OFF" — toggle the in-game Pip-Boy flashlight
 // MUST be called from the main game thread.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // INITIAL-SYNC LOCK
 // While the companion app runs the initial sync it sends SYNC_LOCK; we disable
-// the player's controls and keep a "please wait" message on screen until it
-// sends SYNC_UNLOCK (or disconnects). Must run on the main game thread.
+// the player's controls and inject a custom HUD XML overlay until SYNC_UNLOCK
+// (or disconnect). Must run on the main game thread.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-static const char *SYNC_WAIT_MESSAGE = "Please wait for initial Pip-Boy sync";
+// Engine Tile::ReadXML via temp file — same fallback path JIP LN NVSE uses.
+static const UInt32 kTileReadXMLAddr = 0x00A01B00;
+static const char *kSyncWaitTempXmlFile = "pipboy_sync_temp.xml";
+static char s_hudInjectionParentPath[] = "HUDMainMenu/HUDMainMenu";
+
+// GetMenuComponentTile mutates the path (writes NULs over '/' separators).
+// Never pass string literals — use a stack copy each call.
+static Tile *GetMenuComponentTileCopy(const char *path) {
+  if (!path || !path[0])
+    return nullptr;
+  char pathBuf[0x100];
+  strncpy(pathBuf, path, sizeof(pathBuf) - 1);
+  pathBuf[sizeof(pathBuf) - 1] = '\0';
+  return InterfaceManager::GetMenuComponentTile(pathBuf);
+}
+
+// Inject on menuRoot so screen-relative coordinates are correct (HUDMainMenu
+// is offset/scaled). Text with &center; anchors on x — set x to parent/2.
+static const char kSyncWaitOverlayXml[] =
+    "<rect name=\"PipBoySyncWait\">"
+    "<visible> &true; </visible>"
+    "<depth> 2500 </depth>"
+    "<locus> &true; </locus>"
+    "<x><copy src=\"screen\" trait=\"width\"/>"
+    "<sub src=\"me\" trait=\"width\"/><div>2</div></x>"
+    "<y><copy src=\"screen\" trait=\"height\"/>"
+    "<sub src=\"me\" trait=\"height\"/><div>2</div></y>"
+    "<width> 600 </width>"
+    "<height> 200 </height>"
+    "<systemcolor> &hudmain; </systemcolor>"
+    "<target> 0 </target>"
+    "<text name=\"sync_title\">"
+    "<string> Pip-Boy Sync </string>"
+    "<x><copy src=\"parent\" trait=\"width\"/><div>2</div></x>"
+    "<y> 24 </y>"
+    "<font> 3 </font>"
+    "<justify> &center; </justify>"
+    "<width> 600 </width>"
+    "</text>"
+    "<text name=\"sync_body\">"
+    "<string> Please wait while your Pip-Boy syncs with the companion app. "
+    "</string>"
+    "<x><copy src=\"parent\" trait=\"width\"/><div>2</div></x>"
+    "<y> 72 </y>"
+    "<font> 1 </font>"
+    "<justify> &center; </justify>"
+    "<width> 600 </width>"
+    "<wrapwidth> 560 </wrapwidth>"
+    "</text>"
+    "</rect>";
+
 static bool g_syncControlsDisabled = false;
-static DWORD g_lastSyncMsgTime = 0;
+static bool g_syncOverlayInjected = false;
+// Frames to wait after a save/load before touching HUD tiles (HUD is rebuilt).
+static UInt32 g_syncHudReadyDelay = 0;
+
+static bool IsSafeForHudTileAccess() {
+  if (g_syncHudReadyDelay > 0)
+    return false;
+  if (InterfaceManager::IsMenuVisible(kMenuType_Loading))
+    return false;
+  return InterfaceManager::GetSingleton() != nullptr;
+}
+
+static Tile *GetLegacyHudParentUnsafe() {
+  if (!InterfaceManager::GetSingleton())
+    return nullptr;
+
+  Tile *parent = GetMenuComponentTileCopy(s_hudInjectionParentPath);
+  if (!parent) {
+    if (Menu *hud = InterfaceManager::GetMenuByType(kMenuType_HUDMain))
+      parent = hud->tile;
+  }
+  return parent;
+}
+
+static Tile *GetSyncOverlayParent() {
+  if (!IsSafeForHudTileAccess())
+    return nullptr;
+  InterfaceManager *im = InterfaceManager::GetSingleton();
+  return im ? im->menuRoot : nullptr;
+}
+
+static bool IsHudReadyForSyncOverlay() {
+  if (!IsSafeForHudTileAccess())
+    return false;
+
+  Tile *parent = GetSyncOverlayParent();
+  return parent && parent->node;
+}
+
+static void ResetSyncLockState(bool reenableControls) {
+  g_syncHudReadyDelay = 90;
+  g_syncOverlayInjected = false;
+  if (reenableControls && g_syncControlsDisabled) {
+    if (PlayerCharacter *player = PlayerCharacter::GetSingleton())
+      Script::RunScriptLine2("EnablePlayerControls 1 1 1 1 1 1 1", player, true);
+    g_syncControlsDisabled = false;
+  }
+}
+
+static Tile *InjectTileXml(Tile *parent, const char *xml) {
+  if (!parent || !xml || !*xml)
+    return nullptr;
+
+  FILE *file = fopen(kSyncWaitTempXmlFile, "wb");
+  if (!file)
+    return nullptr;
+  fputs(xml, file);
+  fclose(file);
+  return ThisStdCall<Tile *>(kTileReadXMLAddr, parent, kSyncWaitTempXmlFile);
+}
+
+static void DestroySyncOverlayTile(Tile *overlay) {
+  if (!overlay)
+    return;
+  ThisStdCall(0x00A012D0, overlay, Tile::kTileValue_visible, 0.0f, true);
+  overlay->Destroy(true);
+}
+
+static void ShowSyncWaitOverlay() {
+  if (!IsHudReadyForSyncOverlay() || g_syncOverlayInjected)
+    return;
+
+  Tile *parent = GetSyncOverlayParent();
+  if (!parent || !parent->node)
+    return;
+
+  InjectTileXml(parent, kSyncWaitOverlayXml);
+  if (parent->GetChild("PipBoySyncWait"))
+    g_syncOverlayInjected = true;
+}
+
+static void CloseSyncWaitOverlay() {
+  if (InterfaceManager::IsMenuVisible(kMenuType_Loading))
+    return;
+
+  // Dismiss any Message menu left open by older plugin versions (ShowMessageBox).
+  if (InterfaceManager::IsMenuVisible(kMenuType_Message))
+    CdeclCall(0x7AA480);
+
+  if (InterfaceManager *im = InterfaceManager::GetSingleton()) {
+    if (im->menuRoot) {
+      if (Tile *overlay = im->menuRoot->GetChild("PipBoySyncWait"))
+        DestroySyncOverlayTile(overlay);
+    }
+  }
+  // Remove overlays injected by older plugin versions on HUDMainMenu.
+  if (Tile *legacyParent = GetLegacyHudParentUnsafe()) {
+    if (Tile *overlay = legacyParent->GetChild("PipBoySyncWait"))
+      DestroySyncOverlayTile(overlay);
+  }
+
+  g_syncOverlayInjected = false;
+}
 
 static void ApplySyncLock(bool wantLock) {
   PlayerCharacter *player = PlayerCharacter::GetSingleton();
@@ -650,27 +1138,36 @@ static void ApplySyncLock(bool wantLock) {
     return;
 
   if (wantLock) {
+    if (!IsSafeForHudTileAccess())
+      return;
+
     if (!g_syncControlsDisabled) {
       // Disable movement, Pip-Boy, fighting, POV switch, looking, rollover and
       // sneaking — a full "cutscene" style lock so nothing can be done.
       Script::RunScriptLine2("DisablePlayerControls 1 1 1 1 1 1 1", player, true);
       g_syncControlsDisabled = true;
-      g_lastSyncMsgTime = 0; // show the message immediately
     }
-    // HUD messages fade out, so re-post periodically to keep it on screen for
-    // the whole sync.
-    DWORD now = GetTickCount();
-    if (now - g_lastSyncMsgTime >= 3500) {
-      g_lastSyncMsgTime = now;
-      QueueUIMessage(SYNC_WAIT_MESSAGE, 0, NULL, NULL, 4.0f, true);
+    if (IsHudReadyForSyncOverlay() && !g_syncOverlayInjected)
+      ShowSyncWaitOverlay();
+  } else {
+    if (g_syncControlsDisabled) {
+      Script::RunScriptLine2("EnablePlayerControls 1 1 1 1 1 1 1", player, true);
+      g_syncControlsDisabled = false;
     }
-  } else if (g_syncControlsDisabled) {
-    Script::RunScriptLine2("EnablePlayerControls 1 1 1 1 1 1 1", player, true);
-    g_syncControlsDisabled = false;
+    CloseSyncWaitOverlay();
   }
 }
 
 static void ExecutePipBoyCommand(const std::string &line) {
+  if (line == "TORCH ON") {
+    SetPipBoyLight(PlayerCharacter::GetSingleton(), true);
+    return;
+  }
+  if (line == "TORCH OFF") {
+    SetPipBoyLight(PlayerCharacter::GetSingleton(), false);
+    return;
+  }
+
   size_t space = line.find(' ');
   if (space == std::string::npos)
     return;
@@ -811,9 +1308,14 @@ void PipeServerThread() {
 
 void MessageHandler(NVSEMessagingInterface::Message *msg) {
   switch (msg->type) {
+  case NVSEMessagingInterface::kMessage_PreLoadGame:
+    g_syncLockRequested = false;
+    ResetSyncLockState(true);
+    break;
   case NVSEMessagingInterface::kMessage_PostLoadGame:
     g_gameLoaded = true;
     g_saveLoadPending = true;
+    ResetSyncLockState(true);
     {
       std::lock_guard<std::mutex> lock(g_snapshotMutex);
       g_latestSnapshot.clear();
@@ -822,6 +1324,7 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
   case NVSEMessagingInterface::kMessage_NewGame:
     g_gameLoaded = true;
     g_saveLoadPending = true;
+    ResetSyncLockState(true);
     {
       std::lock_guard<std::mutex> lock(g_snapshotMutex);
       g_latestSnapshot.clear();
@@ -829,12 +1332,19 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
     break;
   case NVSEMessagingInterface::kMessage_ExitGame:
     g_gameLoaded = false;
+    g_syncLockRequested = false;
+    ResetSyncLockState(true);
     break;
   case NVSEMessagingInterface::kMessage_ExitToMainMenu:
     g_gameLoaded = false;
+    g_syncLockRequested = false;
+    ResetSyncLockState(true);
     break;
   case NVSEMessagingInterface::kMessage_MainGameLoop:
     if (g_gameLoaded) {
+      if (g_syncHudReadyDelay > 0)
+        g_syncHudReadyDelay--;
+
       // Apply/clear the initial-sync control lock (main thread only)
       try {
         ApplySyncLock(g_syncLockRequested.load());
@@ -917,6 +1427,10 @@ __declspec(dllexport) bool NVSEPlugin_Load(NVSEInterface *nvse) {
     g_msgIntfc->RegisterListener(nvse->GetPluginHandle(), "NVSE",
                                  MessageHandler);
   }
+
+  // Script interface is required for GetReputation / GetReputationThreshold.
+  g_scriptInterface =
+      (NVSEScriptInterface *)nvse->QueryInterface(kInterface_Script);
 
   // Start the Named Pipe server on a background thread
   g_pipeThread = std::thread(PipeServerThread);

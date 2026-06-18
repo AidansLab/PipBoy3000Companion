@@ -217,8 +217,15 @@ export class CompanionApp extends EventEmitter {
       await this.bridge.sendCommand('cmode = !0');
     }
 
-    if (options.requestResync) {
+    if (options.requestResync || this.syncEngine.isInventorySyncPaused()) {
       await this._requestInventoryResync();
+      return;
+    }
+
+    this.syncEngine.requestWeaponAmmoRefresh();
+    const snap = this.pipeClient.lastSnapshot;
+    if (snap) {
+      await this.syncEngine.processSnapshot(snap);
     }
   }
 
@@ -245,11 +252,21 @@ export class CompanionApp extends EventEmitter {
       this.log('cmd', cmd);
     });
     this.bridge.on('data', (text) => {
-      const lines = text.split(/\r?\n/).filter((l) => l.trim());
+      const sanitized = String(text)
+        .replace(/\r/g, '')
+        .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+      if (!sanitized.trim()) return;
+
+      const lines = sanitized.split(/\n/).filter((l) => l.trim());
       for (const line of lines) {
         if (line.includes('PIPSYNC:')) continue;
         if (line === '>' || line === '=>') continue;
         if (/^(true|false)\x04?$/.test(line.trim())) continue;
+        const cleaned = line
+          .replace(/\r/g, '')
+          .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
+          .trim();
+        if (!cleaned || cleaned === '[J') continue;
         if (this.bridge._firmwareUploadInProgress) {
           if (
             /ERROR:|Ctrl-C|CALLBACK|Execution Interrupted|New interpreter error|^\s*\^/.test(
@@ -259,7 +276,7 @@ export class CompanionApp extends EventEmitter {
             continue;
           }
         }
-        this.log('device', line);
+        this.log('device', cleaned);
       }
     });
 
@@ -267,6 +284,16 @@ export class CompanionApp extends EventEmitter {
       if (evt.action === 'restore') {
         await this.syncEngine.notifyPresyncRestored();
         this.log('sync', 'Pre-sync data restored on Pip-Boy (companion was disconnected)');
+        return;
+      }
+
+      if (evt.action === 'torch') {
+        if (this.pipeClient.connected) {
+          this.pipeClient.send(evt.state ? 'TORCH ON' : 'TORCH OFF');
+          this.log('sync', `Pip-Boy → game: flashlight ${evt.state ? 'on' : 'off'}`);
+        } else if (this._companionPatchInstalled) {
+          this.log('warn', 'Pip-Boy flashlight toggle ignored (game not connected)');
+        }
         return;
       }
 
