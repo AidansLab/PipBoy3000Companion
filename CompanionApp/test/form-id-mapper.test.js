@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { FormIdMapper } from '../src/form-id-mapper.js';
+import { FormIdMapper, formatGameFormId } from '../src/form-id-mapper.js';
 
 const SAMPLE_LOAD_ORDER = [
   { index: 0, name: 'FalloutNV.esm' },
@@ -78,5 +78,12 @@ describe('FormIdMapper load-order remapping', () => {
     const mapper = new FormIdMapper();
     assert.equal(mapper.setLoadOrder(SAMPLE_LOAD_ORDER), true);
     assert.equal(mapper.setLoadOrder(SAMPLE_LOAD_ORDER), false);
+  });
+});
+
+describe('formatGameFormId', () => {
+  it('formats numeric form IDs as 0x-prefixed hex for the game pipe', () => {
+    assert.equal(formatGameFormId(0x05000a09), '0x05000a09');
+    assert.equal(formatGameFormId('0x09000867'), '0x09000867');
   });
 });

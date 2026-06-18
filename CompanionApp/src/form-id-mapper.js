@@ -66,6 +66,13 @@ function buildFormId(modIndex, localId) {
   return (((modIndex & 0xff) << 24) | (localId & 0x00ffffff)) >>> 0;
 }
 
+/** Format a form ID for the game plugin pipe (always 0x + 8 hex digits). */
+function formatGameFormId(formId) {
+  const parsed = parseFormId(formId);
+  if (parsed === null) return String(formId);
+  return '0x' + parsed.toString(16).padStart(8, '0');
+}
+
 // Item type categories matching the game engine's record types
 const ITEM_CATEGORIES = [
   'WEAP',  // Weapons
@@ -331,6 +338,7 @@ export {
   normalizePluginName,
   parseFormId,
   buildFormId,
+  formatGameFormId,
   pipboyHighByteForPlugin,
 };
 export default FormIdMapper;

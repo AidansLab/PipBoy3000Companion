@@ -14,7 +14,7 @@ import { createInterface } from 'readline';
 import { SerialBridge } from './serial-bridge.js';
 import { SyncEngine } from './sync-engine.js';
 import { PipeClient } from './pipe-client.js';
-import { FormIdMapper } from './form-id-mapper.js';
+import { FormIdMapper, formatGameFormId } from './form-id-mapper.js';
 import { PRESYNC_RESTORE_HINT, COMPANION_PATCH_REQUIRED_MSG } from './app-core.js';
 
 // ─── ANSI Color Helpers ────────────────────────────────────────────────────────
@@ -220,16 +220,21 @@ async function main() {
 
     const gameMode = syncEngine.gameMode || 'FNV';
     const gameFormId = mapper.resolveToGame(evt.formId, gameMode);
+    const pipeFormId = formatGameFormId(gameFormId);
 
     // An AID use already decremented the device's local count — make sure the
     // sync engine doesn't echo the game's matching decrement back to it
     if (evt.action === 'use') {
-      syncEngine.notifyDeviceConsumed(gameFormId);
+      syncEngine.notifyDeviceConsumed(pipeFormId);
     }
 
     if (pipeClient.connected) {
-      pipeClient.send(`${evt.action.toUpperCase()} ${gameFormId}`);
-      logSync(`Pip-Boy → game: ${evt.action} ${evt.category} ${gameFormId}`);
+      pipeClient.send(`${evt.action.toUpperCase()} ${pipeFormId}`);
+      if (pipeFormId.toLowerCase() !== String(evt.formId).toLowerCase()) {
+        logSync(`Pip-Boy → game: ${evt.action} ${evt.category} ${evt.formId} → ${pipeFormId}`);
+      } else {
+        logSync(`Pip-Boy → game: ${evt.action} ${evt.category} ${pipeFormId}`);
+      }
     } else {
       logWarn(`Pip-Boy ${evt.action} ${evt.category} ${gameFormId} ignored (game not connected)`);
     }

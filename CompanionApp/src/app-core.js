@@ -8,7 +8,7 @@ import { EventEmitter } from 'events';
 import { SerialBridge } from './serial-bridge.js';
 import { SyncEngine } from './sync-engine.js';
 import { PipeClient } from './pipe-client.js';
-import { FormIdMapper } from './form-id-mapper.js';
+import { FormIdMapper, formatGameFormId } from './form-id-mapper.js';
 
 export const PRESYNC_RESTORE_HINT =
   'To restore pre-sync data, disconnect the companion app, then go to Settings>User>Restore pre-sync data';
@@ -272,14 +272,19 @@ export class CompanionApp extends EventEmitter {
 
       const gameMode = this.syncEngine.gameMode || 'FNV';
       const gameFormId = this.mapper.resolveToGame(evt.formId, gameMode);
+      const pipeFormId = formatGameFormId(gameFormId);
 
       if (evt.action === 'use') {
-        this.syncEngine.notifyDeviceConsumed(gameFormId);
+        this.syncEngine.notifyDeviceConsumed(pipeFormId);
       }
 
       if (this.pipeClient.connected) {
-        this.pipeClient.send(`${evt.action.toUpperCase()} ${gameFormId}`);
-        this.log('sync', `Pip-Boy → game: ${evt.action} ${evt.category} ${gameFormId}`);
+        this.pipeClient.send(`${evt.action.toUpperCase()} ${pipeFormId}`);
+        if (pipeFormId.toLowerCase() !== String(evt.formId).toLowerCase()) {
+          this.log('sync', `Pip-Boy → game: ${evt.action} ${evt.category} ${evt.formId} → ${pipeFormId}`);
+        } else {
+          this.log('sync', `Pip-Boy → game: ${evt.action} ${evt.category} ${pipeFormId}`);
+        }
       } else if (this._companionPatchInstalled) {
         this.log('warn', `Pip-Boy ${evt.action} ${evt.category} ${gameFormId} ignored (game not connected)`);
       }
