@@ -10,7 +10,16 @@
   const isCmode = () => typeof cmode !== 'undefined' && cmode;
   let active = player.getav('ammoActive'),
     usable = player.getav('ammoUsable') || [];
-  const isUsable = (id) => !usable.length || usable.indexOf(id) >= 0;
+  const getEquippedWeap = () => player.getav('equippedweap') || 0;
+  // Match in-game: no weapon, grenade, or melee → all ammo greyed out. Only a
+  // gun with a non-empty ammoUsable list allows selecting matching ammo types.
+  const isUsable = (id) => {
+    if (!isCmode()) return !0;
+    const eq = getEquippedWeap();
+    if (!eq || !usable.length) return !1;
+    return usable.indexOf(id) >= 0;
+  };
+  const shouldDimAmmo = (id) => isCmode() && !isUsable(id);
   const scroller = Pip.createScroller({
     hasEquipStates: !0,
     itemCount: inv.count,
@@ -21,7 +30,7 @@
       (it.cnt > 1 && (item.txt = `${item.txt} (${it.cnt})`),
         isCmode() &&
           (active != null && it.id === active && (item.activ = !0),
-          usable.length && usable.indexOf(it.id) < 0 && (item.dim = !0)));
+          shouldDimAmmo(it.id) && (item.dim = !0)));
       return item;
     },
     width: 185,

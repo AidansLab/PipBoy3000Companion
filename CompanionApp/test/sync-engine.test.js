@@ -326,6 +326,39 @@ describe('SyncEngine', () => {
       assert.ok(!bridge.sentCommands.some(c => c.includes("setav('ammoUsable'")));
     });
 
+    it('should re-push weapon ammo when equipped weapon changes to ammoless', async () => {
+      const settle = () => new Promise((r) => setTimeout(r, 550));
+
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: {
+          name: 'Test',
+          equippedweap: 0,
+          weaponammo: { current: 0, usable: [] },
+        },
+        inventory: [],
+        perks: [],
+      });
+      await settle();
+
+      bridge.sentCommands.length = 0;
+
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: {
+          name: 'Test',
+          equippedweap: '0x00004330',
+          weaponammo: { current: 0, usable: [] },
+        },
+        inventory: [],
+        perks: [],
+      });
+      await settle();
+
+      assert.ok(bridge.sentCommands.some((c) => c.includes("setav('ammoUsable', [], !1)")));
+      assert.ok(bridge.sentCommands.some((c) => c.includes("setav('ammoActive', 0, !1)")));
+    });
+
     it('should re-push weapon ammo when refresh is requested after reconnect', async () => {
       const settle = () => new Promise((r) => setTimeout(r, 550));
       const weaponammo = { current: 5, usable: [5, 6, 7] };

@@ -1054,10 +1054,13 @@ export class SyncEngine extends EventEmitter {
     const prevAmmo = this._toFormIdInt(prevWa.current) ?? 0;
     const usable = this._normalizeAmmoList(wa.usable);
     const prevUsable = this._normalizeAmmoList(prevWa.usable);
+    const currentWeapon = this._toFormIdInt(player.equippedweap) ?? 0;
+    const prevWeapon = this._toFormIdInt(prevPlayer.equippedweap) ?? 0;
+    const weaponChanged = currentWeapon !== prevWeapon;
     const force = this._needsWeaponAmmoRefresh;
     if (force) this._needsWeaponAmmoRefresh = false;
 
-    if (force) {
+    if (force || weaponChanged) {
       commands.push(`player.setav('ammoActive', ${currentAmmo}, !1)`);
       commands.push(`player.setav('ammoUsable', [${usable.join(',')}], !1)`);
     } else {
