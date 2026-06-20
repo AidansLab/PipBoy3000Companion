@@ -147,9 +147,10 @@ static std::vector<std::string> g_commandQueue;
 
 static NVSEScriptInterface *g_scriptInterface = nullptr;
 
-// xNVSE per-plugin control disable — does not corrupt vanilla DisablePlayerControls
-// stacks used by mods such as MrShersh Functional Backpack.
-// Bitmask 127 = movement | looking | pipboy | fighting | POV | rollover | sneak.
+// xNVSE per-plugin control disable — does not corrupt vanilla
+// DisablePlayerControls stacks used by mods such as MrShersh Functional
+// Backpack. Bitmask 127 = movement | looking | pipboy | fighting | POV |
+// rollover | sneak.
 static const char *kSyncDisableControlsCmd = "DisablePlayerControlsAltEx 127";
 static const char *kSyncEnableControlsCmd = "EnablePlayerControlsAltEx 127";
 
@@ -178,10 +179,11 @@ static void PipBoyLogInit() {
     return;
   SYSTEMTIME st;
   GetLocalTime(&st);
-  fprintf(g_logFile,
-          "\n=== FalloutPipBoySync v%d started %04d-%02d-%02d %02d:%02d:%02d ===\n",
-          PLUGIN_VERSION, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute,
-          st.wSecond);
+  fprintf(
+      g_logFile,
+      "\n=== FalloutPipBoySync v%d started %04d-%02d-%02d %02d:%02d:%02d ===\n",
+      PLUGIN_VERSION, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute,
+      st.wSecond);
   fflush(g_logFile);
 #endif
 }
@@ -224,8 +226,9 @@ static void PipBoyLogSnapshotOut(const std::string &snapshot) {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MENU / MOD COMPATIBILITY HELPERS
-// Functional Backpack opens a teammate container + uses vanilla DisablePlayerControls
-// with partial flags. Avoid interfering while those menus/scripts are active.
+// Functional Backpack opens a teammate container + uses vanilla
+// DisablePlayerControls with partial flags. Avoid interfering while those
+// menus/scripts are active.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 static UInt32 GetOpenMenuMask() {
@@ -282,8 +285,9 @@ static bool IsPipBoyMenuOpen() {
          InterfaceManager::IsMenuVisible(kMenuType_Map);
 }
 
-// ExtraHealth::health is current hit points; TESHealthForm::health is the maximum.
-// In-game condition is current / max * 100 (matches NVSE GetCurrentHealth / AdjustHealth).
+// ExtraHealth::health is current hit points; TESHealthForm::health is the
+// maximum. In-game condition is current / max * 100 (matches NVSE
+// GetCurrentHealth / AdjustHealth).
 static int GetInventoryItemConditionPct(TESForm *baseForm,
                                         ExtraDataList *extraDataList) {
   TESHealthForm *healthForm = DYNAMIC_CAST(baseForm, TESForm, TESHealthForm);
@@ -377,8 +381,8 @@ static int EvalReputationValue(UInt32 repFormId, const char *repEditorId,
   double v = 0.0;
 
   // Console/GECK use the REPU form ID (e.g. GetReputation 001558E6 0).
-  _snprintf_s(expr, _TRUNCATE, "GetReputation %08X %d",
-              repFormId & 0x00FFFFFF, fameOrInfamy);
+  _snprintf_s(expr, _TRUNCATE, "GetReputation %08X %d", repFormId & 0x00FFFFFF,
+              fameOrInfamy);
   if (EvalExprNumber(expr, &v))
     goto done;
 
@@ -633,25 +637,23 @@ static bool IsPipBoyLightOn(PlayerCharacter *player) {
   if (!pipBoyLight)
     return false;
 
-  return ThisStdCall<bool>(0x822B90, &player->magicTarget, &pipBoyLight->magicItem,
-                           1);
+  return ThisStdCall<bool>(0x822B90, &player->magicTarget,
+                           &pipBoyLight->magicItem, 1);
 }
 
-static SpellItem *GetPipBoyLightSpell() {
-  return *(SpellItem **)0x11C358C;
-}
+static SpellItem *GetPipBoyLightSpell() { return *(SpellItem **)0x11C358C; }
 
 #if defined(_M_IX86)
-// Globals for the asm toggle — do NOT read turnON from the stack inside the naked
-// function; calling it from __try shifts the frame and breaks OFF (UI refresh was
-// re-enabling the light with a garbage edx value).
+// Globals for the asm toggle — do NOT read turnON from the stack inside the
+// naked function; calling it from __try shifts the frame and breaks OFF (UI
+// refresh was re-enabling the light with a garbage edx value).
 static UInt32 s_turnONForToggle = 0;
 static void *s_pipboyManagerForToggle = nullptr;
 
-// Engine-native Pip-Boy light toggle — copied from JIP LN NVSE TogglePipBoyLight.
-__declspec(naked) static void __fastcall
-EngineTogglePipBoyLight(PlayerCharacter *thePlayer, SpellItem *pipBoyLight,
-                        UInt32 turnON) {
+// Engine-native Pip-Boy light toggle — copied from JIP LN NVSE
+// TogglePipBoyLight.
+__declspec(naked) static void __fastcall EngineTogglePipBoyLight(
+    PlayerCharacter *thePlayer, SpellItem *pipBoyLight, UInt32 turnON) {
   __asm {
     push 0
     cmp dword ptr s_turnONForToggle, 0
@@ -827,14 +829,16 @@ std::string BuildPlayerSnapshot() {
     json.keyInt("hp", (int)ceilf(curHP));
     json.keyFloat("maxHP", maxHP);
 
-    // Action Points — floor to match game HUD; fractional regen ignored for sync.
+    // Action Points — floor to match game HUD; fractional regen ignored for
+    // sync.
     float maxAP = player->avOwner.Fn_01(kAV_ActionPoints);
     float curAP = player->avOwner.Fn_03(kAV_ActionPoints);
     json.keyInt("ap", (int)floorf(curAP));
     json.keyInt("maxAP", (int)(maxAP + 0.5f));
 
     // Carry Weight
-    // maxWg is the max carry weight AV (includes Strong Back / implants / buffs).
+    // maxWg is the max carry weight AV (includes Strong Back / implants /
+    // buffs).
     float maxWg = player->avOwner.Fn_01(kAV_CarryWeight);
     json.keyInt("maxWg", (int)(maxWg + 0.5f));
     // wg is the player's actual carried inventory weight, taken straight from
@@ -1160,31 +1164,90 @@ static const char kSyncWaitOverlayXml[] =
     "<visible> &true; </visible>"
     "<depth> 2500 </depth>"
     "<locus> &true; </locus>"
+    // Center on screen
     "<x><copy src=\"screen\" trait=\"width\"/>"
     "<sub src=\"me\" trait=\"width\"/><div>2</div></x>"
     "<y><copy src=\"screen\" trait=\"height\"/>"
     "<sub src=\"me\" trait=\"height\"/><div>2</div></y>"
-    "<width> 600 </width>"
-    "<height> 200 </height>"
-    "<systemcolor> &hudmain; </systemcolor>"
+    "<width> 500 </width>"
+    "<height> 180 </height>"
     "<target> 0 </target>"
+    // Background: inset 10px on each side from parent edges
+    "<image name=\"sync_background\">"
+    "<filename> Interface\\Shared\\solid.dds </filename>"
+    "<red> 20 </red>"
+    "<green> 20 </green>"
+    "<blue> 20 </blue>"
+    "<alpha> 210 </alpha>"
+    "<x> 10 </x>"
+    "<y> 10 </y>"
+    "<width><copy src=\"parent\" trait=\"width\"/><sub>20</sub></width>"
+    "<height><copy src=\"parent\" trait=\"height\"/><sub>20</sub></height>"
+    "<depth> 1 </depth>"
+    "</image>"
+    // Border top: x=10, y=10, spans full inner width
+    "<image name=\"sync_border_top\">"
+    "<filename> Interface\\Shared\\solid.dds </filename>"
+    "<systemcolor> &hudmain; </systemcolor>"
+    "<x> 10 </x>"
+    "<y> 10 </y>"
+    "<width><copy src=\"parent\" trait=\"width\"/><sub>20</sub></width>"
+    "<height> 2 </height>"
+    "<depth> 2 </depth>"
+    "</image>"
+    // Border bottom: y = parent.height - 12 (10px inset + 2px border)
+    "<image name=\"sync_border_bottom\">"
+    "<filename> Interface\\Shared\\solid.dds </filename>"
+    "<systemcolor> &hudmain; </systemcolor>"
+    "<x> 10 </x>"
+    "<y><copy src=\"parent\" trait=\"height\"/><sub>12</sub></y>"
+    "<width><copy src=\"parent\" trait=\"width\"/><sub>20</sub></width>"
+    "<height> 2 </height>"
+    "<depth> 2 </depth>"
+    "</image>"
+    // Border left: x=10, y=10, full inner height
+    "<image name=\"sync_border_left\">"
+    "<filename> Interface\\Shared\\solid.dds </filename>"
+    "<systemcolor> &hudmain; </systemcolor>"
+    "<x> 10 </x>"
+    "<y> 10 </y>"
+    "<width> 2 </width>"
+    "<height><copy src=\"parent\" trait=\"height\"/><sub>20</sub></height>"
+    "<depth> 2 </depth>"
+    "</image>"
+    // Border right: x = parent.width - 12 (10px inset + 2px border)
+    "<image name=\"sync_border_right\">"
+    "<filename> Interface\\Shared\\solid.dds </filename>"
+    "<systemcolor> &hudmain; </systemcolor>"
+    "<x><copy src=\"parent\" trait=\"width\"/><sub>12</sub></x>"
+    "<y> 10 </y>"
+    "<width> 2 </width>"
+    "<height><copy src=\"parent\" trait=\"height\"/><sub>20</sub></height>"
+    "<depth> 2 </depth>"
+    "</image>"
+    // Title: x=center, y=height*2/9 (~40px for h=180, scales with height)
     "<text name=\"sync_title\">"
     "<string> Pip-Boy Sync </string>"
     "<x><copy src=\"parent\" trait=\"width\"/><div>2</div></x>"
-    "<y> 24 </y>"
+    "<y><copy src=\"parent\" trait=\"height\"/><mul>2</mul><div>9</div></y>"
     "<font> 1 </font>"
     "<justify> &center; </justify>"
-    "<width> 600 </width>"
+    "<systemcolor> &hudmain; </systemcolor>"
+    "<width><copy src=\"parent\" trait=\"width\"/></width>"
+    "<depth> 3 </depth>"
     "</text>"
+    // Body: x=center, y=height/2 (=90px for h=180, scales with height)
     "<text name=\"sync_body\">"
     "<string> Please wait while your Pip-Boy syncs with the companion app. "
     "</string>"
     "<x><copy src=\"parent\" trait=\"width\"/><div>2</div></x>"
-    "<y> 72 </y>"
+    "<y><copy src=\"parent\" trait=\"height\"/><div>2</div></y>"
     "<font> 2 </font>"
     "<justify> &center; </justify>"
-    "<width> 600 </width>"
-    "<wrapwidth> 560 </wrapwidth>"
+    "<systemcolor> &hudmain; </systemcolor>"
+    "<width><copy src=\"parent\" trait=\"width\"/></width>"
+    "<wrapwidth><copy src=\"parent\" trait=\"width\"/><sub>40</sub></wrapwidth>"
+    "<depth> 3 </depth>"
     "</text>"
     "</rect>";
 
@@ -1192,7 +1255,8 @@ static bool g_syncControlsDisabled = false;
 static bool g_syncOverlayInjected = false;
 // Frames to wait after a save/load before touching HUD tiles (HUD is rebuilt).
 static UInt32 g_syncHudReadyDelay = 0;
-// Deferred HUD refresh after sync unlock (DisablePlayerControls hides HUD tiles).
+// Deferred HUD refresh after sync unlock (DisablePlayerControls hides HUD
+// tiles).
 static UInt32 g_syncHudRefreshDelay = 0;
 
 static bool IsSafeForHudTileAccess() {
@@ -1235,8 +1299,9 @@ static void RefreshHudAfterSyncUnlock() {
     return;
   if (InterfaceManager::IsMenuVisible(kMenuType_Loading))
     return;
-  // DisablePlayerControlsAltEx (movement flag) forces kHUDState_PlayerDisabledControls.
-  // Re-enabling via script does not always recalculate visibility — Tab/Pip-Boy does.
+  // DisablePlayerControlsAltEx (movement flag) forces
+  // kHUDState_PlayerDisabledControls. Re-enabling via script does not always
+  // recalculate visibility — Tab/Pip-Boy does.
   HUDMainMenu::UpdateVisibilityState(HUDMainMenu::kHUDState_RECALCULATE);
   PipBoyLog("SYNC", "HUD visibility recalculated");
 }
