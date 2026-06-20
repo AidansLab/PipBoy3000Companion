@@ -73,6 +73,10 @@ global.cmode = !1;
       if (void 0 !== wg) p.wg = wg;
       const maxWg = this.getav('maxwg');
       if (void 0 !== maxWg) p.maxWg = maxWg;
+      const ap = this.getav('ap');
+      if (void 0 !== ap) p.ap = ap;
+      const maxAP = this.getav('maxap');
+      if (void 0 !== maxAP) p.maxAP = maxAP;
     }
     return p;
   };
@@ -100,6 +104,32 @@ global.cmode = !1;
     }
   };
 
+  // Stock InvFile.add() clips every stack to 999; companion sync allows 9999 (stock ADDITEM UI).
+  const INV_MAX_CNT = 9999;
+  const CAPS_FORM_ID = 15;
+  if (typeof InvFile !== 'undefined' && !InvFile._companionMaxCntPatched) {
+    InvFile._companionMaxCntPatched = !0;
+    InvFile.prototype.add = function (dat) {
+      if (!('id' in dat)) throw new Error('Cannot add item without an ID');
+      const newBuf = new ArrayBuffer(this.buf.byteLength + 8);
+      E.mapInPlace(this.buf, newBuf);
+      this.buf = newBuf;
+      this.count++;
+      this.set(this.count - 1, {
+        id: dat.id,
+        cnt: E.clip(dat.cnt, 1, INV_MAX_CNT),
+        cnd: dat.cnd || 100,
+        fl: dat.fl || 0,
+      });
+      this._requiresSort = !0;
+    };
+    const _invSet = InvFile.prototype.set;
+    InvFile.prototype.set = function (i, dat) {
+      if (dat && 'cnt' in dat) dat.cnt = E.clip(dat.cnt, 1, INV_MAX_CNT);
+      return _invSet.call(this, i, dat);
+    };
+  }
+
   Player.prototype.additemhealthpercent = function (id, cnt, cnd) {
     if (cnt <= 0) return;
     // A form ID belongs to exactly one category, so stop opening DataFiles as
@@ -120,8 +150,11 @@ global.cmode = !1;
           let it = inv.get(inx);
           ((it.cnt += cnt), inv.set(inx, it));
         } else inv.add({ id: id, cnt: cnt, cnd: cnd });
-        if (onMenu) Pip.emit('scroller', 'count', inv.count);
-        else inv.sync();
+        if (onMenu) {
+          Pip.emit('scroller', 'count', inv.count);
+          if (v === 'MISC' && id === CAPS_FORM_ID && Pip.MODE === 1 && Pip.renderHeader)
+            Pip.renderHeader();
+        } else inv.sync();
         return !0;
       } catch (e) {}
     }
@@ -208,6 +241,63 @@ global.cmode = !1;
   };
 
   companionClearCmodeOnUsbDisconnect();
+
+  // Companion header fixes: STATS AP from game sync; ITEMS caps from in-memory inv.
+  function patchCompanionHeaders() {
+    if (Pip._companionHeadersPatched || typeof Pip.getMode !== 'function')
+      return !1;
+    Pip._companionHeadersPatched = !0;
+    const _getMode = Pip.getMode;
+    Pip.getMode = function (mode) {
+      const m = _getMode.apply(this, arguments);
+      if (mode === 0 && m && typeof m.header === 'function') {
+        const _header = m.header;
+        m.header = function () {
+          const rows = _header.call(this);
+          if (typeof cmode !== 'undefined' && cmode) {
+            const USER = player.getinfo();
+            if (USER.ap !== undefined) {
+              for (let ri = 0; ri < rows.length; ri++) {
+                if (rows[ri][0] === 'AP') {
+                  rows[ri][1] = `${USER.ap}/${USER.maxAP}`;
+                  break;
+                }
+              }
+            }
+          }
+          return rows;
+        };
+      }
+      if (mode === 1 && m && typeof m.header === 'function') {
+        const _header = m.header;
+        m.header = function () {
+          const rows = _header.call(this);
+          if (Pip.inv && Pip.CURRENT && Pip.CURRENT.id === 'MISC') {
+            let caps = 0;
+            const capI = Pip.inv.indexOf(CAPS_FORM_ID);
+            if (capI >= 0) {
+              const capV = Pip.inv.get(capI);
+              if (capV) caps = capV.cnt;
+            }
+            for (let ri = 0; ri < rows.length; ri++) {
+              if (rows[ri][0] === 'Caps') {
+                rows[ri][1] = String(caps).padStart(5, ' ');
+                break;
+              }
+            }
+          }
+          return rows;
+        };
+      }
+      return m;
+    };
+    return !0;
+  }
+  if (!patchCompanionHeaders()) {
+    const headersPatchTimer = setInterval(function () {
+      if (patchCompanionHeaders()) clearInterval(headersPatchTimer);
+    }, 50);
+  }
 
   // In companion mode (cmode), long-press ITEMS toggles the torch LED only — never
   // the full-screen TORCH overlay (torchMode Screen / LED+Screen). User-initiated

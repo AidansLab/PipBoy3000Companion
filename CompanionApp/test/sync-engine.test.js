@@ -76,7 +76,7 @@ describe('SyncEngine', () => {
       assert.ok(addCmd.includes('5'));
     });
 
-    it('should use additemhealthpercent for items with degraded condition', async () => {
+    it('should set cnd for items with degraded condition', async () => {
       await engine.processSnapshot({
         game: 'F3',
         player: { name: 'Test' },
@@ -86,9 +86,23 @@ describe('SyncEngine', () => {
         perks: [],
       });
 
-      const cmd = bridge.sentCommands.find(c => c.includes('additemhealthpercent'));
-      assert.ok(cmd, 'Should use additemhealthpercent for degraded items');
-      assert.ok(cmd.includes('75'));
+      const cmd = bridge.sentCommands.find(c => c.includes('cnd=75'));
+      assert.ok(cmd, 'Should set cnd=75 for degraded items');
+      assert.ok(cmd.includes('id=17186'));
+    });
+
+    it('should normalize 0–1 game condition to 0–100 percent', async () => {
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: { name: 'Test' },
+        inventory: [
+          { formId: '0x00004322', type: 'WEAP', count: 1, condition: 0.75 },
+        ],
+        perks: [],
+      });
+
+      const cmd = bridge.sentCommands.find(c => c.includes('cnd=75'));
+      assert.ok(cmd, 'Should convert 0.75 to cnd=75');
     });
 
     it('should add perks on first sync', async () => {
@@ -232,6 +246,31 @@ describe('SyncEngine', () => {
       await settle();
 
       assert.ok(!bridge.sentCommands.some(c => c.includes("setav('wg'")));
+    });
+
+    it('should copy action points from the game when they change', async () => {
+      const settle = () => new Promise((r) => setTimeout(r, 550));
+
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: { name: 'Test', ap: 80, maxAP: 95 },
+        inventory: [],
+        perks: [],
+      });
+      await settle();
+
+      bridge.sentCommands.length = 0;
+
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: { name: 'Test', ap: 65, maxAP: 95 },
+        inventory: [],
+        perks: [],
+      });
+      await settle();
+
+      assert.ok(bridge.sentCommands.some(c => c.includes("setav('ap', 65, !1)")));
+      assert.ok(bridge.sentCommands.some(c => c.includes('renderHeader')));
     });
 
     it('should push usable ammo and the loaded ammo type to the device', async () => {

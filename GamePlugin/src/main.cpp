@@ -21,8 +21,10 @@
  * The companion app connects to this pipe to receive player data.
  */
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdarg>
 #include <iomanip>
 #include <mutex>
 #include <set>
@@ -55,7 +57,12 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #define PLUGIN_NAME "FalloutPipBoySync"
-#define PLUGIN_VERSION 16
+#define PLUGIN_VERSION 21
+
+// Write FalloutPipBoySync.log beside this DLL (Data/NVSE/Plugins/).
+#ifndef PIPBOY_VERBOSE_LOG
+#define PIPBOY_VERBOSE_LOG 1
+#endif
 
 // How often to snapshot player state (in milliseconds)
 #define SNAPSHOT_INTERVAL_MS 250
@@ -139,6 +146,169 @@ static std::mutex g_commandMutex;
 static std::vector<std::string> g_commandQueue;
 
 static NVSEScriptInterface *g_scriptInterface = nullptr;
+
+// xNVSE per-plugin control disable — does not corrupt vanilla DisablePlayerControls
+// stacks used by mods such as MrShersh Functional Backpack.
+// Bitmask 127 = movement | looking | pipboy | fighting | POV | rollover | sneak.
+static const char *kSyncDisableControlsCmd = "DisablePlayerControlsAltEx 127";
+static const char *kSyncEnableControlsCmd = "EnablePlayerControlsAltEx 127";
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// VERBOSE LOGGING
+// ═══════════════════════════════════════════════════════════════════════════════
+
+static std::mutex g_logMutex;
+static FILE *g_logFile = nullptr;
+static UInt32 g_lastLoggedMenuMask = 0xFFFFFFFF;
+static DWORD g_lastSnapshotSkipLogTime = 0;
+
+static void PipBoyLogInit() {
+#if PIPBOY_VERBOSE_LOG
+  if (g_logFile)
+    return;
+  char path[MAX_PATH] = {};
+  if (!g_hModule || !GetModuleFileNameA(g_hModule, path, MAX_PATH))
+    return;
+  char *slash = strrchr(path, '\\');
+  if (slash)
+    *(slash + 1) = '\0';
+  strcat_s(path, "FalloutPipBoySync.log");
+  g_logFile = fopen(path, "a");
+  if (!g_logFile)
+    return;
+  SYSTEMTIME st;
+  GetLocalTime(&st);
+  fprintf(g_logFile,
+          "\n=== FalloutPipBoySync v%d started %04d-%02d-%02d %02d:%02d:%02d ===\n",
+          PLUGIN_VERSION, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute,
+          st.wSecond);
+  fflush(g_logFile);
+#endif
+}
+
+static void PipBoyLog(const char *level, const char *fmt, ...) {
+#if PIPBOY_VERBOSE_LOG
+  {
+    std::lock_guard<std::mutex> lock(g_logMutex);
+    if (!g_logFile)
+      PipBoyLogInit();
+    if (!g_logFile)
+      return;
+    DWORD ms = GetTickCount();
+    fprintf(g_logFile, "[%lu.%03lu][%s] ", ms / 1000, ms % 1000, level);
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(g_logFile, fmt, args);
+    va_end(args);
+    fputc('\n', g_logFile);
+    fflush(g_logFile);
+  }
+#endif
+  (void)level;
+  (void)fmt;
+}
+
+static void PipBoyLogSnapshotOut(const std::string &snapshot) {
+#if PIPBOY_VERBOSE_LOG
+  PipBoyLog("PIPE-OUT", "snapshot %zu bytes", snapshot.size());
+  if (snapshot.empty())
+    return;
+  const size_t kChunk = 2000;
+  for (size_t off = 0; off < snapshot.size(); off += kChunk) {
+    const size_t len = (std::min)(kChunk, snapshot.size() - off);
+    std::string chunk = snapshot.substr(off, len);
+    PipBoyLog("PIPE-OUT", "snapshot[%04zu]: %s", off, chunk.c_str());
+  }
+#endif
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MENU / MOD COMPATIBILITY HELPERS
+// Functional Backpack opens a teammate container + uses vanilla DisablePlayerControls
+// with partial flags. Avoid interfering while those menus/scripts are active.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+static UInt32 GetOpenMenuMask() {
+  UInt32 mask = 0;
+  if (InterfaceManager::IsMenuVisible(kMenuType_Message))
+    mask |= 1u << 0;
+  if (InterfaceManager::IsMenuVisible(kMenuType_Inventory))
+    mask |= 1u << 1;
+  if (InterfaceManager::IsMenuVisible(kMenuType_Stats))
+    mask |= 1u << 2;
+  if (InterfaceManager::IsMenuVisible(kMenuType_Map))
+    mask |= 1u << 3;
+  if (InterfaceManager::IsMenuVisible(kMenuType_Container))
+    mask |= 1u << 4;
+  if (InterfaceManager::IsMenuVisible(kMenuType_Barter))
+    mask |= 1u << 5;
+  if (InterfaceManager::IsMenuVisible(kMenuType_Repair))
+    mask |= 1u << 6;
+  if (InterfaceManager::IsMenuVisible(kMenuType_SleepWait))
+    mask |= 1u << 7;
+  if (InterfaceManager::IsMenuVisible(kMenuType_LevelUp))
+    mask |= 1u << 8;
+  if (InterfaceManager::IsMenuVisible(kMenuType_Loading))
+    mask |= 1u << 9;
+  return mask;
+}
+
+static void LogMenuMaskIfChanged() {
+  UInt32 mask = GetOpenMenuMask();
+  if (mask == g_lastLoggedMenuMask)
+    return;
+  PipBoyLog("MENU",
+            "mask=0x%03X msg=%d pipinv=%d stats=%d map=%d container=%d "
+            "barter=%d repair=%d sleep=%d levelup=%d loading=%d",
+            mask, !!(mask & (1u << 0)), !!(mask & (1u << 1)),
+            !!(mask & (1u << 2)), !!(mask & (1u << 3)), !!(mask & (1u << 4)),
+            !!(mask & (1u << 5)), !!(mask & (1u << 6)), !!(mask & (1u << 7)),
+            !!(mask & (1u << 8)), !!(mask & (1u << 9)));
+  g_lastLoggedMenuMask = mask;
+}
+
+static bool IsModGameplayMenuOpen() {
+  return InterfaceManager::IsMenuVisible(kMenuType_Container) ||
+         InterfaceManager::IsMenuVisible(kMenuType_Barter) ||
+         InterfaceManager::IsMenuVisible(kMenuType_Repair) ||
+         InterfaceManager::IsMenuVisible(kMenuType_Message) ||
+         InterfaceManager::IsMenuVisible(kMenuType_SleepWait) ||
+         InterfaceManager::IsMenuVisible(kMenuType_LevelUp);
+}
+
+static bool IsPipBoyMenuOpen() {
+  return InterfaceManager::IsMenuVisible(kMenuType_Inventory) ||
+         InterfaceManager::IsMenuVisible(kMenuType_Stats) ||
+         InterfaceManager::IsMenuVisible(kMenuType_Map);
+}
+
+// ExtraHealth::health is current hit points; TESHealthForm::health is the maximum.
+// In-game condition is current / max * 100 (matches NVSE GetCurrentHealth / AdjustHealth).
+static int GetInventoryItemConditionPct(TESForm *baseForm,
+                                        ExtraDataList *extraDataList) {
+  TESHealthForm *healthForm = DYNAMIC_CAST(baseForm, TESForm, TESHealthForm);
+  if (!healthForm)
+    return 100;
+
+  const float maxHealth = healthForm->health;
+  if (maxHealth <= 0.0f)
+    return 100;
+
+  float currentHealth = maxHealth;
+  if (extraDataList) {
+    ExtraHealth *xHealth =
+        (ExtraHealth *)extraDataList->GetByType(kExtraData_Health);
+    if (xHealth)
+      currentHealth = xHealth->health;
+  }
+
+  if (currentHealth <= 0.0f)
+    return 0;
+  if (currentHealth >= maxHealth)
+    return 100;
+
+  return (int)(currentHealth / maxHealth * 100.0f + 0.5f);
+}
 
 // Pip-Boy GENERAL screen order (must match FW/GENERAL-decoded.js and REP.IMG).
 struct FactionRepDef {
@@ -657,22 +827,20 @@ std::string BuildPlayerSnapshot() {
     json.keyInt("hp", (int)ceilf(curHP));
     json.keyFloat("maxHP", maxHP);
 
-    // Action Points
+    // Action Points — floor to match game HUD; fractional regen ignored for sync.
     float maxAP = player->avOwner.Fn_01(kAV_ActionPoints);
     float curAP = player->avOwner.Fn_03(kAV_ActionPoints);
-    json.keyFloat("ap", curAP);
-    json.keyFloat("maxAP", maxAP);
+    json.keyInt("ap", (int)floorf(curAP));
+    json.keyInt("maxAP", (int)(maxAP + 0.5f));
 
     // Carry Weight
     // maxWg is the max carry weight AV (includes Strong Back / implants / buffs).
     float maxWg = player->avOwner.Fn_01(kAV_CarryWeight);
     json.keyInt("maxWg", (int)(maxWg + 0.5f));
     // wg is the player's actual carried inventory weight, taken straight from
-    // the engine (AV 46). This is authoritative — it counts every item the
-    // player is carrying, including modded items the Pip-Boy doesn't know about.
-    // Rounded to a whole number so float jitter doesn't spam the pipe/serial.
+    // the engine (AV 46). Truncated (floor) to match the in-game HUD display.
     float curWg = player->avOwner.Fn_03(kAV_InventoryWeight);
-    json.keyInt("wg", (int)(curWg + 0.5f));
+    json.keyInt("wg", (int)floorf(curWg));
 
     // Karma
     float karma = player->avOwner.Fn_03(kAV_Karma);
@@ -861,29 +1029,22 @@ std::string BuildPlayerSnapshot() {
         if (count <= 0)
           continue; // Skip removed items
 
-        // Get item condition (health percentage)
-        float condition = 100.0f;
+        // Item condition: ExtraHealth stores current HP, not a 0–1 fraction.
+        ExtraDataList *stackExtra = nullptr;
         if (entry->extendData) {
-          for (auto extIter = entry->extendData->Begin(); !extIter.End();
-               ++extIter) {
-            auto *extraDataList = extIter.Get();
-            if (extraDataList) {
-              ExtraHealth *healthData =
-                  (ExtraHealth *)extraDataList->GetByType(kExtraData_Health);
-              if (healthData) {
-                condition = healthData->health;
-                break;
-              }
-            }
-          }
+          auto extIter = entry->extendData->Begin();
+          if (!extIter.End())
+            stackExtra = extIter.Get();
         }
+        const int conditionPct =
+            GetInventoryItemConditionPct(baseForm, stackExtra);
 
         json.arrayElement();
         json.beginObject();
         json.keyStr("formId", FormatFormId(formId));
         json.keyStr("type", GetFormTypeString(baseForm->typeID));
         json.keyInt("count", count);
-        json.keyFloat("condition", condition);
+        json.keyInt("condition", conditionPct);
         json.endObject();
       }
     }
@@ -1031,6 +1192,8 @@ static bool g_syncControlsDisabled = false;
 static bool g_syncOverlayInjected = false;
 // Frames to wait after a save/load before touching HUD tiles (HUD is rebuilt).
 static UInt32 g_syncHudReadyDelay = 0;
+// Deferred HUD refresh after sync unlock (DisablePlayerControls hides HUD tiles).
+static UInt32 g_syncHudRefreshDelay = 0;
 
 static bool IsSafeForHudTileAccess() {
   if (g_syncHudReadyDelay > 0)
@@ -1067,13 +1230,32 @@ static bool IsHudReadyForSyncOverlay() {
   return parent && parent->node;
 }
 
+static void RefreshHudAfterSyncUnlock() {
+  if (!InterfaceManager::GetSingleton())
+    return;
+  if (InterfaceManager::IsMenuVisible(kMenuType_Loading))
+    return;
+  // DisablePlayerControlsAltEx (movement flag) forces kHUDState_PlayerDisabledControls.
+  // Re-enabling via script does not always recalculate visibility — Tab/Pip-Boy does.
+  HUDMainMenu::UpdateVisibilityState(HUDMainMenu::kHUDState_RECALCULATE);
+  PipBoyLog("SYNC", "HUD visibility recalculated");
+}
+
+static void RequestHudRefreshAfterSyncUnlock() {
+  if (IsSafeForHudTileAccess())
+    RefreshHudAfterSyncUnlock();
+  g_syncHudRefreshDelay = 3;
+}
+
 static void ResetSyncLockState(bool reenableControls) {
   g_syncHudReadyDelay = 90;
   g_syncOverlayInjected = false;
   if (reenableControls && g_syncControlsDisabled) {
     if (PlayerCharacter *player = PlayerCharacter::GetSingleton())
-      Script::RunScriptLine2("EnablePlayerControls 1 1 1 1 1 1 1", player, true);
+      Script::RunScriptLine2(kSyncEnableControlsCmd, player, true);
+    PipBoyLog("SYNC", "ResetSyncLockState: issued %s", kSyncEnableControlsCmd);
     g_syncControlsDisabled = false;
+    RequestHudRefreshAfterSyncUnlock();
   }
 }
 
@@ -1105,17 +1287,15 @@ static void ShowSyncWaitOverlay() {
     return;
 
   InjectTileXml(parent, kSyncWaitOverlayXml);
-  if (parent->GetChild("PipBoySyncWait"))
+  if (parent->GetChild("PipBoySyncWait")) {
     g_syncOverlayInjected = true;
+    PipBoyLog("SYNC", "Overlay injected");
+  }
 }
 
 static void CloseSyncWaitOverlay() {
   if (InterfaceManager::IsMenuVisible(kMenuType_Loading))
     return;
-
-  // Dismiss any Message menu left open by older plugin versions (ShowMessageBox).
-  if (InterfaceManager::IsMenuVisible(kMenuType_Message))
-    CdeclCall(0x7AA480);
 
   if (InterfaceManager *im = InterfaceManager::GetSingleton()) {
     if (im->menuRoot) {
@@ -1129,6 +1309,8 @@ static void CloseSyncWaitOverlay() {
       DestroySyncOverlayTile(overlay);
   }
 
+  if (g_syncOverlayInjected)
+    PipBoyLog("SYNC", "Overlay closed");
   g_syncOverlayInjected = false;
 }
 
@@ -1144,21 +1326,28 @@ static void ApplySyncLock(bool wantLock) {
     if (!g_syncControlsDisabled) {
       // Disable movement, Pip-Boy, fighting, POV switch, looking, rollover and
       // sneaking — a full "cutscene" style lock so nothing can be done.
-      Script::RunScriptLine2("DisablePlayerControls 1 1 1 1 1 1 1", player, true);
+      Script::RunScriptLine2(kSyncDisableControlsCmd, player, true);
+      PipBoyLog("SYNC", "Lock ON: issued %s", kSyncDisableControlsCmd);
       g_syncControlsDisabled = true;
     }
     if (IsHudReadyForSyncOverlay() && !g_syncOverlayInjected)
       ShowSyncWaitOverlay();
   } else {
+    const bool wasLocked = g_syncControlsDisabled;
     if (g_syncControlsDisabled) {
-      Script::RunScriptLine2("EnablePlayerControls 1 1 1 1 1 1 1", player, true);
+      Script::RunScriptLine2(kSyncEnableControlsCmd, player, true);
+      PipBoyLog("SYNC", "Lock OFF: issued %s", kSyncEnableControlsCmd);
       g_syncControlsDisabled = false;
     }
-    CloseSyncWaitOverlay();
+    if (g_syncOverlayInjected)
+      CloseSyncWaitOverlay();
+    if (wasLocked)
+      RequestHudRefreshAfterSyncUnlock();
   }
 }
 
 static void ExecutePipBoyCommand(const std::string &line) {
+  PipBoyLog("CMD-IN", "%s", line.c_str());
   if (line == "TORCH ON") {
     SetPipBoyLight(PlayerCharacter::GetSingleton(), true);
     return;
@@ -1192,6 +1381,7 @@ static void ExecutePipBoyCommand(const std::string &line) {
   }
 
   RefreshPipBoyUI();
+  PipBoyLog("CMD-OK", "%s -> form %08X", verb.c_str(), formId);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1201,6 +1391,7 @@ static void ExecutePipBoyCommand(const std::string &line) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void PipeServerThread() {
+  PipBoyLog("PIPE", "Pipe server thread started");
   while (g_running) {
     // Create pipe instance
     HANDLE hPipe = CreateNamedPipeA(
@@ -1213,6 +1404,7 @@ void PipeServerThread() {
     );
 
     if (hPipe == INVALID_HANDLE_VALUE) {
+      PipBoyLog("PIPE", "CreateNamedPipe failed, retrying");
       Sleep(5000);
       continue;
     }
@@ -1224,6 +1416,7 @@ void PipeServerThread() {
             : (GetLastError() == ERROR_PIPE_CONNECTED ? TRUE : FALSE);
 
     if (connected) {
+      PipBoyLog("PIPE", "Client connected");
       // Client connected — push snapshots until disconnected.
       // Poll frequently but only write when the snapshot actually changed,
       // so the companion app hears about changes within ~PIPE_POLL_INTERVAL_MS
@@ -1235,6 +1428,7 @@ void PipeServerThread() {
           const char *loadMsg = "{\"event\":\"saveLoad\"}\n";
           DWORD written = 0;
           WriteFile(hPipe, loadMsg, (DWORD)strlen(loadMsg), &written, NULL);
+          PipBoyLog("PIPE-OUT", "saveLoad event");
           lastSent.clear();
         }
 
@@ -1245,6 +1439,7 @@ void PipeServerThread() {
         }
 
         if (!snapshot.empty() && snapshot != lastSent) {
+          PipBoyLogSnapshotOut(snapshot);
           lastSent = snapshot;
           snapshot += "\n"; // Newline delimiter for the client parser
           DWORD written;
@@ -1273,10 +1468,13 @@ void PipeServerThread() {
               readBuffer.erase(0, newline + 1);
               if (!line.empty() && line.back() == '\r')
                 line.pop_back();
+              PipBoyLog("PIPE-IN", "%s", line.c_str());
               if (line == "SYNC_LOCK") {
                 g_syncLockRequested = true;
+                PipBoyLog("SYNC", "SYNC_LOCK received");
               } else if (line == "SYNC_UNLOCK") {
                 g_syncLockRequested = false;
+                PipBoyLog("SYNC", "SYNC_UNLOCK received");
               } else if (!line.empty()) {
                 std::lock_guard<std::mutex> lock(g_commandMutex);
                 g_commandQueue.push_back(line);
@@ -1293,10 +1491,12 @@ void PipeServerThread() {
     // disabled controls if the app closed mid-sync. The main loop re-enables
     // them on the next frame.
     g_syncLockRequested = false;
+    PipBoyLog("PIPE", "Client disconnected");
 
     DisconnectNamedPipe(hPipe);
     CloseHandle(hPipe);
   }
+  PipBoyLog("PIPE", "Pipe server thread stopped");
 }
 
 // (SnapshotThread removed, polling moved to MainGameLoop hook)
@@ -1309,10 +1509,12 @@ void PipeServerThread() {
 void MessageHandler(NVSEMessagingInterface::Message *msg) {
   switch (msg->type) {
   case NVSEMessagingInterface::kMessage_PreLoadGame:
+    PipBoyLog("MSG", "PreLoadGame");
     g_syncLockRequested = false;
     ResetSyncLockState(true);
     break;
   case NVSEMessagingInterface::kMessage_PostLoadGame:
+    PipBoyLog("MSG", "PostLoadGame");
     g_gameLoaded = true;
     g_saveLoadPending = true;
     ResetSyncLockState(true);
@@ -1322,6 +1524,7 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
     }
     break;
   case NVSEMessagingInterface::kMessage_NewGame:
+    PipBoyLog("MSG", "NewGame");
     g_gameLoaded = true;
     g_saveLoadPending = true;
     ResetSyncLockState(true);
@@ -1331,19 +1534,27 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
     }
     break;
   case NVSEMessagingInterface::kMessage_ExitGame:
+    PipBoyLog("MSG", "ExitGame");
     g_gameLoaded = false;
     g_syncLockRequested = false;
     ResetSyncLockState(true);
     break;
   case NVSEMessagingInterface::kMessage_ExitToMainMenu:
+    PipBoyLog("MSG", "ExitToMainMenu");
     g_gameLoaded = false;
     g_syncLockRequested = false;
     ResetSyncLockState(true);
     break;
   case NVSEMessagingInterface::kMessage_MainGameLoop:
     if (g_gameLoaded) {
+      LogMenuMaskIfChanged();
       if (g_syncHudReadyDelay > 0)
         g_syncHudReadyDelay--;
+      if (g_syncHudRefreshDelay > 0) {
+        g_syncHudRefreshDelay--;
+        if (g_syncHudRefreshDelay == 0 && IsSafeForHudTileAccess())
+          RefreshHudAfterSyncUnlock();
+      }
 
       // Apply/clear the initial-sync control lock (main thread only)
       try {
@@ -1369,6 +1580,14 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
       DWORD now = GetTickCount();
       if (now - g_lastSnapshotTime >= SNAPSHOT_INTERVAL_MS) {
         g_lastSnapshotTime = now;
+        if (!g_syncLockRequested.load() && IsModGameplayMenuOpen() &&
+            !IsPipBoyMenuOpen()) {
+          if (now - g_lastSnapshotSkipLogTime >= 1000) {
+            PipBoyLog("SNAP", "skip snapshot during mod gameplay menu");
+            g_lastSnapshotSkipLogTime = now;
+          }
+          break;
+        }
         try {
           std::string snapshot = BuildPlayerSnapshot();
           if (!snapshot.empty()) {
@@ -1418,6 +1637,8 @@ __declspec(dllexport) bool NVSEPlugin_Query(const NVSEInterface *nvse,
  */
 __declspec(dllexport) bool NVSEPlugin_Load(NVSEInterface *nvse) {
   g_nvse = nvse;
+  PipBoyLogInit();
+  PipBoyLog("LOAD", "NVSEPlugin_Load called");
 
   // Get the messaging interface for lifecycle events
   g_msgIntfc =
@@ -1435,6 +1656,7 @@ __declspec(dllexport) bool NVSEPlugin_Load(NVSEInterface *nvse) {
   // Start the Named Pipe server on a background thread
   g_pipeThread = std::thread(PipeServerThread);
   g_pipeThread.detach();
+  PipBoyLog("LOAD", "Plugin loaded (version %d)", PLUGIN_VERSION);
 
   return true;
 }
@@ -1453,6 +1675,14 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpReserved) {
     break;
   case DLL_PROCESS_DETACH:
     g_running = false;
+    {
+      std::lock_guard<std::mutex> lock(g_logMutex);
+      if (g_logFile) {
+        fprintf(g_logFile, "=== FalloutPipBoySync shutdown ===\n");
+        fclose(g_logFile);
+        g_logFile = nullptr;
+      }
+    }
     break;
   }
   return TRUE;

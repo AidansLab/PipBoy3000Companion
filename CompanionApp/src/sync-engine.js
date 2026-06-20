@@ -37,6 +37,14 @@ const SPECIAL_SOFT_REFRESH_CMD =
 const SKILLS_SOFT_REFRESH_CMD =
   `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id==='SKILLS'&&Pip.emit)Pip.emit('skills');`;
 
+// HP lives in the shared Pip-Boy header; redraw it without rebuilding pages.
+const HP_HEADER_SOFT_REFRESH_CMD =
+  `if(typeof Pip!=='undefined'&&Pip.renderHeader)Pip.renderHeader();`;
+
+// Caps/Wg/HP in the ITEMS chrome — header only, no tab rebuild.
+const ITEMS_HEADER_SOFT_REFRESH_CMD =
+  `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.MODE===1&&Pip.renderHeader)Pip.renderHeader();`;
+
 /** Full menu rebuild for STATS sub-tabs except GENERAL/SPECIAL/SKILLS (soft refresh). */
 const STATS_TAB_FULL_REFRESH_CMD =
   `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.MODE===0&&Pip.changeMenu&&` +
@@ -242,7 +250,7 @@ export class SyncEngine extends EventEmitter {
             commands.push(`[${catsArray}].forEach(function(v){try{var d=new DataFile('DATA/'+(NV?'NV':'F3')+'/'+v+'.DAT');var i=(typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id===v)?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/'+v+'.INV',{idOrder:d.ids});if(i._requiresSort)i.sort(d.ids);if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id===v)Pip.emit('scroller','refresh');d.close();}catch(e){}})`);
           }
           // Caps and carry weight live in the ITEMS header — only refresh on inventory tabs.
-          commands.push(`if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.MODE===1&&Pip.renderHeader)Pip.renderHeader();`);
+          commands.push(ITEMS_HEADER_SOFT_REFRESH_CMD);
         }
 
         /* SYNC-DISABLED: batch inv.sync + sort stack guard
@@ -346,7 +354,7 @@ export class SyncEngine extends EventEmitter {
             commands.push(`player.setav('${attr}', ${JSON.stringify(current)}, ${attr === 'hp' ? '!1' : '!0'})`);
           }
           if (attr === 'hp' || attr === 'level') {
-            commands.push(`if(typeof Pip!=='undefined' && Pip.CURRENT && Pip.MODE===1 && Pip.renderHeader){Pip.renderHeader();}`);
+            commands.push(ITEMS_HEADER_SOFT_REFRESH_CMD);
           }
         }
       }
@@ -363,13 +371,11 @@ export class SyncEngine extends EventEmitter {
         }
       }
 
-      // Carry weight — taken straight from the game (authoritative). The game
-      // counts every carried item, including modded ones the Pip-Boy may not
-      // know about, so this is more accurate than summing the local inventory.
-      // Stored ephemerally (!1) so it never persists to PLAYER.JSON; the
-      // firmware's getinfo override uses it instead of calculating weight.
-      commands.push(...this._diffWeight(player, prevPlayer));
     }
+
+    // Carry weight + AP — game-authoritative; always sync (not gated on inventory pause)
+    commands.push(...this._diffWeight(player, prevPlayer));
+    commands.push(...this._diffAP(player, prevPlayer));
 
     // --- Inventory diffs (before equip so items exist on the device) ---
     const invCommands = this._diffInventory(
@@ -411,10 +417,10 @@ export class SyncEngine extends EventEmitter {
     const hasSpecialChange = commands.some((c) =>
       SPECIAL_SETAV_MARKERS.some((m) => c.includes(m))
     );
+    const hasHpChange = commands.some((c) => c.includes("player.setav('hp'"));
     const hasOtherStatsChange = commands.some(
       (c) =>
-        (c.includes("player.setav('hp'") ||
-          c.includes('player.setlevel') ||
+        (c.includes('player.setlevel') ||
           c.includes("player.setav('name'") ||
           c.includes('perceptioncondition') ||
           c.includes('endurancecondition') ||
@@ -425,6 +431,9 @@ export class SyncEngine extends EventEmitter {
     );
     if (hasSpecialChange) {
       commands.push(SPECIAL_SOFT_REFRESH_CMD);
+    }
+    if (hasHpChange) {
+      commands.push(HP_HEADER_SOFT_REFRESH_CMD);
     }
     if (hasOtherStatsChange) {
       if (this.gameMode === 'FNV') {
@@ -480,7 +489,7 @@ export class SyncEngine extends EventEmitter {
         }
       }
 
-      // Carry weight — game-authoritative, stored ephemerally (see _diffWeight)
+      // Carry weight — game-authoritative (see _diffWeight)
       commands.push(...this._diffWeight(player, {}));
 
       // Skills — stored in SETTINGS/*_SKILLS.JSON (not player.setav)
@@ -495,7 +504,7 @@ export class SyncEngine extends EventEmitter {
         const formId = this._resolveFormId(item.formId);
         if (formId === null) continue;
 
-        if (item.condition !== undefined && item.condition !== 100) {
+        if (this._itemHasDegradedCondition(item)) {
           commands.push(
             this._buildAddItemHealthPercentCommand(formId, item.count || 1, item.condition)
           );
@@ -511,6 +520,9 @@ export class SyncEngine extends EventEmitter {
       // Equipped items — after inventory is populated
       commands.push(...this._diffEquipped(player, {}));
     }
+
+    // Action Points — always sync on full sync
+    commands.push(...this._diffAP(player, {}));
 
     // Weapon ammo — ephemeral UI state for AMMO tab dimming/selection
     commands.push(...this._diffWeaponAmmo(player, {}));
@@ -649,7 +661,7 @@ export class SyncEngine extends EventEmitter {
       for (const item of current) {
         const formId = this._resolveFormId(item.formId);
         if (formId === null) continue;
-        if (item.condition !== undefined && item.condition !== 100) {
+        if (this._itemHasDegradedCondition(item)) {
           commands.push(
             this._buildAddItemHealthPercentCommand(formId, item.count || 1, item.condition)
           );
@@ -670,7 +682,7 @@ export class SyncEngine extends EventEmitter {
       const cat = this._toPipBoyCategory(item.type);
       if (cat) this._lastChangedCategories.add(cat);
 
-      if (item.condition !== undefined && item.condition !== 100) {
+      if (this._itemHasDegradedCondition(item)) {
         commands.push(
           this._buildAddItemHealthPercentCommand(formId, item.count || 1, item.condition)
         );
@@ -692,7 +704,13 @@ export class SyncEngine extends EventEmitter {
           if (formId === null) continue;
           const cat = this._toPipBoyCategory(currentItem.type);
           if (cat) this._lastChangedCategories.add(cat);
-          commands.push(this._buildAddItemCommand(formId, countDelta));
+          if (this._itemHasDegradedCondition(currentItem)) {
+            commands.push(
+              this._buildAddItemHealthPercentCommand(formId, countDelta, currentItem.condition)
+            );
+          } else {
+            commands.push(this._buildAddItemCommand(formId, countDelta));
+          }
         } else if (countDelta < 0) {
           // Skip decrements the device already applied to itself (item used
           // on the Pip-Boy and mirrored into the game by us)
@@ -707,16 +725,15 @@ export class SyncEngine extends EventEmitter {
           commands.push(removeCmd);
         }
 
-        // Condition change — remove the old condition item and add the new one
-        if (currentItem.condition !== prevItem.condition) {
+        // Condition change — update cnd in place (Pip-Boy stores 0–100 per stack)
+        if (this._itemConditionChanged(currentItem, prevItem)) {
           const formId = this._resolveFormId(id);
           if (formId !== null) {
             const cat = this._toPipBoyCategory(currentItem.type);
             if (cat) this._lastChangedCategories.add(cat);
-            const removeQty = currentItem.count || 1;
-            const removeCmd = this._buildRemoveItemCommand(cat, formId, removeQty);
-            commands.push(removeCmd);
-            commands.push(this._buildAddItemHealthPercentCommand(formId, removeQty, currentItem.condition));
+            commands.push(
+              this._buildSetItemConditionCommand(formId, currentItem.condition)
+            );
           }
         }
       }
@@ -933,6 +950,34 @@ export class SyncEngine extends EventEmitter {
   }
 
   /**
+   * Generate action-point commands from game → Pip-Boy.
+   * Stock firmware shows maxAP/maxAP in the STATS header; boot0 overrides when
+   * cmode is on. Values are ephemeral (!1) and refreshed via renderHeader.
+   */
+  _diffAP(player, prevPlayer) {
+    const commands = [];
+    const curAp =
+      player.ap !== undefined ? Math.floor(player.ap) : undefined;
+    const prevAp =
+      prevPlayer.ap !== undefined ? Math.floor(prevPlayer.ap) : undefined;
+    const curMaxAp =
+      player.maxAP !== undefined ? Math.round(player.maxAP) : undefined;
+    const prevMaxAp =
+      prevPlayer.maxAP !== undefined ? Math.round(prevPlayer.maxAP) : undefined;
+
+    if (curAp !== undefined && curAp !== prevAp) {
+      commands.push(`player.setav('ap', ${JSON.stringify(curAp)}, !1)`);
+    }
+    if (curMaxAp !== undefined && curMaxAp !== prevMaxAp) {
+      commands.push(`player.setav('maxap', ${JSON.stringify(curMaxAp)}, !1)`);
+    }
+    if (commands.length > 0) {
+      commands.push(HP_HEADER_SOFT_REFRESH_CMD);
+    }
+    return commands;
+  }
+
+  /**
    * Generate carry-weight commands from game → Pip-Boy.
    *
    * The current weight (`wg`) and max weight (`maxWg`) are copied directly from
@@ -947,7 +992,7 @@ export class SyncEngine extends EventEmitter {
    */
   _diffWeight(player, prevPlayer) {
     const commands = [];
-    const refreshHeader = `if(typeof Pip!=='undefined' && Pip.CURRENT && Pip.MODE===1 && Pip.renderHeader){Pip.renderHeader();}`;
+    const refreshHeader = ITEMS_HEADER_SOFT_REFRESH_CMD;
 
     if (player.wg !== undefined && player.wg !== prevPlayer.wg) {
       commands.push(`player.setav('wg', ${JSON.stringify(player.wg)}, !1)`);
@@ -1066,10 +1111,35 @@ export class SyncEngine extends EventEmitter {
     return `(()=>{var p=${formId},db=new DataFile('DATA/'+(NV?'NV':'F3')+'/PERK.DAT');if(db.ids.indexOf(p)>=0)player.removeperk(p);db.close();})()`;
   }
 
+  _normalizeItemCondition(condition) {
+    if (condition === undefined || condition === null) return 100;
+    const n = Number(condition);
+    if (!Number.isFinite(n)) return 100;
+    // Game plugin may send 0.0–1.0; Pip-Boy InvFile uses 0–100 (uint8).
+    if (n > 0 && n <= 1) return Math.round(n * 100);
+    return Math.round(Math.min(100, Math.max(0, n)));
+  }
+
+  _itemHasDegradedCondition(item) {
+    return this._normalizeItemCondition(item?.condition) !== 100;
+  }
+
+  _itemConditionChanged(currentItem, prevItem) {
+    return (
+      this._normalizeItemCondition(currentItem?.condition) !==
+      this._normalizeItemCondition(prevItem?.condition)
+    );
+  }
+
+  _buildSetItemConditionCommand(formId, condition) {
+    const cnd = this._normalizeItemCondition(condition);
+    return `(()=>{var id=${formId},cnd=${cnd};['AID','AMMO','APPAREL','MISC','WEAPONS'].forEach(function(v){try{var db=new DataFile('DATA/'+(NV?'NV':'F3')+'/'+v+'.DAT');if(db.ids.indexOf(id)<0){db.close();return;}var onMenu=typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id===v,inv=onMenu?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/'+v+'.INV',{idOrder:db.ids}),i=inv.indexOf(id);if(i<0){db.close();return;}var it=inv.get(i);it.cnd=cnd;inv.set(i,it);if(!onMenu)inv.sync();if(onMenu)Pip.emit('scroller','refresh');db.close();}catch(e){}});})()`;
+  }
+
   _buildAddItemHealthPercentCommand(formId, count, condition) {
     const cnt = count || 1;
-    const cnd = condition !== undefined ? condition : 100;
-    return `(()=>{var id=${formId},cnt=${cnt},cnd=${cnd};if(cnt<=0)return;['AID','AMMO','APPAREL','MISC','WEAPONS'].forEach(function(v){try{var db=new DataFile('DATA/'+(NV?'NV':'F3')+'/'+v+'.DAT'),idx=db.ids.indexOf(id);if(db.close(),idx<0)return;var onMenu=typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id===v,inv=onMenu?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/'+v+'.INV',{idOrder:db.ids}),inx=inv.indexOf(id);if(inx>=0){var it=inv.get(inx);it.cnt+=cnt;inv.set(inx,it);}else inv.add({id:id,cnt:cnt,cnd:cnd});if(!onMenu)inv.sync();if(onMenu)Pip.emit('scroller','count',inv.count);}catch(e){}});})()`;
+    const cnd = this._normalizeItemCondition(condition);
+    return `(()=>{var id=${formId},cnt=${cnt},cnd=${cnd};if(cnt<=0)return;['AID','AMMO','APPAREL','MISC','WEAPONS'].forEach(function(v){try{var db=new DataFile('DATA/'+(NV?'NV':'F3')+'/'+v+'.DAT'),idx=db.ids.indexOf(id);if(db.close(),idx<0)return;var onMenu=typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id===v,inv=onMenu?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/'+v+'.INV',{idOrder:db.ids}),inx=inv.indexOf(id);if(inx>=0){var it=inv.get(inx);it.cnt+=cnt;it.cnd=cnd;inv.set(inx,it);}else inv.add({id:id,cnt:cnt,cnd:cnd});if(!onMenu)inv.sync();if(onMenu)Pip.emit('scroller','count',inv.count);}catch(e){}});})()`;
   }
 
   _buildAddItemCommand(formId, count) {
