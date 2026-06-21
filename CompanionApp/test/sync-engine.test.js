@@ -196,6 +196,8 @@ describe('SyncEngine', () => {
     it('should not sync flashlight when torch sync is disabled', async () => {
       engine.setTorchSyncEnabled(false);
 
+      assert.strictEqual(engine.handleDeviceTorch(true), false);
+
       // Full sync with the flashlight on — must not touch the torch LED.
       await engine.processSnapshot({
         game: 'FNV',
@@ -205,6 +207,78 @@ describe('SyncEngine', () => {
       });
 
       assert.ok(!bridge.sentCommands.some(c => c.includes('Pip.setTorch')));
+    });
+
+    it('should not echo game torch off after the device turned it on', async () => {
+      const settle = () => new Promise((r) => setTimeout(r, 550));
+
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: { name: 'Test', torch: false },
+        inventory: [],
+        perks: [],
+      });
+      await settle();
+
+      bridge.sentCommands.length = 0;
+      engine.notifyDeviceTorch(true);
+
+      // Game still reports off (e.g. Pip-Boy menu just closed before reconcile).
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: { name: 'Test', torch: false },
+        inventory: [],
+        perks: [],
+      });
+      await settle();
+
+      assert.ok(!bridge.sentCommands.some((c) => c.includes('Pip.setTorch(!1)')));
+
+      // Game caught up — device already matches; no redundant setTorch (avoids double sound).
+      bridge.sentCommands.length = 0;
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: { name: 'Test', torch: true },
+        inventory: [],
+        perks: [],
+      });
+      await settle();
+
+      assert.ok(!bridge.sentCommands.some((c) => c.includes('Pip.setTorch')));
+    });
+
+    it('should sync game torch off after device-on was confirmed', async () => {
+      const settle = () => new Promise((r) => setTimeout(r, 550));
+
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: { name: 'Test', torch: false },
+        inventory: [],
+        perks: [],
+      });
+      await settle();
+
+      engine.notifyDeviceTorch(true);
+
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: { name: 'Test', torch: true },
+        inventory: [],
+        perks: [],
+      });
+      await settle();
+
+      bridge.sentCommands.length = 0;
+
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: { name: 'Test', torch: false },
+        inventory: [],
+        perks: [],
+      });
+      await settle();
+
+      assert.ok(bridge.sentCommands.some((c) => c.includes('Pip.setTorch(!1)')));
     });
 
     it('should copy carry weight from the game when it changes', async () => {

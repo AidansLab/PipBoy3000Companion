@@ -65,7 +65,7 @@ export class CompanionApp extends EventEmitter {
   }
 
   /**
-   * Toggle whether the in-game flashlight drives the Pip-Boy torch LED.
+   * Toggle bidirectional flashlight sync (game ↔ Pip-Boy torch LED).
    * @param {boolean} enabled
    */
   setTorchSyncEnabled(enabled) {
@@ -288,6 +288,10 @@ export class CompanionApp extends EventEmitter {
       }
 
       if (evt.action === 'torch') {
+        if (!this.syncEngine.handleDeviceTorch(evt.state)) {
+          this.log('sync', 'Pip-Boy flashlight toggle ignored (flashlight sync disabled)');
+          return;
+        }
         if (this.pipeClient.connected) {
           this.pipeClient.send(evt.state ? 'TORCH ON' : 'TORCH OFF');
           this.log('sync', `Pip-Boy → game: flashlight ${evt.state ? 'on' : 'off'}`);

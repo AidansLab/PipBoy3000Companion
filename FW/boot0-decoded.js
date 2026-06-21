@@ -311,6 +311,9 @@ global.cmode = !1;
       const wasOn = !!Pip.torchOn;
       if (typeof cmode !== 'undefined' && cmode) {
         const nextOn = explicit ? !!on : !wasOn;
+        if (nextOn === wasOn) {
+          return;
+        }
         if (Pip.CURRENT && Pip.CURRENT.id === 'TORCH') {
           if (Pip.CURRENT.turnOff) Pip.CURRENT.turnOff();
           else if (Pip.changeMenu) Pip.changeMenu();

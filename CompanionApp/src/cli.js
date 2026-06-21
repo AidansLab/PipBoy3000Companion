@@ -219,6 +219,10 @@ async function main() {
     }
 
     if (evt.action === 'torch') {
+      if (!syncEngine.handleDeviceTorch(evt.state)) {
+        logSync('Pip-Boy flashlight toggle ignored (flashlight sync disabled)');
+        return;
+      }
       if (pipeClient.connected) {
         pipeClient.send(evt.state ? 'TORCH ON' : 'TORCH OFF');
         logSync(`Pip-Boy → game: flashlight ${evt.state ? 'on' : 'off'}`);

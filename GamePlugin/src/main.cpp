@@ -58,7 +58,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #define PLUGIN_NAME "FalloutPipBoySync"
-#define PLUGIN_VERSION 22
+#define PLUGIN_VERSION 24
 
 // Write FalloutPipBoySync.log beside this DLL (Data/NVSE/Plugins/).
 #ifndef PIPBOY_VERBOSE_LOG
@@ -690,7 +690,58 @@ __declspec(naked) static void __fastcall EngineTogglePipBoyLight(
     ret 4
   }
 }
+
+// Apply or remove the PipBoyLight spell only — no FOPipboyManager UI update
+// (0x7FA310), which drives the green mesh glow while the Pip-Boy menu is open.
+__declspec(naked) static void __fastcall EngineApplyPipBoyLightEffectOnly(
+    PlayerCharacter *thePlayer, SpellItem *pipBoyLight, UInt32 turnON) {
+  __asm {
+    push 0
+    cmp dword ptr s_turnONForToggle, 0
+    jz turnOFF
+    push edx
+    add ecx, 0x88
+    mov eax, [ecx]
+    call dword ptr [eax]
+    ret 4
+  turnOFF:
+    push 0
+    add edx, 0x18
+    push edx
+    add ecx, 0x94
+    mov eax, 0x824400
+    call eax
+    ret 4
+  }
+}
+
+// FOPipboyManager light UI only (0x7FA310) — spell effect is unchanged.
+__declspec(naked) static void EngineSyncPipBoyManagerLightOnly() {
+  __asm {
+    mov ecx, dword ptr s_pipboyManagerForToggle
+    mov edx, dword ptr s_turnONForToggle
+    push 1
+    push edx
+    push 0
+    push ecx
+    push 1
+    push edx
+    push 1
+    mov eax, 0x7FA310
+    call eax
+    pop ecx
+    mov eax, 0x7FA310
+    call eax
+    ret
+  }
+}
 #endif
+
+// Companion torch intent (physical Pip-Boy ITEMS shortcut). Spell-only toggles
+// while the in-game Pip-Boy menu is open skip the manager UI; reconcile on close.
+static bool g_companionTorchDesired = false;
+static bool g_pipBoyMenuWasOpen = false;
+static bool g_lastObservedTorchOn = false;
 
 static void PlayPipBoyLightSound(PlayerCharacter *player, bool wantOn) {
   if (!player)
@@ -728,8 +779,63 @@ static void SetPipBoyLightScriptFallback(PlayerCharacter *player, bool wantOn) {
   }
 }
 
+// Spell effect only — skip TogglePipBoyLight (that also updates Pip-Boy UI glow).
+static void SetPipBoyLightSpellOnlyFallback(PlayerCharacter *player, bool wantOn) {
+  if (!player)
+    return;
+  SpellItem *pipBoyLight = GetPipBoyLightSpell();
+  if (wantOn) {
+    if (!IsPipBoyLightOn(player))
+      Script::RunScriptLine2("cios PipBoyLight", player, true);
+    if (!IsPipBoyLightOn(player) && pipBoyLight) {
+      std::stringstream ss;
+      ss << "cios " << std::hex << std::uppercase << std::setfill('0')
+         << std::setw(8) << pipBoyLight->refID;
+      Script::RunScriptLine2(ss.str().c_str(), player, true);
+    }
+  } else {
+    if (IsPipBoyLightOn(player))
+      Script::RunScriptLine2("dispel PipBoyLight", player, true);
+    if (IsPipBoyLightOn(player) && pipBoyLight) {
+      std::stringstream ss;
+      ss << "dispel " << std::hex << std::uppercase << std::setfill('0')
+         << std::setw(8) << pipBoyLight->refID;
+      Script::RunScriptLine2(ss.str().c_str(), player, true);
+    }
+  }
+}
+
+#if defined(_M_IX86)
+static void ApplyPipBoyLightEffectOnly(PlayerCharacter *player,
+                                       SpellItem *pipBoyLight, bool wantOn) {
+  s_turnONForToggle = wantOn ? 1 : 0;
+  __try {
+    EngineApplyPipBoyLightEffectOnly(player, pipBoyLight, s_turnONForToggle);
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    SetPipBoyLightSpellOnlyFallback(player, wantOn);
+  }
+}
+#endif
+
+static void SyncPipBoyManagerLight(bool wantOn) {
+  InterfaceManager *im = InterfaceManager::GetSingleton();
+  if (!im || !im->pipboyManager)
+    return;
+  s_turnONForToggle = wantOn ? 1 : 0;
+  s_pipboyManagerForToggle = im->pipboyManager;
+#if defined(_M_IX86)
+  __try {
+    EngineSyncPipBoyManagerLightOnly();
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+  }
+#endif
+}
+
 // Turn the in-game Pip-Boy flashlight on or off (companion-initiated).
-static void SetPipBoyLight(PlayerCharacter *player, bool wantOn) {
+// When suppressPipBoyGlow is true (Pip-Boy menu open), apply the light spell
+// in the background so sync stays correct but the green mesh glow is not shown.
+static void SetPipBoyLight(PlayerCharacter *player, bool wantOn,
+                         bool suppressPipBoyGlow = false) {
   if (!player)
     return;
 
@@ -740,6 +846,22 @@ static void SetPipBoyLight(PlayerCharacter *player, bool wantOn) {
   const UInt32 turnON = wantOn ? 1 : 0;
   if ((IsPipBoyLightOn(player) ? 1u : 0u) == turnON)
     return;
+
+  if (suppressPipBoyGlow) {
+#if defined(_M_IX86)
+    ApplyPipBoyLightEffectOnly(player, pipBoyLight, wantOn);
+#else
+    SetPipBoyLightSpellOnlyFallback(player, wantOn);
+#endif
+    if ((IsPipBoyLightOn(player) ? 1u : 0u) != turnON)
+      SetPipBoyLightSpellOnlyFallback(player, wantOn);
+    // OFF clears the green mesh glow; ON stays spell-only (manager ON causes glow).
+    if (!wantOn)
+      SyncPipBoyManagerLight(false);
+    PipBoyLog("TORCH", "%s (spell only, Pip-Boy menu open)",
+              wantOn ? "ON" : "OFF");
+    return;
+  }
 
   InterfaceManager *im = InterfaceManager::GetSingleton();
   if (!im || !im->pipboyManager)
@@ -762,6 +884,56 @@ static void SetPipBoyLight(PlayerCharacter *player, bool wantOn) {
     SetPipBoyLightScriptFallback(player, wantOn);
 
   PlayPipBoyLightSound(player, wantOn);
+}
+
+// After closing the in-game Pip-Boy, run the full engine toggle so spell and
+// FOPipboyManager match companion intent (spell-only toggles while the menu
+// was open skip the manager and leave the world light wrong on close).
+static void ReconcileCompanionTorchAfterPipBoyClose() {
+  PlayerCharacter *player = PlayerCharacter::GetSingleton();
+  if (!player)
+    return;
+
+  SpellItem *pipBoyLight = GetPipBoyLightSpell();
+  if (!pipBoyLight)
+    return;
+
+  InterfaceManager *im = InterfaceManager::GetSingleton();
+  if (!im || !im->pipboyManager)
+    return;
+
+  if (g_companionTorchDesired) {
+#if defined(_M_IX86)
+    s_turnONForToggle = 1;
+    s_pipboyManagerForToggle = im->pipboyManager;
+    __try {
+      EngineTogglePipBoyLight(player, pipBoyLight, 1);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      SetPipBoyLightScriptFallback(player, true);
+    }
+#else
+    SetPipBoyLight(player, true, false);
+#endif
+    if (!IsPipBoyLightOn(player))
+      SetPipBoyLightScriptFallback(player, true);
+    PlayPipBoyLightSound(player, true);
+    PipBoyLog("TORCH", "reconciled ON after Pip-Boy menu close");
+  } else {
+#if defined(_M_IX86)
+    s_turnONForToggle = 0;
+    s_pipboyManagerForToggle = im->pipboyManager;
+    __try {
+      EngineTogglePipBoyLight(player, pipBoyLight, 0);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      SetPipBoyLightScriptFallback(player, false);
+    }
+#else
+    SetPipBoyLight(player, false, false);
+#endif
+    if (IsPipBoyLightOn(player))
+      SetPipBoyLightScriptFallback(player, false);
+    PipBoyLog("TORCH", "reconciled OFF after Pip-Boy menu close");
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1465,11 +1637,15 @@ static int GetItemCountForEquip(PlayerCharacter *player, UInt32 targetFormId) {
 static void ExecutePipBoyCommand(const std::string &line) {
   PipBoyLog("CMD-IN", "%s", line.c_str());
   if (line == "TORCH ON") {
-    SetPipBoyLight(PlayerCharacter::GetSingleton(), true);
+    PlayerCharacter *player = PlayerCharacter::GetSingleton();
+    g_companionTorchDesired = true;
+    SetPipBoyLight(player, true, IsPipBoyMenuOpen());
     return;
   }
   if (line == "TORCH OFF") {
-    SetPipBoyLight(PlayerCharacter::GetSingleton(), false);
+    PlayerCharacter *player = PlayerCharacter::GetSingleton();
+    g_companionTorchDesired = false;
+    SetPipBoyLight(player, false, IsPipBoyMenuOpen());
     return;
   }
 
@@ -1702,6 +1878,25 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
           RefreshHudAfterSyncUnlock();
       }
 
+      // Spell-only torch toggles while the Pip-Boy menu is open must be
+      // completed when the menu closes or the light silently turns off.
+      {
+        const bool pipBoyOpen = IsPipBoyMenuOpen();
+        if (!g_pipBoyMenuWasOpen && pipBoyOpen && !g_companionTorchDesired) {
+          try {
+            SyncPipBoyManagerLight(false);
+          } catch (...) {
+          }
+        }
+        if (g_pipBoyMenuWasOpen && !pipBoyOpen) {
+          try {
+            ReconcileCompanionTorchAfterPipBoyClose();
+          } catch (...) {
+          }
+        }
+        g_pipBoyMenuWasOpen = pipBoyOpen;
+      }
+
       // Apply/clear the initial-sync control lock (main thread only)
       try {
         ApplySyncLock(g_syncLockRequested.load());
@@ -1719,6 +1914,20 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
           try {
             ExecutePipBoyCommand(cmd);
           } catch (...) {
+          }
+        }
+      }
+
+      // In-game flashlight toggles (hotkey / Pip-Boy menu) — keep companion
+      // intent aligned so snapshots reflect actual game state after user turns
+      // the light off/on outside the physical Pip-Boy shortcut.
+      {
+        PlayerCharacter *player = PlayerCharacter::GetSingleton();
+        if (player && !IsPipBoyMenuOpen()) {
+          const bool torchOn = IsPipBoyLightOn(player);
+          if (torchOn != g_lastObservedTorchOn) {
+            g_companionTorchDesired = torchOn;
+            g_lastObservedTorchOn = torchOn;
           }
         }
       }

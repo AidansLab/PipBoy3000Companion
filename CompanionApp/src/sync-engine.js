@@ -73,8 +73,7 @@ export class SyncEngine extends EventEmitter {
     this.lastSyncFlush = 0;
     this.gameMode = null; // 'F3' or 'FNV'
     this.enabled = false;
-    // When on, the in-game flashlight drives the Pip-Boy's torch LED. Defaults
-    // to on; the app exposes a toggle to disable it.
+    // When on, game ↔ Pip-Boy torch LED stay in sync. Defaults to on; toggle in app.
     this.torchSyncEnabled = true;
     this._processingSnapshot = false;
     this._pendingSnapshot = null;
@@ -90,6 +89,8 @@ export class SyncEngine extends EventEmitter {
     // to worn without reducing total owned; unequip returns 1 to bag).
     // gameFormId (lowercase) -> { action: 'equip'|'unequip', count, time }
     this._deviceEquipPending = new Map();
+    // Device-initiated torch toggles — don't let a stale game snapshot turn the LED off.
+    this._deviceTorchPending = null;
     this.stats = {
       snapshotsProcessed: 0,
       commandsSent: 0,
@@ -131,15 +132,29 @@ export class SyncEngine extends EventEmitter {
   }
 
   /**
-   * Enable or disable mirroring the in-game flashlight to the Pip-Boy torch LED.
+   * Enable or disable bidirectional flashlight sync (game ↔ Pip-Boy torch LED).
    * @param {boolean} enabled
    */
   setTorchSyncEnabled(enabled) {
     this.torchSyncEnabled = !!enabled;
+    if (!this.torchSyncEnabled) {
+      this._deviceTorchPending = null;
+    }
     this.emit(
       'status',
       this.torchSyncEnabled ? 'Flashlight sync enabled' : 'Flashlight sync disabled'
     );
+  }
+
+  /**
+   * Device user toggled the torch. Returns true if the game should receive TORCH ON/OFF.
+   * @param {boolean} on
+   * @returns {boolean}
+   */
+  handleDeviceTorch(on) {
+    if (!this.torchSyncEnabled) return false;
+    this.notifyDeviceTorch(on);
+    return true;
   }
 
   /**
@@ -410,7 +425,12 @@ export class SyncEngine extends EventEmitter {
     commands.push(...this._diffFactions(this._getFactions(snapshot), this._getFactions(prev)));
 
     // Pip-Boy flashlight LED — game → device only (independent of inventory pause)
-    if (this.torchSyncEnabled && player.torch !== undefined && player.torch !== prevPlayer.torch) {
+    if (
+      this.torchSyncEnabled &&
+      player.torch !== undefined &&
+      player.torch !== prevPlayer.torch &&
+      !this._shouldSuppressGameToDeviceTorch(player.torch)
+    ) {
       commands.push(
         `if(typeof Pip!=='undefined'&&Pip.setTorch)Pip.setTorch(${player.torch ? '!0' : '!1'});`
       );
@@ -602,6 +622,32 @@ export class SyncEngine extends EventEmitter {
     entry.count++;
     entry.time = Date.now();
     this._deviceEquipPending.set(key, entry);
+  }
+
+  /**
+   * User toggled the torch on the physical Pip-Boy. Ignore game→device torch
+   * sync that disagrees until the game catches up or the window expires.
+   */
+  notifyDeviceTorch(on) {
+    this._deviceTorchPending = { on: !!on, confirmed: false, time: Date.now() };
+  }
+
+  _shouldSuppressGameToDeviceTorch(gameTorch) {
+    const pending = this._deviceTorchPending;
+    if (!pending) return false;
+    if (Date.now() - pending.time > 15000) {
+      this._deviceTorchPending = null;
+      return false;
+    }
+    if (gameTorch === pending.on) {
+      pending.confirmed = true;
+      return true;
+    }
+    if (pending.confirmed) {
+      this._deviceTorchPending = null;
+      return false;
+    }
+    return true;
   }
 
   /**
@@ -1349,6 +1395,7 @@ export class SyncEngine extends EventEmitter {
     this.previousState = null;
     this._deviceConsumed.clear();
     this._deviceEquipPending.clear();
+    this._deviceTorchPending = null;
     this.emit('status', 'Forced full resync on next snapshot');
   }
 
@@ -1360,6 +1407,7 @@ export class SyncEngine extends EventEmitter {
     this.previousState = null;
     this._deviceConsumed.clear();
     this._deviceEquipPending.clear();
+    this._deviceTorchPending = null;
     this.emit('status', 'Game save loaded — full resync on next snapshot');
   }
 
