@@ -870,6 +870,35 @@ describe('SyncEngine', () => {
       assert.ok(removeCmd, 'Should send a removal for the in-game uses');
       assert.ok(removeCmd.includes('it.cnt-=2'), 'Should only remove the 2 in-game uses');
     });
+
+    it('should not echo a bag-count drop after the device equips a stackable weapon', async () => {
+      const settle = () => new Promise((r) => setTimeout(r, 550));
+
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: { name: 'Test', equippedweap: 0 },
+        inventory: [{ formId: '0x00004330', type: 'WEAP', count: 10 }],
+        perks: [],
+      });
+      await settle();
+
+      bridge.sentCommands.length = 0;
+      engine.notifyDeviceEquipped('0x00004330');
+
+      // Game still owns 10 total (1 worn + 9 in bag) but bag-only read was 9.
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: { name: 'Test', equippedweap: '0x00004330' },
+        inventory: [{ formId: '0x00004330', type: 'WEAP', count: 9 }],
+        perks: [],
+      });
+      await settle();
+
+      assert.ok(
+        !bridge.sentCommands.some((c) => c.includes('it.cnt-=')),
+        'Should not remove from Pip-Boy when equip only moved one to worn'
+      );
+    });
   });
 
   describe('Force full sync', () => {

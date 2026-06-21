@@ -26,6 +26,7 @@
 #include <cmath>
 #include <cstdarg>
 #include <iomanip>
+#include <map>
 #include <mutex>
 #include <set>
 #include <sstream>
@@ -57,7 +58,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #define PLUGIN_NAME "FalloutPipBoySync"
-#define PLUGIN_VERSION 21
+#define PLUGIN_VERSION 22
 
 // Write FalloutPipBoySync.log beside this DLL (Data/NVSE/Plugins/).
 #ifndef PIPBOY_VERBOSE_LOG
@@ -131,6 +132,7 @@ static std::thread g_pipeThread;
 static bool g_gameLoaded = false;
 static DWORD g_lastSnapshotTime = 0;
 static std::atomic<bool> g_saveLoadPending(false);
+static std::atomic<bool> g_mainMenuPending(false);
 
 // Set by the companion app (SYNC_LOCK / SYNC_UNLOCK) while it performs the
 // initial Pip-Boy sync. Disables player controls and shows a "please wait"
@@ -149,10 +151,10 @@ static NVSEScriptInterface *g_scriptInterface = nullptr;
 
 // xNVSE per-plugin control disable — does not corrupt vanilla
 // DisablePlayerControls stacks used by mods such as MrShersh Functional
-// Backpack. Bitmask 127 = movement | looking | pipboy | fighting | POV |
-// rollover | sneak.
-static const char *kSyncDisableControlsCmd = "DisablePlayerControlsAltEx 127";
-static const char *kSyncEnableControlsCmd = "EnablePlayerControlsAltEx 127";
+// Backpack. Bitmask 125 = movement | pipboy | fighting | POV |
+// rollover | sneak. (Looking is handled separately via vanilla command)
+static const char *kSyncDisableControlsCmd = "DisablePlayerControlsAltEx 125";
+static const char *kSyncEnableControlsCmd = "EnablePlayerControlsAltEx 125";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // VERBOSE LOGGING
@@ -1010,9 +1012,19 @@ std::string BuildPlayerSnapshot() {
   json.endObject();
 
   // ─── Inventory ─────────────────────────────────────────────────────
+  // Stackable weapons (e.g. throwing spears) may occupy multiple container
+  // entries after equipping (worn stack + bag stack). Sum by formId so sync
+  // sees the true total count instead of whichever entry happened to be last.
   json.key("inventory");
   json.beginArray();
   {
+    struct AggInvItem {
+      int count;
+      int condition;
+      const char *typeStr;
+    };
+    std::map<UInt32, AggInvItem> agg;
+
     ExtraContainerChanges *containerChanges =
         (ExtraContainerChanges *)player->extraDataList.GetByType(
             kExtraData_ContainerChanges);
@@ -1031,9 +1043,8 @@ std::string BuildPlayerSnapshot() {
         int count = entry->countDelta;
 
         if (count <= 0)
-          continue; // Skip removed items
+          continue;
 
-        // Item condition: ExtraHealth stores current HP, not a 0–1 fraction.
         ExtraDataList *stackExtra = nullptr;
         if (entry->extendData) {
           auto extIter = entry->extendData->Begin();
@@ -1043,14 +1054,25 @@ std::string BuildPlayerSnapshot() {
         const int conditionPct =
             GetInventoryItemConditionPct(baseForm, stackExtra);
 
-        json.arrayElement();
-        json.beginObject();
-        json.keyStr("formId", FormatFormId(formId));
-        json.keyStr("type", GetFormTypeString(baseForm->typeID));
-        json.keyInt("count", count);
-        json.keyInt("condition", conditionPct);
-        json.endObject();
+        AggInvItem &slot = agg[formId];
+        if (slot.count == 0) {
+          slot.condition = conditionPct;
+          slot.typeStr = GetFormTypeString(baseForm->typeID);
+        }
+        slot.count += count;
       }
+    }
+
+    for (const auto &pair : agg) {
+      const UInt32 formId = pair.first;
+      const AggInvItem &item = pair.second;
+      json.arrayElement();
+      json.beginObject();
+      json.keyStr("formId", FormatFormId(formId));
+      json.keyStr("type", item.typeStr);
+      json.keyInt("count", item.count);
+      json.keyInt("condition", item.condition);
+      json.endObject();
     }
   }
   json.endArray();
@@ -1392,7 +1414,11 @@ static void ApplySyncLock(bool wantLock) {
       // Disable movement, Pip-Boy, fighting, POV switch, looking, rollover and
       // sneaking — a full "cutscene" style lock so nothing can be done.
       Script::RunScriptLine2(kSyncDisableControlsCmd, player, true);
-      PipBoyLog("SYNC", "Lock ON: issued %s", kSyncDisableControlsCmd);
+      // xNVSE's DisablePlayerControlsAltEx misses the camera hook, so the mouse
+      // can still move the camera. We apply the vanilla command ONLY for the 
+      // Looking flag (arg 5) to freeze the camera without breaking other mods' movement stacks.
+      Script::RunScriptLine2("DisablePlayerControls 0 0 0 0 1 0 0", player, true);
+      PipBoyLog("SYNC", "Lock ON: issued %s and vanilla Look disable", kSyncDisableControlsCmd);
       g_syncControlsDisabled = true;
     }
     if (IsHudReadyForSyncOverlay() && !g_syncOverlayInjected)
@@ -1401,7 +1427,8 @@ static void ApplySyncLock(bool wantLock) {
     const bool wasLocked = g_syncControlsDisabled;
     if (g_syncControlsDisabled) {
       Script::RunScriptLine2(kSyncEnableControlsCmd, player, true);
-      PipBoyLog("SYNC", "Lock OFF: issued %s", kSyncEnableControlsCmd);
+      Script::RunScriptLine2("EnablePlayerControls 0 0 0 0 1 0 0", player, true);
+      PipBoyLog("SYNC", "Lock OFF: issued %s and vanilla Look enable", kSyncEnableControlsCmd);
       g_syncControlsDisabled = false;
     }
     if (g_syncOverlayInjected)
@@ -1409,6 +1436,30 @@ static void ApplySyncLock(bool wantLock) {
     if (wasLocked)
       RequestHudRefreshAfterSyncUnlock();
   }
+}
+
+static DWORD g_lastEquipFormId = 0;
+static DWORD g_lastEquipTime = 0;
+
+static int GetItemCountForEquip(PlayerCharacter *player, UInt32 targetFormId) {
+  if (!player)
+    return 1;
+  ExtraContainerChanges *containerChanges =
+      (ExtraContainerChanges *)player->extraDataList.GetByType(
+          kExtraData_ContainerChanges);
+  if (!containerChanges || !containerChanges->data ||
+      !containerChanges->data->objList)
+    return 1;
+
+  int count = 0;
+  for (auto iter = containerChanges->data->objList->Begin(); !iter.End(); ++iter) {
+    auto *entry = iter.Get();
+    if (entry && entry->type && entry->type->refID == targetFormId) {
+      if (entry->countDelta > 0)
+        count += entry->countDelta;
+    }
+  }
+  return count > 0 ? count : 1;
 }
 
 static void ExecutePipBoyCommand(const std::string &line) {
@@ -1437,9 +1488,25 @@ static void ExecutePipBoyCommand(const std::string &line) {
     return;
 
   if (verb == "USE" || verb == "EQUIP") {
-    // USE (ingestibles) and EQUIP both go through vanilla equipitem
-    if (!RunVanillaItemCommand(player, form, true))
-      player->EquipItem(form, 1, NULL, 1, false, 1);
+    if (verb == "EQUIP") {
+      const DWORD now = GetTickCount();
+      if (formId == g_lastEquipFormId && now - g_lastEquipTime < 500) {
+        PipBoyLog("CMD-IN", "EQUIP debounced (duplicate within 500ms)");
+        return;
+      }
+      g_lastEquipFormId = formId;
+      g_lastEquipTime = now;
+    }
+    int countToEquip = GetItemCountForEquip(player, formId);
+    if (countToEquip > 1) {
+      // Direct call is required for stacked items to prevent the engine from
+      // splitting the stack into 1 equipped and (N-1) unequipped.
+      player->EquipItem(form, countToEquip, NULL, 1, false, 1);
+    } else {
+      // USE (ingestibles) and EQUIP both go through vanilla equipitem
+      if (!RunVanillaItemCommand(player, form, true))
+        player->EquipItem(form, 1, NULL, 1, false, 1);
+    }
   } else if (verb == "UNEQUIP") {
     if (!RunVanillaItemCommand(player, form, false))
       player->UnequipItem(form, 1, NULL, 1, false, 1);
@@ -1495,6 +1562,18 @@ void PipeServerThread() {
           WriteFile(hPipe, loadMsg, (DWORD)strlen(loadMsg), &written, NULL);
           PipBoyLog("PIPE-OUT", "saveLoad event");
           lastSent.clear();
+        }
+
+        if (g_mainMenuPending.exchange(false)) {
+          const char *mainMenuMsg = "{\"event\":\"mainMenu\"}\n";
+          DWORD written = 0;
+          WriteFile(hPipe, mainMenuMsg, (DWORD)strlen(mainMenuMsg), &written, NULL);
+          PipBoyLog("PIPE-OUT", "mainMenu event");
+          lastSent.clear();
+          {
+            std::lock_guard<std::mutex> lock(g_snapshotMutex);
+            g_latestSnapshot.clear();
+          }
         }
 
         std::string snapshot;
@@ -1602,12 +1681,14 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
     PipBoyLog("MSG", "ExitGame");
     g_gameLoaded = false;
     g_syncLockRequested = false;
+    g_mainMenuPending = true;
     ResetSyncLockState(true);
     break;
   case NVSEMessagingInterface::kMessage_ExitToMainMenu:
     PipBoyLog("MSG", "ExitToMainMenu");
     g_gameLoaded = false;
     g_syncLockRequested = false;
+    g_mainMenuPending = true;
     ResetSyncLockState(true);
     break;
   case NVSEMessagingInterface::kMessage_MainGameLoop:

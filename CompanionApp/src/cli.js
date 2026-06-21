@@ -236,6 +236,10 @@ async function main() {
     // sync engine doesn't echo the game's matching decrement back to it
     if (evt.action === 'use') {
       syncEngine.notifyDeviceConsumed(pipeFormId);
+    } else if (evt.action === 'equip') {
+      syncEngine.notifyDeviceEquipped(pipeFormId);
+    } else if (evt.action === 'unequip') {
+      syncEngine.notifyDeviceUnequipped(pipeFormId);
     }
 
     if (pipeClient.connected) {

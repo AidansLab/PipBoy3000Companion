@@ -4,6 +4,8 @@ Sync your **Fallout 3** and **Fallout: New Vegas** player stats and inventory to
 
 > **⚠ DISCLAIMER**: This is an unofficial fan project. Not affiliated with or endorsed by Bethesda Softworks, The Wand Company, or any other entity.
 
+> **⚠ WARNING**: Compatibility with mod and modpacks that adds or modifies items and/or modifies gameplay is not guaranteed. YUP is specifically not supported, as the mod developer decided to change the formid's on some items.
+
 ## How It Works
 
 ```

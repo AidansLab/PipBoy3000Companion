@@ -86,6 +86,10 @@ export class SyncEngine extends EventEmitter {
     // we expect to see echoed back in an upcoming game snapshot.
     // gameFormId (lowercase) -> { count, time }
     this._deviceConsumed = new Map();
+    // Device-initiated equip/unequip — suppress bag-count echoes (equip moves 1
+    // to worn without reducing total owned; unequip returns 1 to bag).
+    // gameFormId (lowercase) -> { action: 'equip'|'unequip', count, time }
+    this._deviceEquipPending = new Map();
     this.stats = {
       snapshotsProcessed: 0,
       commandsSent: 0,
@@ -575,6 +579,32 @@ export class SyncEngine extends EventEmitter {
   }
 
   /**
+   * User equipped an item on the Pip-Boy. The game moves one unit to the worn
+   * slot but total owned is unchanged — do not mirror a bag-count drop on device.
+   */
+  notifyDeviceEquipped(gameFormId) {
+    const key = String(gameFormId).toLowerCase();
+    const entry = this._deviceEquipPending.get(key) || { action: 'equip', count: 0, time: 0 };
+    entry.action = 'equip';
+    entry.count++;
+    entry.time = Date.now();
+    this._deviceEquipPending.set(key, entry);
+  }
+
+  /**
+   * User unequipped on the Pip-Boy. The game returns one unit to the bag but
+   * total owned is unchanged — do not mirror a bag-count rise on device.
+   */
+  notifyDeviceUnequipped(gameFormId) {
+    const key = String(gameFormId).toLowerCase();
+    const entry = this._deviceEquipPending.get(key) || { action: 'unequip', count: 0, time: 0 };
+    entry.action = 'unequip';
+    entry.count++;
+    entry.time = Date.now();
+    this._deviceEquipPending.set(key, entry);
+  }
+
+  /**
    * Pip-Boy restored pre-sync data (only possible when cmode is off — companion
    * app disconnected). Pause game sync until resync; firmware already cleared PRESYNC.
    */
@@ -611,6 +641,30 @@ export class SyncEngine extends EventEmitter {
     const taken = Math.min(entry.count, max);
     entry.count -= taken;
     if (entry.count <= 0) this._deviceConsumed.delete(key);
+    return taken;
+  }
+
+  /**
+   * Suppress inventory count echoes from a device-initiated equip/unequip.
+   * @param {'down'|'up'} direction down = bag lost a unit (equip), up = bag gained (unequip)
+   * @returns {number} Units to suppress
+   */
+  _takeDeviceEquipPending(gameFormId, max, direction) {
+    const key = String(gameFormId).toLowerCase();
+    const entry = this._deviceEquipPending.get(key);
+    if (!entry) return 0;
+
+    if (Date.now() - entry.time > 10000) {
+      this._deviceEquipPending.delete(key);
+      return 0;
+    }
+
+    const wantAction = direction === 'down' ? 'equip' : 'unequip';
+    if (entry.action !== wantAction) return 0;
+
+    const taken = Math.min(entry.count, max);
+    entry.count -= taken;
+    if (entry.count <= 0) this._deviceEquipPending.delete(key);
     return taken;
   }
 
@@ -702,19 +756,24 @@ export class SyncEngine extends EventEmitter {
         if (countDelta > 0) {
           const formId = this._resolveFormId(id);
           if (formId === null) continue;
+          const addQty = countDelta - this._takeDeviceEquipPending(id, countDelta, 'up');
+          if (addQty <= 0) continue;
           const cat = this._toPipBoyCategory(currentItem.type);
           if (cat) this._lastChangedCategories.add(cat);
           if (this._itemHasDegradedCondition(currentItem)) {
             commands.push(
-              this._buildAddItemHealthPercentCommand(formId, countDelta, currentItem.condition)
+              this._buildAddItemHealthPercentCommand(formId, addQty, currentItem.condition)
             );
           } else {
-            commands.push(this._buildAddItemCommand(formId, countDelta));
+            commands.push(this._buildAddItemCommand(formId, addQty));
           }
         } else if (countDelta < 0) {
           // Skip decrements the device already applied to itself (item used
           // on the Pip-Boy and mirrored into the game by us)
-          const removeQty = Math.abs(countDelta) - this._takeDeviceConsumed(id, Math.abs(countDelta));
+          const removeQty =
+            Math.abs(countDelta) -
+            this._takeDeviceConsumed(id, Math.abs(countDelta)) -
+            this._takeDeviceEquipPending(id, Math.abs(countDelta), 'down');
           if (removeQty <= 0) continue;
 
           const formId = this._resolveFormId(id);
@@ -1289,6 +1348,7 @@ export class SyncEngine extends EventEmitter {
     this._inventorySyncPaused = false;
     this.previousState = null;
     this._deviceConsumed.clear();
+    this._deviceEquipPending.clear();
     this.emit('status', 'Forced full resync on next snapshot');
   }
 
@@ -1299,6 +1359,7 @@ export class SyncEngine extends EventEmitter {
     this._inventorySyncPaused = false;
     this.previousState = null;
     this._deviceConsumed.clear();
+    this._deviceEquipPending.clear();
     this.emit('status', 'Game save loaded — full resync on next snapshot');
   }
 

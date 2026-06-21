@@ -303,6 +303,10 @@ export class CompanionApp extends EventEmitter {
 
       if (evt.action === 'use') {
         this.syncEngine.notifyDeviceConsumed(pipeFormId);
+      } else if (evt.action === 'equip') {
+        this.syncEngine.notifyDeviceEquipped(pipeFormId);
+      } else if (evt.action === 'unequip') {
+        this.syncEngine.notifyDeviceUnequipped(pipeFormId);
       }
 
       if (this.pipeClient.connected) {
@@ -357,6 +361,14 @@ export class CompanionApp extends EventEmitter {
         try {
           await this.bridge.sendCommand('cmode = !1');
         } catch (_) {}
+      }
+      this._emitStatus();
+    });
+    this.pipeClient.on('main-menu', () => {
+      this.log('status', 'Game returned to main menu');
+      this.syncEngine.setEnabled(false);
+      if (!this.options.game) {
+        this.syncEngine.clearGameMode();
       }
       this._emitStatus();
     });

@@ -96,7 +96,13 @@ export class PipeClient extends EventEmitter {
       try {
         const msg = JSON.parse(line);
         if (msg.event === 'saveLoad') {
+          this.lastSnapshot = null;
           this.emit('save-load', msg);
+          continue;
+        }
+        if (msg.event === 'mainMenu') {
+          this.lastSnapshot = null;
+          this.emit('main-menu', msg);
           continue;
         }
         this.lastSnapshot = msg;
