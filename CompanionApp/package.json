@@ -1,6 +1,6 @@
 {
   "name": "fallout-pipboy-sync",
-  "version": "0.9.85",
+  "version": "0.9.9",
   "description": "Sync Fallout 3 / New Vegas player stats and inventory to The Wand Company's Pip-Boy 3000 over USB",
   "main": "electron/main.js",
   "type": "module",
