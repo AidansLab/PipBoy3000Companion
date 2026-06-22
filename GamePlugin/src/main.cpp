@@ -58,7 +58,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #define PLUGIN_NAME "FalloutPipBoySync"
-#define PLUGIN_VERSION 24
+#define PLUGIN_VERSION 25
 
 // Write FalloutPipBoySync.log beside this DLL (Data/NVSE/Plugins/).
 #ifndef PIPBOY_VERBOSE_LOG
@@ -281,11 +281,19 @@ static bool IsModGameplayMenuOpen() {
          InterfaceManager::IsMenuVisible(kMenuType_LevelUp);
 }
 
-static bool IsPipBoyMenuOpen() {
+static bool IsPipBoyTabMenuOpen() {
   return InterfaceManager::IsMenuVisible(kMenuType_Inventory) ||
          InterfaceManager::IsMenuVisible(kMenuType_Stats) ||
          InterfaceManager::IsMenuVisible(kMenuType_Map);
 }
+
+static bool IsPipBoyRepairOrModMenuOpen() {
+  return InterfaceManager::IsMenuVisible(kMenuType_Repair) ||
+         InterfaceManager::IsMenuVisible(kMenuType_ItemMod);
+}
+
+// Pip-Boy STATS/ITEMS/DATA tabs (used for snapshot gating and session start).
+static bool IsPipBoyMenuOpen() { return IsPipBoyTabMenuOpen(); }
 
 // ExtraHealth::health is current hit points; TESHealthForm::health is the
 // maximum. In-game condition is current / max * 100 (matches NVSE
@@ -738,10 +746,20 @@ __declspec(naked) static void EngineSyncPipBoyManagerLightOnly() {
 #endif
 
 // Companion torch intent (physical Pip-Boy ITEMS shortcut). Spell-only toggles
-// while the in-game Pip-Boy menu is open skip the manager UI; reconcile on close.
+// while the in-game Pip-Boy UI is on screen skip the manager UI; reconcile on close.
 static bool g_companionTorchDesired = false;
-static bool g_pipBoyMenuWasOpen = false;
+static bool g_pipBoyChromeSession = false;
+static bool g_pipBoyTorchUiWasActive = false;
 static bool g_lastObservedTorchOn = false;
+
+// True while the Pip-Boy 3D chrome is visible (tabs or Repair/Mod from Pip-Boy).
+static bool IsPipBoyTorchUiActive() {
+  if (IsPipBoyTabMenuOpen())
+    return true;
+  if (IsPipBoyRepairOrModMenuOpen() && g_pipBoyChromeSession)
+    return true;
+  return false;
+}
 
 static void PlayPipBoyLightSound(PlayerCharacter *player, bool wantOn) {
   if (!player)
@@ -1639,13 +1657,13 @@ static void ExecutePipBoyCommand(const std::string &line) {
   if (line == "TORCH ON") {
     PlayerCharacter *player = PlayerCharacter::GetSingleton();
     g_companionTorchDesired = true;
-    SetPipBoyLight(player, true, IsPipBoyMenuOpen());
+    SetPipBoyLight(player, true, IsPipBoyTorchUiActive());
     return;
   }
   if (line == "TORCH OFF") {
     PlayerCharacter *player = PlayerCharacter::GetSingleton();
     g_companionTorchDesired = false;
-    SetPipBoyLight(player, false, IsPipBoyMenuOpen());
+    SetPipBoyLight(player, false, IsPipBoyTorchUiActive());
     return;
   }
 
@@ -1878,23 +1896,31 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
           RefreshHudAfterSyncUnlock();
       }
 
-      // Spell-only torch toggles while the Pip-Boy menu is open must be
-      // completed when the menu closes or the light silently turns off.
+      // Spell-only torch toggles while the Pip-Boy UI is on screen must be
+      // completed when it closes or the light silently turns off.
       {
-        const bool pipBoyOpen = IsPipBoyMenuOpen();
-        if (!g_pipBoyMenuWasOpen && pipBoyOpen && !g_companionTorchDesired) {
+        if (IsPipBoyTabMenuOpen())
+          g_pipBoyChromeSession = true;
+
+        const bool pipBoyTorchUi = IsPipBoyTorchUiActive();
+
+        if (!g_pipBoyTorchUiWasActive && pipBoyTorchUi &&
+            !g_companionTorchDesired) {
           try {
             SyncPipBoyManagerLight(false);
           } catch (...) {
           }
         }
-        if (g_pipBoyMenuWasOpen && !pipBoyOpen) {
+        if (g_pipBoyTorchUiWasActive && !pipBoyTorchUi) {
           try {
             ReconcileCompanionTorchAfterPipBoyClose();
           } catch (...) {
           }
         }
-        g_pipBoyMenuWasOpen = pipBoyOpen;
+        if (!IsPipBoyTabMenuOpen() && !IsPipBoyRepairOrModMenuOpen())
+          g_pipBoyChromeSession = false;
+
+        g_pipBoyTorchUiWasActive = pipBoyTorchUi;
       }
 
       // Apply/clear the initial-sync control lock (main thread only)
@@ -1923,7 +1949,7 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
       // the light off/on outside the physical Pip-Boy shortcut.
       {
         PlayerCharacter *player = PlayerCharacter::GetSingleton();
-        if (player && !IsPipBoyMenuOpen()) {
+        if (player && !IsPipBoyTorchUiActive()) {
           const bool torchOn = IsPipBoyLightOn(player);
           if (torchOn != g_lastObservedTorchOn) {
             g_companionTorchDesired = torchOn;
