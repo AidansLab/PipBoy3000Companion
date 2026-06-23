@@ -74,9 +74,10 @@ describe('SyncEngine', () => {
         perks: [],
       });
 
-      const addCmd = bridge.sentCommands.find(c => c.includes("id=86430"));
-      assert.ok(addCmd, 'Should have a command for AID item 86430');
-      assert.ok(addCmd.includes('cnt=5'));
+      const addCmd = bridge.sentCommands.find(c => c.includes("additemhealthpercent"));
+      assert.ok(addCmd, 'Should have an additemhealthpercent command');
+      assert.ok(addCmd.includes('86430'));
+      assert.ok(addCmd.includes('5'));
     });
 
     it('should set cnd for items with degraded condition', async () => {
@@ -89,9 +90,10 @@ describe('SyncEngine', () => {
         perks: [],
       });
 
-      const cmd = bridge.sentCommands.find(c => c.includes("id=17186"));
-      assert.ok(cmd, 'Should have a command for WEAP item 17186');
-      assert.ok(cmd.includes('cnd=75'));
+      const cmd = bridge.sentCommands.find(c => c.includes("additemhealthpercent"));
+      assert.ok(cmd, 'Should have an additemhealthpercent command for 17186');
+      assert.ok(cmd.includes('17186'));
+      assert.ok(cmd.includes('75'));
     });
 
     it('should normalize 0–1 game condition to 0–100 percent', async () => {
@@ -104,9 +106,10 @@ describe('SyncEngine', () => {
         perks: [],
       });
 
-      const cmd = bridge.sentCommands.find(c => c.includes("id=17186"));
+      const cmd = bridge.sentCommands.find(c => c.includes("additemhealthpercent"));
       assert.ok(cmd, 'Should convert 0.75 to condition 75');
-      assert.ok(cmd.includes('cnd=75'));
+      assert.ok(cmd.includes('17186'));
+      assert.ok(cmd.includes('75'));
     });
 
     it('should add perks on first sync', async () => {
@@ -117,7 +120,7 @@ describe('SyncEngine', () => {
         perks: ['0x00031DC4'],
       });
 
-      const cmd = bridge.sentCommands.find(c => c.includes('addperk'));
+      const cmd = bridge.sentCommands.find(c => c.includes('safeaddperk'));
       assert.ok(cmd);
       assert.ok(cmd.includes('204228'));
     });
@@ -461,7 +464,7 @@ describe('SyncEngine', () => {
       assert.ok(bridge.sentCommands.some((c) => c.includes("setav('ammoActive', 5, !1)")));
       assert.ok(bridge.sentCommands.some((c) => c.includes("setav('ammoUsable', [5,6,7], !1)")));
       assert.ok(
-        bridge.sentCommands.some((c) => c.includes("Pip.CURRENT.id==='AMMO'"))
+        bridge.sentCommands.some((c) => c.includes("player.refreshequip('AMMO')"))
       );
     });
 
@@ -492,10 +495,9 @@ describe('SyncEngine', () => {
       });
       await settle();
 
-      const fullSkillCmd = bridge.sentCommands.find((c) => c.includes('SKILLS.DAT'));
-      assert.ok(fullSkillCmd, 'Full sync should write skills via SKILLS.DAT lookup');
+      const fullSkillCmd = bridge.sentCommands.find((c) => c.includes('syncskills'));
+      assert.ok(fullSkillCmd, 'Full sync should write skills via syncskills');
       assert.ok(fullSkillCmd.includes('"guns":80'));
-      assert.ok(fullSkillCmd.includes('SKILLS.JSON'));
 
       bridge.sentCommands.length = 0;
 
@@ -507,7 +509,7 @@ describe('SyncEngine', () => {
       });
       await settle();
 
-      const incSkillCmd = bridge.sentCommands.find((c) => c.includes('SKILLS.DAT'));
+      const incSkillCmd = bridge.sentCommands.find((c) => c.includes('syncskills'));
       assert.ok(incSkillCmd, 'Incremental sync should update changed skills');
       assert.ok(incSkillCmd.includes('"guns":90'));
 
@@ -522,7 +524,7 @@ describe('SyncEngine', () => {
       await settle();
 
       assert.ok(
-        !bridge.sentCommands.some((c) => c.includes('SKILLS.DAT')),
+        !bridge.sentCommands.some((c) => c.includes('syncskills')),
         'Unchanged skills should not re-sync'
       );
     });
@@ -542,7 +544,7 @@ describe('SyncEngine', () => {
       });
       await settle();
 
-      const skillCmd = bridge.sentCommands.find((c) => c.includes('SKILLS.DAT'));
+      const skillCmd = bridge.sentCommands.find((c) => c.includes('syncskills'));
       assert.ok(skillCmd);
       assert.ok(skillCmd.includes('"guns":50'));
       assert.ok(!skillCmd.includes('survival'));
@@ -565,11 +567,10 @@ describe('SyncEngine', () => {
       });
       await settle();
 
-      const fullCmd = bridge.sentCommands.find((c) => c.includes('REP.JSON'));
+      const fullCmd = bridge.sentCommands.find((c) => c.includes('syncfactions'));
       assert.ok(fullCmd, 'Full sync should write faction reputation');
       assert.ok(fullCmd.includes('"name":"NCR"'));
       assert.ok(fullCmd.includes('"tier":1'));
-      assert.ok(fullCmd.includes('REP_VISIBLE.JSON'));
       assert.ok(fullCmd.includes('"discovered":false'));
 
       bridge.sentCommands.length = 0;
@@ -586,7 +587,7 @@ describe('SyncEngine', () => {
       });
       await settle();
 
-      const incCmd = bridge.sentCommands.find((c) => c.includes('REP.JSON'));
+      const incCmd = bridge.sentCommands.find((c) => c.includes('syncfactions'));
       assert.ok(incCmd, 'Incremental sync should update factions');
       assert.ok(incCmd.includes('"name":"Goodsprings"'));
       assert.ok(incCmd.includes('"tier":2'));
@@ -606,7 +607,7 @@ describe('SyncEngine', () => {
       await settle();
 
       assert.ok(
-        !bridge.sentCommands.some((c) => c.includes('REP.JSON')),
+        !bridge.sentCommands.some((c) => c.includes('syncfactions')),
         'Unchanged factions should not re-sync'
       );
     });
@@ -628,7 +629,7 @@ describe('SyncEngine', () => {
       });
       await settle();
 
-      const cmd = bridge.sentCommands.find((c) => c.includes('REP_VISIBLE.JSON'));
+      const cmd = bridge.sentCommands.find((c) => c.includes('syncfactions'));
       assert.ok(cmd, 'Should sync factions from player.factions');
       assert.ok(cmd.includes('"name":"Powder Gangers","tier":12,"discovered":true'));
     });
@@ -665,10 +666,9 @@ describe('SyncEngine', () => {
       });
       await settle();
 
-      const cmd = bridge.sentCommands.find((c) => c.includes('REP_VISIBLE.JSON'));
+      const cmd = bridge.sentCommands.find((c) => c.includes('syncfactions'));
       assert.ok(cmd, 'Tier change should sync factions');
-      assert.ok(cmd.includes("Pip.emit('factions')"));
-      assert.ok(!cmd.includes('Pip.changeMenu'));
+      assert.ok(cmd.includes('!1'));
     });
 
     it('should soft-refresh SPECIAL on agility change without changeMenu', async () => {
@@ -734,10 +734,9 @@ describe('SyncEngine', () => {
       });
       await settle();
 
-      const skillCmd = bridge.sentCommands.find((c) => c.includes('SKILLS.DAT'));
+      const skillCmd = bridge.sentCommands.find((c) => c.includes('syncskills'));
       assert.ok(skillCmd);
-      assert.ok(skillCmd.includes("Pip.emit('skills')"));
-      assert.ok(!skillCmd.includes('Pip.changeMenu'));
+      assert.ok(skillCmd.includes('"guns":90'));
     });
 
     it('should ignore sub-whole-number hp changes (regen ticks)', async () => {
@@ -800,7 +799,7 @@ describe('SyncEngine', () => {
       await settle();
 
       // Should only add the new Stimpak, not re-add Nuka-Cola
-      const addCmds = bridge.sentCommands.filter(c => c.includes('inv.add') || c.includes('InvFile'));
+      const addCmds = bridge.sentCommands.filter(c => c.includes('additemhealthpercent'));
       assert.equal(addCmds.length, 1);
       assert.ok(addCmds[0].includes('86072')); // Hex: 0x00015038 -> Dec: 86072
     });
@@ -828,7 +827,7 @@ describe('SyncEngine', () => {
       });
       await settle();
 
-      const addCmd = bridge.sentCommands.find(c => c.includes('cnt=2'));
+      const addCmd = bridge.sentCommands.find(c => c.includes('additemhealthpercent') && c.includes(',2,100'));
       assert.ok(addCmd);
     });
 
@@ -851,7 +850,7 @@ describe('SyncEngine', () => {
       });
       await settle();
 
-      const addPerk = bridge.sentCommands.find(c => c.includes('addperk'));
+      const addPerk = bridge.sentCommands.find(c => c.includes('safeaddperk'));
       assert.ok(addPerk);
       assert.ok(addPerk.includes('204215')); // Hex: 0x00031DB7 -> Dec: 204215
       // Should NOT re-add the existing perk
@@ -877,7 +876,7 @@ describe('SyncEngine', () => {
       });
       await settle();
 
-      const removePerk = bridge.sentCommands.find(c => c.includes('removeperk'));
+      const removePerk = bridge.sentCommands.find(c => c.includes('saferemoveperk'));
       assert.ok(removePerk);
       assert.ok(removePerk.includes('204215')); // Hex: 0x00031DB7 -> Dec: 204215
     });
@@ -960,7 +959,7 @@ describe('SyncEngine', () => {
       });
       await settle();
 
-      const removeCmd = bridge.sentCommands.find(c => c.includes('qty=2'));
+      const removeCmd = bridge.sentCommands.find(c => c.includes('removeitem') && c.includes(',2'));
       assert.ok(removeCmd, 'Should send a removal for the in-game uses');
     });
 

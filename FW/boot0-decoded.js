@@ -161,6 +161,148 @@ global.cmode = !1;
     return !1;
   };
 
+  Player.prototype.removeitem = function (id, qty) {
+    if (qty <= 0) return;
+    const cats = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
+    for (let ci = 0; ci < cats.length; ci++) {
+      const v = cats[ci];
+      try {
+        const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/${v}.DAT`),
+          i = db.ids.indexOf(id);
+        if ((db.close(), i < 0)) continue;
+        const onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === v;
+        const inv = onMenu
+          ? Pip.inv
+          : new InvFile(`INV/${NV ? 'NV' : 'F3'}/${v}.INV`, { idOrder: db.ids });
+        const inx = inv.indexOf(id);
+        if (inx >= 0) {
+          let it = inv.get(inx);
+          it.cnt -= qty;
+          if (it.cnt > 0) inv.set(inx, it);
+          else inv.remove(inx);
+          if (onMenu) {
+            Pip.emit('scroller', 'count', inv.count);
+            if (v === 'MISC' && id === CAPS_FORM_ID && Pip.MODE === 1 && Pip.renderHeader)
+              Pip.renderHeader();
+          } else inv.sync();
+          return !0;
+        }
+      } catch (e) {}
+    }
+    return !1;
+  };
+
+  Player.prototype.setitemcondition = function (id, cnd) {
+    const cats = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
+    for (let ci = 0; ci < cats.length; ci++) {
+      const v = cats[ci];
+      try {
+        const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/${v}.DAT`),
+          i = db.ids.indexOf(id);
+        if ((db.close(), i < 0)) continue;
+        const onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === v;
+        const inv = onMenu
+          ? Pip.inv
+          : new InvFile(`INV/${NV ? 'NV' : 'F3'}/${v}.INV`, { idOrder: db.ids });
+        const inx = inv.indexOf(id);
+        if (inx >= 0) {
+          let it = inv.get(inx);
+          it.cnd = cnd;
+          inv.set(inx, it);
+          if (onMenu) {
+            Pip.emit('scroller', 'refresh');
+          } else inv.sync();
+          return !0;
+        }
+      } catch (e) {}
+    }
+    return !1;
+  };
+
+  Player.prototype.safeaddperk = function (p) {
+    try {
+      const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/PERK.DAT`);
+      if (db.ids.indexOf(p) >= 0) this.addperk(p);
+      db.close();
+    } catch (e) {}
+  };
+
+  Player.prototype.saferemoveperk = function (p) {
+    try {
+      const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/PERK.DAT`);
+      if (db.ids.indexOf(p) >= 0) this.removeperk(p);
+      db.close();
+    } catch (e) {}
+  };
+
+  Player.prototype.refreshequip = function (v) {
+    if (typeof Pip !== 'undefined' && Pip.CURRENT && (!v || Pip.CURRENT.id === v)) {
+      if (Pip.refreshEquipState) Pip.refreshEquipState();
+      else Pip.emit('scroller', 'refreshEquip');
+    }
+  };
+
+  Player.prototype.syncskills = function (g) {
+    try {
+      var m = NV ? 'NV' : 'F3',
+        db = new DataFile('DATA/' + m + '/SKILLS.DAT'),
+        p = 'SETTINGS/' + m + '_SKILLS.JSON',
+        u = loadJSONWithDefaults(p, 'SETTINGS/DEFAULT/' + m + '_SKILLS.JSON'),
+        chg = !1,
+        nm = function (s) {
+          return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        },
+        i, id, dat, k, lvl, dt;
+      for (i = 0; i < db.ids.length; i++) {
+        id = db.ids[i];
+        dat = db.getId(id);
+        dt = nm(dat.txt);
+        for (k in g) {
+          if (dt === nm(k)) {
+            lvl = E.clip(Math.round(g[k]), 1, 100);
+            if (u[Pip.formatId(id)] !== lvl) {
+              u[Pip.formatId(id)] = lvl;
+              chg = !0;
+            }
+            break;
+          }
+        }
+      }
+      db.close();
+      if (chg) {
+        require('fs').writeFileSync(p, JSON.stringify(u));
+        if (typeof Pip !== 'undefined' && Pip.CURRENT && Pip.CURRENT.id === 'SKILLS' && Pip.emit) {
+          Pip.emit('skills');
+        }
+      }
+    } catch (e) {
+      debug('skill sync', e);
+    }
+  };
+
+  Player.prototype.syncfactions = function (d, visListChanged) {
+    try {
+      var rep = {}, vis = [], i, f, t;
+      for (i = 0; i < d.length; i++) {
+        f = d[i];
+        if (!f.discovered) continue;
+        t = E.clip(Math.round(f.tier), 0, 15);
+        rep[f.name] = t;
+        vis.push(f.name);
+      }
+      var fs = require('fs');
+      fs.writeFileSync('SETTINGS/REP.JSON', JSON.stringify(rep));
+      fs.writeFileSync('SETTINGS/REP_VISIBLE.JSON', JSON.stringify(vis));
+      if (typeof Pip !== 'undefined' && Pip.CURRENT && Pip.CURRENT.id === 'GENERAL') {
+        if (visListChanged && Pip.changeMenu) Pip.changeMenu();
+        else if (Pip.emit) Pip.emit('factions');
+      }
+    } catch (e) {
+      debug('faction sync', e);
+    }
+  };
+
+
   Pip.refreshEquipState = function () {
     if (!Pip.CURRENT) return;
     Pip.emit('scroller', 'refreshEquip');

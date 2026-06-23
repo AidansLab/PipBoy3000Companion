@@ -62,7 +62,7 @@ const INVENTORY_CATEGORIES = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
 const CLEAR_INV_CMD = `if(typeof Pip!=='undefined'&&Pip.inv){delete Pip.inv;}['AID','AMMO','APPAREL','MISC','WEAPONS'].forEach(function(v){require('fs').writeFileSync('INV/'+(NV?'NV':'F3')+'/'+v+'.INV','')})`;
 const CLEAR_PERKS_CMD = `require('fs').writeFileSync('SETTINGS/'+(NV?'NV':'F3')+'_PERKS.JSON','{}')`;
 /** Refresh open WEAPONS/APPAREL scroller after remote equip; safe if .boot0 not loaded */
-const REFRESH_EQUIP_CMD = `if(typeof Pip!=='undefined'){if(Pip.refreshEquipState)Pip.refreshEquipState();else Pip.emit('scroller','refreshEquip');}`;
+const REFRESH_EQUIP_CMD = 'player.refreshequip()';
 
 export class SyncEngine extends EventEmitter {
   constructor(serialBridge, formIdMapper) {
@@ -921,21 +921,7 @@ export class SyncEngine extends EventEmitter {
     if (Object.keys(filtered).length === 0) return null;
 
     const payload = JSON.stringify(filtered);
-    return (
-      `(()=>{try{var g=${payload},m=NV?'NV':'F3',` +
-      `db=new DataFile('DATA/'+m+'/SKILLS.DAT'),` +
-      `p='SETTINGS/'+m+'_SKILLS.JSON',` +
-      `u=loadJSONWithDefaults(p,'SETTINGS/DEFAULT/'+m+'_SKILLS.JSON'),` +
-      `chg=!1,nm=function(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'')},` +
-      `i,id,dat,k,lvl,dt;` +
-      `for(i=0;i<db.ids.length;i++){id=db.ids[i];dat=db.getId(id);dt=nm(dat.txt);` +
-      `for(k in g){if(dt===nm(k)){lvl=E.clip(Math.round(g[k]),1,100);` +
-      `if(u[Pip.formatId(id)]!==lvl){u[Pip.formatId(id)]=lvl;chg=!0}break}}}` +
-      `db.close();` +
-      `if(chg){fs.writeFileSync(p,JSON.stringify(u));` +
-      SKILLS_SOFT_REFRESH_CMD + `}}` +
-      `catch(e){debug('skill sync',e)}})()`
-    );
+    return `player.syncskills(${payload})`;
   }
 
   _diffSkills(currentPlayer, previousPlayer) {
@@ -948,9 +934,15 @@ export class SyncEngine extends EventEmitter {
     return commands;
   }
 
-  /** True when a command mutates inventory files (not SETTINGS/REP or skills). */
   _isInventoryRefreshCommand(cmd) {
-    if (cmd.includes('InvFile') || cmd.includes('resetinventory') || cmd.includes('additem')) {
+    if (
+      cmd.includes('InvFile') ||
+      cmd.includes('resetinventory') ||
+      cmd.includes('additem') ||
+      cmd.includes('removeitem') ||
+      cmd.includes('setitemcondition') ||
+      cmd.includes('additemhealthpercent')
+    ) {
       return true;
     }
     if (!cmd.includes('fs.writeFileSync')) return false;
@@ -1018,19 +1010,7 @@ export class SyncEngine extends EventEmitter {
     }
 
     const payload = JSON.stringify(normalized);
-    const generalRefresh = visListChanged
-      ? `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id==='GENERAL'&&Pip.changeMenu)Pip.changeMenu();`
-      : `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id==='GENERAL')Pip.emit('factions');`;
-
-    return (
-      `(()=>{try{var d=${payload},rep={},vis=[],i,f,t;` +
-      `for(i=0;i<d.length;i++){f=d[i];if(!f.discovered)continue;` +
-      `t=E.clip(Math.round(f.tier),0,15);rep[f.name]=t;vis.push(f.name);}` +
-      `fs.writeFileSync('SETTINGS/REP.JSON',JSON.stringify(rep));` +
-      `fs.writeFileSync('SETTINGS/REP_VISIBLE.JSON',JSON.stringify(vis));` +
-      `${generalRefresh}` +
-      `}catch(e){debug('faction sync',e)}})()`
-    );
+    return `player.syncfactions(${payload},${visListChanged ? '!0' : '!1'})`;
   }
 
   _diffFactions(current, previous) {
@@ -1199,9 +1179,7 @@ export class SyncEngine extends EventEmitter {
       }
     }
     if (commands.length > 0) {
-      commands.push(
-        `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id==='AMMO'){if(Pip.refreshEquipState)Pip.refreshEquipState();else Pip.emit('scroller','refreshEquip');}`
-      );
+      commands.push("player.refreshequip('AMMO')");
     }
 
     return commands;
@@ -1234,11 +1212,11 @@ export class SyncEngine extends EventEmitter {
   }
 
   _buildSafeAddPerk(formId) {
-    return `(()=>{var p=${formId},db=new DataFile('DATA/'+(NV?'NV':'F3')+'/PERK.DAT');if(db.ids.indexOf(p)>=0)player.addperk(p);db.close();})()`;
+    return `player.safeaddperk(${formId})`;
   }
 
   _buildSafeRemovePerk(formId) {
-    return `(()=>{var p=${formId},db=new DataFile('DATA/'+(NV?'NV':'F3')+'/PERK.DAT');if(db.ids.indexOf(p)>=0)player.removeperk(p);db.close();})()`;
+    return `player.saferemoveperk(${formId})`;
   }
 
   _normalizeItemCondition(condition) {
@@ -1263,13 +1241,13 @@ export class SyncEngine extends EventEmitter {
 
   _buildSetItemConditionCommand(formId, condition) {
     const cnd = this._normalizeItemCondition(condition);
-    return `(()=>{var id=${formId},cnd=${cnd};['AID','AMMO','APPAREL','MISC','WEAPONS'].forEach(function(v){try{var db=new DataFile('DATA/'+(NV?'NV':'F3')+'/'+v+'.DAT');if(db.ids.indexOf(id)<0){db.close();return;}var onMenu=typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id===v,inv=onMenu?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/'+v+'.INV',{idOrder:db.ids}),i=inv.indexOf(id);if(i<0){db.close();return;}var it=inv.get(i);it.cnd=cnd;inv.set(i,it);if(!onMenu)inv.sync();if(onMenu)Pip.emit('scroller','refresh');db.close();}catch(e){}});})()`;
+    return `player.setitemcondition(${formId},${cnd})`;
   }
 
   _buildAddItemHealthPercentCommand(formId, count, condition) {
     const cnt = count || 1;
     const cnd = this._normalizeItemCondition(condition);
-    return `(()=>{var id=${formId},cnt=${cnt},cnd=${cnd};if(cnt<=0)return;['AID','AMMO','APPAREL','MISC','WEAPONS'].forEach(function(v){try{var db=new DataFile('DATA/'+(NV?'NV':'F3')+'/'+v+'.DAT'),idx=db.ids.indexOf(id);if(db.close(),idx<0)return;var onMenu=typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id===v,inv=onMenu?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/'+v+'.INV',{idOrder:db.ids}),inx=inv.indexOf(id);if(inx>=0){var it=inv.get(inx);it.cnt+=cnt;it.cnd=cnd;inv.set(inx,it);}else inv.add({id:id,cnt:cnt,cnd:cnd});if(!onMenu)inv.sync();if(onMenu)Pip.emit('scroller','count',inv.count);}catch(e){}});})()`;
+    return `player.additemhealthpercent(${formId},${cnt},${cnd})`;
   }
 
   _buildAddItemCommand(formId, count) {
@@ -1277,7 +1255,7 @@ export class SyncEngine extends EventEmitter {
   }
 
   _buildRemoveItemCommand(cat, formId, removeQty) {
-    return `(()=>{var id=${formId},qty=${removeQty};if(qty<=0)return;['AID','AMMO','APPAREL','MISC','WEAPONS'].forEach(function(v){try{var db=new DataFile('DATA/'+(NV?'NV':'F3')+'/'+v+'.DAT');if(db.ids.indexOf(id)<0){db.close();return;}var onMenu=typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id===v,inv=onMenu?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/'+v+'.INV',{idOrder:db.ids}),i=inv.indexOf(id);if(i>=0){var it=inv.get(i);it.cnt-=qty;if(it.cnt>0)inv.set(i,it);else inv.remove(i);if(!onMenu)inv.sync();if(onMenu)Pip.emit('scroller','count',inv.count);}db.close();}catch(e){}});})()`;
+    return `player.removeitem(${formId},${removeQty})`;
   }
 
   /**
