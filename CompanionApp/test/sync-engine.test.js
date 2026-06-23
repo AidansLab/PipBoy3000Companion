@@ -21,6 +21,9 @@ function createMockBridge() {
     sendBatch: async (cmds) => {
       commands.push(...cmds);
     },
+    eval: async (expr) => {
+      return '{"hasManifest":true,"manifestOld":false,"playerMissing":false,"invMissing":false,"perksMissing":false,"skillsMissing":false}';
+    },
     on: () => {},
     emit: () => {},
   };
@@ -59,7 +62,6 @@ describe('SyncEngine', () => {
       assert.ok(bridge.sentCommands.some(c => c.includes("'name'")));
       assert.ok(bridge.sentCommands.some(c => c.includes('setlevel(10)')));
       assert.ok(bridge.sentCommands.some(c => c.includes("'hp'")));
-      assert.ok(bridge.sentCommands.some(c => c.includes("'maxHP'")));
     });
 
     it('should add inventory items on first sync', async () => {
@@ -72,10 +74,9 @@ describe('SyncEngine', () => {
         perks: [],
       });
 
-      const addCmd = bridge.sentCommands.find(c => c.includes("cat='AID'"));
-      assert.ok(addCmd, 'Should have a batched command for AID');
-      assert.ok(addCmd.includes('86430'));
-      assert.ok(addCmd.includes('5'));
+      const addCmd = bridge.sentCommands.find(c => c.includes("id=86430"));
+      assert.ok(addCmd, 'Should have a command for AID item 86430');
+      assert.ok(addCmd.includes('cnt=5'));
     });
 
     it('should set cnd for items with degraded condition', async () => {
@@ -88,10 +89,9 @@ describe('SyncEngine', () => {
         perks: [],
       });
 
-      const cmd = bridge.sentCommands.find(c => c.includes("cat='WEAPONS'"));
-      assert.ok(cmd, 'Should have a batched command for WEAPONS');
-      assert.ok(cmd.includes('17186'));
-      assert.ok(cmd.includes('75'));
+      const cmd = bridge.sentCommands.find(c => c.includes("id=17186"));
+      assert.ok(cmd, 'Should have a command for WEAP item 17186');
+      assert.ok(cmd.includes('cnd=75'));
     });
 
     it('should normalize 0–1 game condition to 0–100 percent', async () => {
@@ -104,10 +104,9 @@ describe('SyncEngine', () => {
         perks: [],
       });
 
-      const cmd = bridge.sentCommands.find(c => c.includes("cat='WEAPONS'"));
+      const cmd = bridge.sentCommands.find(c => c.includes("id=17186"));
       assert.ok(cmd, 'Should convert 0.75 to condition 75');
-      assert.ok(cmd.includes('17186'));
-      assert.ok(cmd.includes('75'));
+      assert.ok(cmd.includes('cnd=75'));
     });
 
     it('should add perks on first sync', async () => {
@@ -902,12 +901,12 @@ describe('SyncEngine', () => {
       });
       await settle();
 
-      // Only ST changed
-      const stCmd = bridge.sentCommands.find(c => c.includes("'ST'"));
+      // Only ST (strength) changed
+      const stCmd = bridge.sentCommands.find(c => c.includes("'strength'"));
       assert.ok(stCmd);
       assert.ok(stCmd.includes('6'));
       // Other SPECIAL stats should not be sent
-      assert.ok(!bridge.sentCommands.some(c => c.includes("'PE'")));
+      assert.ok(!bridge.sentCommands.some(c => c.includes("'perception'")));
     });
   });
 

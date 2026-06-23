@@ -1314,8 +1314,8 @@ static void RefreshPipBoyUI() {
     if (Menu *statsMenu = InterfaceManager::GetMenuByType(kMenuType_Stats))
       ThisStdCall(0x7DF230, statsMenu, 4);
   } else if (InterfaceManager::IsMenuVisible(kMenuType_Map)) {
-    if (Menu *mapMenu = InterfaceManager::GetMenuByType(kMenuType_Map))
-      ThisStdCall(0x79DBB0, mapMenu);
+    if (Menu *statsMenu = InterfaceManager::GetMenuByType(kMenuType_Stats))
+      ThisStdCall(0x7DF230, statsMenu, 4);
   }
 }
 
