@@ -302,6 +302,61 @@ global.cmode = !1;
     }
   };
 
+  Player.prototype.settorch = function (on) {
+    if (typeof Pip !== 'undefined' && Pip.setTorch) Pip.setTorch(on);
+  };
+
+  Player.prototype.renderheader = function (onlyItemsMode) {
+    if (typeof Pip !== 'undefined' && Pip.renderHeader) {
+      if (!onlyItemsMode || (Pip.CURRENT && Pip.MODE === 1)) {
+        Pip.renderHeader();
+      }
+    }
+  };
+
+  Player.prototype.fullsyncrefresh = function () {
+    if (typeof Pip !== 'undefined' && Pip.CURRENT) {
+      if (Pip.CURRENT.id === 'SPECIAL' && Pip.emit) Pip.emit('special');
+      else if (Pip.CURRENT.id === 'SKILLS' && Pip.emit) Pip.emit('skills');
+      else if (Pip.MODE === 0 && Pip.CURRENT.id !== 'GENERAL' && Pip.changeMenu) Pip.changeMenu();
+      else if (['WEAPONS', 'APPAREL', 'AID', 'MISC', 'AMMO'].indexOf(Pip.CURRENT.id) >= 0 && Pip.changeMenu) Pip.changeMenu();
+    }
+  };
+
+  Player.prototype.clearinv = function () {
+    if (typeof Pip !== 'undefined' && Pip.inv) {
+      delete Pip.inv;
+    }
+    var fs = require('fs'), m = NV ? 'NV' : 'F3';
+    ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'].forEach(function (v) {
+      try {
+        fs.writeFileSync('INV/' + m + '/' + v + '.INV', '');
+      } catch (e) {}
+    });
+  };
+
+  Player.prototype.clearperks = function () {
+    var fs = require('fs'), m = NV ? 'NV' : 'F3';
+    try {
+      fs.writeFileSync('SETTINGS/' + m + '_PERKS.JSON', '{}');
+    } catch (e) {}
+  };
+
+  Player.prototype.equipapparel = function (ids) {
+    try {
+      var active = [0, 0, 0, 0],
+        m = NV ? 'NV' : 'F3',
+        db = new DataFile('DATA/' + m + '/APPAREL.DAT');
+      ids.forEach(function (id) {
+        var it = db.getId(id);
+        if (it && it.es != null) active[it.es] = id;
+      });
+      db.close();
+      this.setav('equippedApparel', active, !0);
+      this.refreshequip();
+    } catch (e) {}
+  };
+
 
   Pip.refreshEquipState = function () {
     if (!Pip.CURRENT) return;

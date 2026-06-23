@@ -38,12 +38,10 @@ const SKILLS_SOFT_REFRESH_CMD =
   `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id==='SKILLS'&&Pip.emit)Pip.emit('skills');`;
 
 // HP lives in the shared Pip-Boy header; redraw it without rebuilding pages.
-const HP_HEADER_SOFT_REFRESH_CMD =
-  `if(typeof Pip!=='undefined'&&Pip.renderHeader)Pip.renderHeader();`;
+const HP_HEADER_SOFT_REFRESH_CMD = 'player.renderheader();';
 
 // Caps/Wg/HP in the ITEMS chrome — header only, no tab rebuild.
-const ITEMS_HEADER_SOFT_REFRESH_CMD =
-  `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.MODE===1&&Pip.renderHeader)Pip.renderHeader();`;
+const ITEMS_HEADER_SOFT_REFRESH_CMD = 'player.renderheader(!0);';
 
 /** Full menu rebuild for STATS sub-tabs except GENERAL/SPECIAL/SKILLS (soft refresh). */
 const STATS_TAB_FULL_REFRESH_CMD =
@@ -51,16 +49,11 @@ const STATS_TAB_FULL_REFRESH_CMD =
   `Pip.CURRENT.id!=='GENERAL'&&Pip.CURRENT.id!=='SPECIAL'&&Pip.CURRENT.id!=='SKILLS')Pip.changeMenu();`;
 
 /** Used after full sync — inventory tabs still get changeMenu; STATS uses soft where possible. */
-const FULL_SYNC_UI_REFRESH_CMD =
-  `if(typeof Pip!=='undefined'&&Pip.CURRENT){` +
-  `if(Pip.CURRENT.id==='SPECIAL'&&Pip.emit)Pip.emit('special');` +
-  `else if(Pip.CURRENT.id==='SKILLS'&&Pip.emit)Pip.emit('skills');` +
-  `else if(Pip.MODE===0&&Pip.CURRENT.id!=='GENERAL'&&Pip.changeMenu)Pip.changeMenu();` +
-  `else if(['WEAPONS','APPAREL','AID','MISC','AMMO'].indexOf(Pip.CURRENT.id)>=0&&Pip.changeMenu)Pip.changeMenu();}`;
+const FULL_SYNC_UI_REFRESH_CMD = 'player.fullsyncrefresh();';
 
 const INVENTORY_CATEGORIES = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
-const CLEAR_INV_CMD = `if(typeof Pip!=='undefined'&&Pip.inv){delete Pip.inv;}['AID','AMMO','APPAREL','MISC','WEAPONS'].forEach(function(v){require('fs').writeFileSync('INV/'+(NV?'NV':'F3')+'/'+v+'.INV','')})`;
-const CLEAR_PERKS_CMD = `require('fs').writeFileSync('SETTINGS/'+(NV?'NV':'F3')+'_PERKS.JSON','{}')`;
+const CLEAR_INV_CMD = 'player.clearinv()';
+const CLEAR_PERKS_CMD = 'player.clearperks()';
 /** Refresh open WEAPONS/APPAREL scroller after remote equip; safe if .boot0 not loaded */
 const REFRESH_EQUIP_CMD = 'player.refreshequip()';
 
@@ -454,7 +447,7 @@ export class SyncEngine extends EventEmitter {
       !this._shouldSuppressGameToDeviceTorch(player.torch)
     ) {
       commands.push(
-        `if(typeof Pip!=='undefined'&&Pip.setTorch)Pip.setTorch(${player.torch ? '!0' : '!1'});`
+        `player.settorch(${player.torch ? '!0' : '!1'})`
       );
     }
 
@@ -598,7 +591,7 @@ export class SyncEngine extends EventEmitter {
     // Match in-game flashlight to the physical torch LED
     if (this.torchSyncEnabled && player.torch !== undefined) {
       commands.push(
-        `if(typeof Pip!=='undefined'&&Pip.setTorch)Pip.setTorch(${player.torch ? '!0' : '!1'});`
+        `player.settorch(${player.torch ? '!0' : '!1'})`
       );
     }
 
@@ -1208,7 +1201,7 @@ export class SyncEngine extends EventEmitter {
 
   _buildEquipApparelCommand(apparelIds) {
     const idList = apparelIds.join(',');
-    return `(()=>{var active=[0,0,0,0],ids=[${idList}],db=new DataFile('DATA/'+(NV?'NV':'F3')+'/APPAREL.DAT');ids.forEach(function(id){var it=db.getId(id);if(it&&it.es!=null)active[it.es]=id;});db.close();player.setav('equippedApparel',active,!0);${REFRESH_EQUIP_CMD}})()`;
+    return `player.equipapparel([${idList}])`;
   }
 
   _buildSafeAddPerk(formId) {

@@ -58,7 +58,7 @@ describe('SyncEngine', () => {
         perks: [],
       });
 
-      assert.ok(bridge.sentCommands.some(c => c.includes("['AID','AMMO','APPAREL','MISC','WEAPONS'].forEach")));
+      assert.ok(bridge.sentCommands.some(c => c.includes('player.clearinv()')));
       assert.ok(bridge.sentCommands.some(c => c.includes("'name'")));
       assert.ok(bridge.sentCommands.some(c => c.includes('setlevel(10)')));
       assert.ok(bridge.sentCommands.some(c => c.includes("'hp'")));
@@ -175,7 +175,7 @@ describe('SyncEngine', () => {
       });
       await settle();
 
-      assert.ok(bridge.sentCommands.some(c => c.includes('Pip.setTorch(!0)')));
+      assert.ok(bridge.sentCommands.some(c => c.includes('player.settorch(!0)')));
 
       bridge.sentCommands.length = 0;
 
@@ -187,7 +187,7 @@ describe('SyncEngine', () => {
       });
       await settle();
 
-      assert.ok(!bridge.sentCommands.some(c => c.includes('Pip.setTorch')));
+      assert.ok(!bridge.sentCommands.some(c => c.includes('player.settorch')));
     });
 
     it('should sync flashlight on the first (full) sync when enabled by default', async () => {
@@ -198,7 +198,7 @@ describe('SyncEngine', () => {
         perks: [],
       });
 
-      assert.ok(bridge.sentCommands.some(c => c.includes('Pip.setTorch(!0)')));
+      assert.ok(bridge.sentCommands.some(c => c.includes('player.settorch(!0)')));
     });
 
     it('should not sync flashlight when torch sync is disabled', async () => {
@@ -214,7 +214,7 @@ describe('SyncEngine', () => {
         perks: [],
       });
 
-      assert.ok(!bridge.sentCommands.some(c => c.includes('Pip.setTorch')));
+      assert.ok(!bridge.sentCommands.some(c => c.includes('player.settorch')));
     });
 
     it('should not echo game torch off after the device turned it on', async () => {
@@ -240,7 +240,7 @@ describe('SyncEngine', () => {
       });
       await settle();
 
-      assert.ok(!bridge.sentCommands.some((c) => c.includes('Pip.setTorch(!1)')));
+      assert.ok(!bridge.sentCommands.some((c) => c.includes('player.settorch(!1)')));
 
       // Game caught up — device already matches; no redundant setTorch (avoids double sound).
       bridge.sentCommands.length = 0;
@@ -252,7 +252,7 @@ describe('SyncEngine', () => {
       });
       await settle();
 
-      assert.ok(!bridge.sentCommands.some((c) => c.includes('Pip.setTorch')));
+      assert.ok(!bridge.sentCommands.some((c) => c.includes('player.settorch')));
     });
 
     it('should sync game torch off after device-on was confirmed', async () => {
@@ -286,7 +286,7 @@ describe('SyncEngine', () => {
       });
       await settle();
 
-      assert.ok(bridge.sentCommands.some((c) => c.includes('Pip.setTorch(!1)')));
+      assert.ok(bridge.sentCommands.some((c) => c.includes('player.settorch(!1)')));
     });
 
     it('should copy carry weight from the game when it changes', async () => {
@@ -352,7 +352,7 @@ describe('SyncEngine', () => {
       await settle();
 
       assert.ok(bridge.sentCommands.some(c => c.includes("setav('ap', 65, !1)")));
-      assert.ok(bridge.sentCommands.some(c => c.includes('renderHeader')));
+      assert.ok(bridge.sentCommands.some(c => c.includes('renderheader')));
     });
 
     it('should push usable ammo and the loaded ammo type to the device', async () => {
@@ -1013,7 +1013,7 @@ describe('SyncEngine', () => {
       await settle();
 
       // Should have cleared inventory (full sync behavior)
-      assert.ok(bridge.sentCommands.some(c => c.includes("['AID','AMMO','APPAREL','MISC','WEAPONS'].forEach")));
+      assert.ok(bridge.sentCommands.some(c => c.includes('player.clearinv()')));
     });
   });
 
