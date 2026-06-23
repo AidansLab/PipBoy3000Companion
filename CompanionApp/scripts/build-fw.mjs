@@ -119,6 +119,7 @@ async function main() {
   }
 
   console.log('Firmware build complete.');
+  process.exit(0);
 }
 
 main().catch((err) => {

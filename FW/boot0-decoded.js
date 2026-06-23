@@ -357,6 +357,27 @@ global.cmode = !1;
     } catch (e) {}
   };
 
+  Player.prototype.sortandrefreshinv = function (cats) {
+    var m = NV ? 'NV' : 'F3';
+    cats.forEach(function (v) {
+      try {
+        var d = new DataFile('DATA/' + m + '/' + v + '.DAT');
+        var i = (typeof Pip !== 'undefined' && Pip.inv && Pip.CURRENT && Pip.CURRENT.id === v) ? Pip.inv : new InvFile('INV/' + m + '/' + v + '.INV', { idOrder: d.ids });
+        if (i._requiresSort) i.sort(d.ids);
+        if (typeof Pip !== 'undefined' && Pip.CURRENT && Pip.CURRENT.id === v) {
+          Pip.emit('scroller', 'refresh');
+        }
+        d.close();
+      } catch (e) {}
+    });
+  };
+
+  Player.prototype.refreshspecial = function () {
+    if (typeof Pip !== 'undefined' && Pip.CURRENT && Pip.CURRENT.id === 'SPECIAL' && Pip.emit) {
+      Pip.emit('special');
+    }
+  };
+
 
   Pip.refreshEquipState = function () {
     if (!Pip.CURRENT) return;

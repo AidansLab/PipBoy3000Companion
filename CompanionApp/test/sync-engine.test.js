@@ -700,7 +700,7 @@ describe('SyncEngine', () => {
       assert.ok(
         bridge.sentCommands.some((c) => c.includes("player.setav('agility', 4"))
       );
-      assert.ok(bridge.sentCommands.some((c) => c.includes("Pip.emit('special')")));
+      assert.ok(bridge.sentCommands.some((c) => c.includes('player.refreshspecial()')));
       assert.ok(
         !bridge.sentCommands.some(
           (c) => c.includes('Pip.changeMenu') && c.includes("id==='SPECIAL'")

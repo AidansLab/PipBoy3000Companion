@@ -31,8 +31,7 @@ const SPECIAL_SETAV_MARKERS = [
   "player.setav('luck'",
 ];
 
-const SPECIAL_SOFT_REFRESH_CMD =
-  `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id==='SPECIAL'&&Pip.emit)Pip.emit('special');`;
+const SPECIAL_SOFT_REFRESH_CMD = 'player.refreshspecial();';
 
 const SKILLS_SOFT_REFRESH_CMD =
   `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id==='SKILLS'&&Pip.emit)Pip.emit('skills');`;
@@ -281,7 +280,7 @@ export class SyncEngine extends EventEmitter {
             .map((c) => "'" + c + "'")
             .join(',');
           if (catsArray.length > 0) {
-            commands.push(`[${catsArray}].forEach(function(v){try{var d=new DataFile('DATA/'+(NV?'NV':'F3')+'/'+v+'.DAT');var i=(typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id===v)?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/'+v+'.INV',{idOrder:d.ids});if(i._requiresSort)i.sort(d.ids);if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id===v)Pip.emit('scroller','refresh');d.close();}catch(e){}})`);
+            commands.push(`player.sortandrefreshinv([${catsArray}])`);
           }
           // Caps and carry weight live in the ITEMS header — only refresh on inventory tabs.
           commands.push(ITEMS_HEADER_SOFT_REFRESH_CMD);
