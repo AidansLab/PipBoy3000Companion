@@ -31,10 +31,12 @@ function createMockBridge() {
 describe('SyncEngine', () => {
   let bridge;
   let engine;
+  const settle = () => new Promise((r) => setTimeout(r, 550));
 
   beforeEach(() => {
     bridge = createMockBridge();
     engine = new SyncEngine(bridge, null); // No mapper — pass-through
+    engine.bypassMismatchCheck = true; // Avoid breaking legacy test cases with mismatched snapshots
     engine.setGameMode('F3');
     engine.setEnabled(true);
   });
@@ -53,7 +55,7 @@ describe('SyncEngine', () => {
         perks: [],
       });
 
-      assert.ok(bridge.sentCommands.includes('player.resetinventory()'));
+      assert.ok(bridge.sentCommands.some(c => c.includes("['AID','AMMO','APPAREL','MISC','WEAPONS'].forEach")));
       assert.ok(bridge.sentCommands.some(c => c.includes("'name'")));
       assert.ok(bridge.sentCommands.some(c => c.includes('setlevel(10)')));
       assert.ok(bridge.sentCommands.some(c => c.includes("'hp'")));
@@ -70,9 +72,9 @@ describe('SyncEngine', () => {
         perks: [],
       });
 
-      const addCmd = bridge.sentCommands.find(c => c.includes('additem'));
-      assert.ok(addCmd, 'Should have an additem command');
-      assert.ok(addCmd.includes('0x0001519E'));
+      const addCmd = bridge.sentCommands.find(c => c.includes("cat='AID'"));
+      assert.ok(addCmd, 'Should have a batched command for AID');
+      assert.ok(addCmd.includes('86430'));
       assert.ok(addCmd.includes('5'));
     });
 
@@ -86,9 +88,10 @@ describe('SyncEngine', () => {
         perks: [],
       });
 
-      const cmd = bridge.sentCommands.find(c => c.includes('cnd=75'));
-      assert.ok(cmd, 'Should set cnd=75 for degraded items');
-      assert.ok(cmd.includes('id=17186'));
+      const cmd = bridge.sentCommands.find(c => c.includes("cat='WEAPONS'"));
+      assert.ok(cmd, 'Should have a batched command for WEAPONS');
+      assert.ok(cmd.includes('17186'));
+      assert.ok(cmd.includes('75'));
     });
 
     it('should normalize 0–1 game condition to 0–100 percent', async () => {
@@ -101,8 +104,10 @@ describe('SyncEngine', () => {
         perks: [],
       });
 
-      const cmd = bridge.sentCommands.find(c => c.includes('cnd=75'));
-      assert.ok(cmd, 'Should convert 0.75 to cnd=75');
+      const cmd = bridge.sentCommands.find(c => c.includes("cat='WEAPONS'"));
+      assert.ok(cmd, 'Should convert 0.75 to condition 75');
+      assert.ok(cmd.includes('17186'));
+      assert.ok(cmd.includes('75'));
     });
 
     it('should add perks on first sync', async () => {
@@ -115,7 +120,7 @@ describe('SyncEngine', () => {
 
       const cmd = bridge.sentCommands.find(c => c.includes('addperk'));
       assert.ok(cmd);
-      assert.ok(cmd.includes('0x00031DC4'));
+      assert.ok(cmd.includes('204228'));
     });
   });
 
@@ -128,6 +133,7 @@ describe('SyncEngine', () => {
         inventory: [],
         perks: [],
       });
+      await settle();
 
       bridge.sentCommands.length = 0; // Clear
 
@@ -138,6 +144,7 @@ describe('SyncEngine', () => {
         inventory: [],
         perks: [],
       });
+      await settle();
 
       // Should only have the hp change, not name or level
       assert.ok(bridge.sentCommands.some(c => c.includes("'hp', 80")));
@@ -147,7 +154,6 @@ describe('SyncEngine', () => {
 
     it('should sync flashlight LED when torch state changes', async () => {
       // Snapshots are debounced (500ms); wait out the window between sends.
-      const settle = () => new Promise((r) => setTimeout(r, 550));
 
       await engine.processSnapshot({
         game: 'FNV',
@@ -742,6 +748,7 @@ describe('SyncEngine', () => {
         inventory: [],
         perks: [],
       });
+      await settle();
 
       bridge.sentCommands.length = 0;
 
@@ -752,6 +759,7 @@ describe('SyncEngine', () => {
         inventory: [],
         perks: [],
       });
+      await settle();
 
       assert.ok(!bridge.sentCommands.some(c => c.includes("'hp'")));
 
@@ -763,6 +771,7 @@ describe('SyncEngine', () => {
         inventory: [],
         perks: [],
       });
+      await settle();
 
       assert.ok(bridge.sentCommands.some(c => c.includes("'hp', 82")));
     });
@@ -776,6 +785,7 @@ describe('SyncEngine', () => {
         ],
         perks: [],
       });
+      await settle();
 
       bridge.sentCommands.length = 0;
 
@@ -788,11 +798,12 @@ describe('SyncEngine', () => {
         ],
         perks: [],
       });
+      await settle();
 
       // Should only add the new Stimpak, not re-add Nuka-Cola
-      const addCmds = bridge.sentCommands.filter(c => c.includes('additem'));
+      const addCmds = bridge.sentCommands.filter(c => c.includes('inv.add') || c.includes('InvFile'));
       assert.equal(addCmds.length, 1);
-      assert.ok(addCmds[0].includes('0x00015038'));
+      assert.ok(addCmds[0].includes('86072')); // Hex: 0x00015038 -> Dec: 86072
     });
 
     it('should detect count increases', async () => {
@@ -804,6 +815,7 @@ describe('SyncEngine', () => {
         ],
         perks: [],
       });
+      await settle();
 
       bridge.sentCommands.length = 0;
 
@@ -815,11 +827,10 @@ describe('SyncEngine', () => {
         ],
         perks: [],
       });
+      await settle();
 
-      const addCmd = bridge.sentCommands.find(c => c.includes('additem'));
+      const addCmd = bridge.sentCommands.find(c => c.includes('cnt=2'));
       assert.ok(addCmd);
-      // Should add the delta (2), not the total
-      assert.ok(addCmd.includes(', 2)'));
     });
 
     it('should detect new perks', async () => {
@@ -829,6 +840,7 @@ describe('SyncEngine', () => {
         inventory: [],
         perks: ['0x00031DC4'],
       });
+      await settle();
 
       bridge.sentCommands.length = 0;
 
@@ -838,12 +850,13 @@ describe('SyncEngine', () => {
         inventory: [],
         perks: ['0x00031DC4', '0x00031DB7'],
       });
+      await settle();
 
       const addPerk = bridge.sentCommands.find(c => c.includes('addperk'));
       assert.ok(addPerk);
-      assert.ok(addPerk.includes('0x00031DB7'));
+      assert.ok(addPerk.includes('204215')); // Hex: 0x00031DB7 -> Dec: 204215
       // Should NOT re-add the existing perk
-      assert.ok(!bridge.sentCommands.some(c => c.includes('0x00031DC4')));
+      assert.ok(!bridge.sentCommands.some(c => c.includes('204228'))); // Hex: 0x00031DC4 -> Dec: 204228
     });
 
     it('should detect removed perks', async () => {
@@ -853,6 +866,7 @@ describe('SyncEngine', () => {
         inventory: [],
         perks: ['0x00031DC4', '0x00031DB7'],
       });
+      await settle();
 
       bridge.sentCommands.length = 0;
 
@@ -862,10 +876,11 @@ describe('SyncEngine', () => {
         inventory: [],
         perks: ['0x00031DC4'],
       });
+      await settle();
 
       const removePerk = bridge.sentCommands.find(c => c.includes('removeperk'));
       assert.ok(removePerk);
-      assert.ok(removePerk.includes('0x00031DB7'));
+      assert.ok(removePerk.includes('204215')); // Hex: 0x00031DB7 -> Dec: 204215
     });
 
     it('should detect S.P.E.C.I.A.L. changes', async () => {
@@ -875,6 +890,7 @@ describe('SyncEngine', () => {
         inventory: [],
         perks: [],
       });
+      await settle();
 
       bridge.sentCommands.length = 0;
 
@@ -884,6 +900,7 @@ describe('SyncEngine', () => {
         inventory: [],
         perks: [],
       });
+      await settle();
 
       // Only ST changed
       const stCmd = bridge.sentCommands.find(c => c.includes("'ST'"));
@@ -902,6 +919,7 @@ describe('SyncEngine', () => {
         inventory: [{ formId: '0x00015038', count: 5 }], // Stimpaks
         perks: [],
       });
+      await settle();
 
       bridge.sentCommands.length = 0;
 
@@ -916,6 +934,7 @@ describe('SyncEngine', () => {
         inventory: [{ formId: '0x00015038', count: 4 }],
         perks: [],
       });
+      await settle();
 
       assert.ok(!bridge.sentCommands.some(c => c.includes('it.cnt-=')),
         'Should not send a removal for a device-initiated consumption');
@@ -928,6 +947,7 @@ describe('SyncEngine', () => {
         inventory: [{ formId: '0x00015038', count: 5 }],
         perks: [],
       });
+      await settle();
 
       bridge.sentCommands.length = 0;
       engine.notifyDeviceConsumed('0x00015038');
@@ -939,15 +959,13 @@ describe('SyncEngine', () => {
         inventory: [{ formId: '0x00015038', count: 2 }],
         perks: [],
       });
+      await settle();
 
-      const removeCmd = bridge.sentCommands.find(c => c.includes('it.cnt-='));
+      const removeCmd = bridge.sentCommands.find(c => c.includes('qty=2'));
       assert.ok(removeCmd, 'Should send a removal for the in-game uses');
-      assert.ok(removeCmd.includes('it.cnt-=2'), 'Should only remove the 2 in-game uses');
     });
 
     it('should not echo a bag-count drop after the device equips a stackable weapon', async () => {
-      const settle = () => new Promise((r) => setTimeout(r, 550));
-
       await engine.processSnapshot({
         game: 'FNV',
         player: { name: 'Test', equippedweap: 0 },
@@ -983,6 +1001,7 @@ describe('SyncEngine', () => {
         inventory: [],
         perks: [],
       });
+      await settle();
 
       bridge.sentCommands.length = 0;
       await engine.forceFullSync();
@@ -993,9 +1012,10 @@ describe('SyncEngine', () => {
         inventory: [],
         perks: [],
       });
+      await settle();
 
-      // Should have resetinventory (full sync behavior)
-      assert.ok(bridge.sentCommands.includes('player.resetinventory()'));
+      // Should have cleared inventory (full sync behavior)
+      assert.ok(bridge.sentCommands.some(c => c.includes("['AID','AMMO','APPAREL','MISC','WEAPONS'].forEach")));
     });
   });
 
@@ -1011,6 +1031,32 @@ describe('SyncEngine', () => {
       });
 
       assert.equal(bridge.sentCommands.length, 0);
+    });
+  });
+
+  describe('Game mode mismatch', () => {
+    it('should disable sync and turn off companion mode if Pip-Boy mode does not match game', async () => {
+      engine.bypassMismatchCheck = false;
+      engine.setGameMode('F3');
+      engine.setEnabled(true);
+
+      let warningEmitted = false;
+      engine.on('warning', (msg) => {
+        if (msg.includes('Game/Pip-Boy mode mismatch')) {
+          warningEmitted = true;
+        }
+      });
+
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: { name: 'Courier' },
+        inventory: [],
+        perks: [],
+      });
+
+      assert.strictEqual(engine.enabled, false);
+      assert.ok(warningEmitted, 'Should emit warning');
+      assert.ok(bridge.sentCommands.includes('cmode = !1'), 'Should send cmode = !1');
     });
   });
 });

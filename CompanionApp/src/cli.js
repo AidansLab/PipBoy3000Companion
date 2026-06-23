@@ -154,8 +154,21 @@ async function main() {
     if (!companionPatchInstalled || !bridge.connected || !pipeClient.connected) {
       return;
     }
-    syncEngine.setEnabled(true);
-    await bridge.sendCommand('cmode = !0');
+    const runningGame = pipeClient.lastSnapshot?.game;
+    if (syncEngine.gameMode && runningGame && syncEngine.gameMode !== runningGame) {
+      const pipBoyLabel = syncEngine.gameMode === 'FNV' ? 'Fallout: New Vegas' : 'Fallout 3';
+      const gameLabel = runningGame === 'FNV' ? 'Fallout: New Vegas' : 'Fallout 3';
+      logWarn(`Game/Pip-Boy mode mismatch: Pip-Boy is in ${pipBoyLabel} mode, but game is ${gameLabel}. Sync disabled.`);
+      syncEngine.setEnabled(false);
+      try {
+        await bridge.sendCommand('cmode = !1');
+      } catch (_) {}
+      return;
+    }
+    if (!syncEngine.enabled) {
+      syncEngine.setEnabled(true);
+      await bridge.sendCommand('cmode = !0');
+    }
   }
 
   // Set game mode if specified via CLI arg (otherwise auto-detected after connect)
@@ -215,6 +228,11 @@ async function main() {
     if (evt.action === 'restore') {
       await syncEngine.notifyPresyncRestored();
       logSync('Pre-sync data restored on Pip-Boy (companion was disconnected)');
+      return;
+    }
+
+    const runningGame = pipeClient.lastSnapshot?.game;
+    if (syncEngine.gameMode && runningGame && syncEngine.gameMode !== runningGame) {
       return;
     }
 
@@ -301,6 +319,7 @@ async function main() {
   });
   pipeClient.on('save-load', () => {
     syncEngine.handleSaveLoad();
+    tryEnableSync();
   });
   pipeClient.on('snapshot', (snapshot) => {
     syncEngine.processSnapshot(snapshot);

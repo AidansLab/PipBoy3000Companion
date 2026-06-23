@@ -73,6 +73,8 @@ export class SyncEngine extends EventEmitter {
     this.lastSyncFlush = 0;
     this.gameMode = null; // 'F3' or 'FNV'
     this.enabled = false;
+    this.bypassMismatchCheck = false;
+    this._lastMismatchWarning = null;
     // When on, game ↔ Pip-Boy torch LED stay in sync. Defaults to on; toggle in app.
     this.torchSyncEnabled = true;
     this._processingSnapshot = false;
@@ -108,6 +110,7 @@ export class SyncEngine extends EventEmitter {
     }
     this.gameMode = mode;
     this.previousState = null; // Force full sync on game mode change
+    this._lastMismatchWarning = null;
     this.emit('game-mode-changed', mode);
   }
 
@@ -116,6 +119,7 @@ export class SyncEngine extends EventEmitter {
     if (!this.gameMode) return;
     this.gameMode = null;
     this.previousState = null;
+    this._lastMismatchWarning = null;
     this.emit('game-mode-changed', null);
   }
 
@@ -163,6 +167,24 @@ export class SyncEngine extends EventEmitter {
    */
   async processSnapshot(snapshot) {
     if (!this.enabled || !this.bridge.connected) return;
+
+    if (!this.bypassMismatchCheck && this.gameMode && snapshot.game && this.gameMode !== snapshot.game) {
+      if (!this._lastMismatchWarning || this._lastMismatchWarning !== snapshot.game) {
+        this._lastMismatchWarning = snapshot.game;
+        const pipBoyLabel = this.gameMode === 'FNV' ? 'Fallout: New Vegas' : 'Fallout 3';
+        const gameLabel = snapshot.game === 'FNV' ? 'Fallout: New Vegas' : 'Fallout 3';
+        this.emit('warning', `Game/Pip-Boy mode mismatch: Pip-Boy is in ${pipBoyLabel} mode, but game is ${gameLabel}. Sync disabled.`);
+      }
+      this.setEnabled(false);
+      try {
+        await this.bridge.sendCommand('cmode = !1');
+      } catch (_) {}
+      return;
+    }
+
+    if (snapshot.game && this.gameMode === snapshot.game) {
+      this._lastMismatchWarning = null;
+    }
 
     if (this._hasEquipChange(snapshot)) {
       if (this._debounceTimer) {

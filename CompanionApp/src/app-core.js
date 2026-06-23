@@ -212,6 +212,19 @@ export class CompanionApp extends EventEmitter {
       return;
     }
 
+    const runningGame = this.pipeClient.lastSnapshot?.game;
+    if (this.syncEngine.gameMode && runningGame && this.syncEngine.gameMode !== runningGame) {
+      const pipBoyLabel = this.syncEngine.gameMode === 'FNV' ? 'Fallout: New Vegas' : 'Fallout 3';
+      const gameLabel = runningGame === 'FNV' ? 'Fallout: New Vegas' : 'Fallout 3';
+      this.log('warn', `Game/Pip-Boy mode mismatch: Pip-Boy is in ${pipBoyLabel} mode, but game is ${gameLabel}. Sync disabled.`);
+      this.syncEngine.setEnabled(false);
+      try {
+        await this.bridge.sendCommand('cmode = !1');
+      } catch (_) {}
+      this._emitStatus();
+      return;
+    }
+
     if (!this.syncEngine.enabled) {
       this.syncEngine.setEnabled(true);
       await this.bridge.sendCommand('cmode = !0');
@@ -284,6 +297,11 @@ export class CompanionApp extends EventEmitter {
       if (evt.action === 'restore') {
         await this.syncEngine.notifyPresyncRestored();
         this.log('sync', 'Pre-sync data restored on Pip-Boy (companion was disconnected)');
+        return;
+      }
+
+      const runningGame = this.pipeClient.lastSnapshot?.game;
+      if (this.syncEngine.gameMode && runningGame && this.syncEngine.gameMode !== runningGame) {
         return;
       }
 
