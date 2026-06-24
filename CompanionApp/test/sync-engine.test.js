@@ -989,6 +989,37 @@ describe('SyncEngine', () => {
         'Should not remove from Pip-Boy when equip only moved one to worn'
       );
     });
+
+    it('should re-push equipped state after inventory removals', async () => {
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: { name: 'Test', equippedweap: '0x00004330' },
+        inventory: [
+          { formId: '0x00004330', type: 'WEAP', count: 1 },
+          { formId: '0x00004331', type: 'WEAP', count: 1 },
+        ],
+        perks: [],
+      });
+      await settle();
+
+      bridge.sentCommands.length = 0;
+      engine.notifyDeviceEquipped('0x00004331');
+
+      await engine.processSnapshot({
+        game: 'FNV',
+        player: { name: 'Test', equippedweap: '0x00004330' },
+        inventory: [{ formId: '0x00004330', type: 'WEAP', count: 1 }],
+        perks: [],
+      });
+      await settle();
+
+      assert.ok(
+        bridge.sentCommands.some((c) =>
+          c.includes("player.setav('equippedWeap', 17200")
+        )
+      );
+      assert.ok(bridge.sentCommands.some((c) => c.includes('player.refreshequip()')));
+    });
   });
 
   describe('Force full sync', () => {

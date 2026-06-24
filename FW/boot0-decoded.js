@@ -397,6 +397,9 @@ global.cmode = !1;
       const _getItem = options.getItem;
       options.getItem = function (n) {
         const item = _getItem(n);
+        if (!item) {
+          return { txt: '', activ: !1 };
+        }
         if (
           item &&
           item.dim &&
@@ -410,13 +413,33 @@ global.cmode = !1;
     }
     const scroller = _createScroller.call(this, options);
     let count = (options && options.itemCount) || 0;
+    const clampScrollerIndices = function () {
+      if (count <= 0) {
+        scroller.selectedIndex = 0;
+        scroller.scrollIndex = 0;
+        return;
+      }
+      if (scroller.selectedIndex >= count) {
+        scroller.selectedIndex = count - 1;
+      }
+      if (scroller.scrollIndex >= count) {
+        scroller.scrollIndex = Math.max(0, count - 1);
+      }
+    };
     const _updateItemCount = scroller.updateItemCount;
     scroller.updateItemCount = function (c) {
       count = c;
+      clampScrollerIndices();
       return _updateItemCount.call(this, c);
     };
     scroller.invalidateCache = function () {
+      clampScrollerIndices();
       return _updateItemCount.call(this, count);
+    };
+    const _render = scroller.render;
+    scroller.render = function (opt) {
+      clampScrollerIndices();
+      return _render.call(this, opt);
     };
     return scroller;
   };

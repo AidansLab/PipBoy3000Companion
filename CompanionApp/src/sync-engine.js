@@ -85,6 +85,7 @@ export class SyncEngine extends EventEmitter {
     this._deviceEquipPending = new Map();
     // Device-initiated torch toggles — don't let a stale game snapshot turn the LED off.
     this._deviceTorchPending = null;
+    this._resyncEquipAfterInventory = false;
     this.stats = {
       snapshotsProcessed: 0,
       commandsSent: 0,
@@ -421,8 +422,14 @@ export class SyncEngine extends EventEmitter {
     commands.push(...this._diffWeaponAmmo(player, prevPlayer));
 
     if (!this._inventorySyncPaused) {
-      // --- Equipped item diffs ---
-      commands.push(...this._diffEquipped(player, prevPlayer));
+      // After inventory removals, re-push game equipped state — the device may
+      // have optimistically equipped an item that left the bag.
+      if (this._resyncEquipAfterInventory) {
+        this._resyncEquipAfterInventory = false;
+        commands.push(...this._buildAuthoritativeEquipCommands(player));
+      } else {
+        commands.push(...this._diffEquipped(player, prevPlayer));
+      }
 
       // --- Perk diffs ---
       const perkCommands = this._diffPerks(
@@ -842,6 +849,7 @@ export class SyncEngine extends EventEmitter {
           if (cat) this._lastChangedCategories.add(cat);
           const removeCmd = this._buildRemoveItemCommand(cat, formId, removeQty);
           commands.push(removeCmd);
+          this._resyncEquipAfterInventory = true;
         }
 
         // Condition change — update cnd in place (Pip-Boy stores 0–100 per stack)
@@ -866,12 +874,15 @@ export class SyncEngine extends EventEmitter {
       const removeQty = prevCount - this._takeDeviceConsumed(id, prevCount);
       if (removeQty <= 0) continue;
 
+      this._deviceEquipPending.delete(String(id).toLowerCase());
+
       const formId = this._resolveFormId(id);
       if (formId !== null) {
         const cat = this._toPipBoyCategory(prevItem.type);
         if (cat) this._lastChangedCategories.add(cat);
         const removeCmd = this._buildRemoveItemCommand(cat, formId, removeQty);
         commands.push(removeCmd);
+        this._resyncEquipAfterInventory = true;
       }
     }
 
@@ -1103,6 +1114,16 @@ export class SyncEngine extends EventEmitter {
       commands.push(refreshHeader);
     }
 
+    return commands;
+  }
+
+  _buildAuthoritativeEquipCommands(player) {
+    const commands = [];
+    const weapon = this._toFormIdInt(player.equippedweap) ?? 0;
+    commands.push(`player.setav('equippedWeap', ${weapon}, !0);${REFRESH_EQUIP_CMD}`);
+    commands.push(
+      this._buildEquipApparelCommand(this._normalizeEquippedApparel(player.equippedapparel))
+    );
     return commands;
   }
 

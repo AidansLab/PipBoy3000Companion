@@ -58,7 +58,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #define PLUGIN_NAME "FalloutPipBoySync"
-#define PLUGIN_VERSION 25
+#define PLUGIN_VERSION 27
 
 // Write FalloutPipBoySync.log beside this DLL (Data/NVSE/Plugins/).
 #ifndef PIPBOY_VERBOSE_LOG
@@ -228,9 +228,9 @@ static void PipBoyLogSnapshotOut(const std::string &snapshot) {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MENU / MOD COMPATIBILITY HELPERS
-// Functional Backpack opens a teammate container + uses vanilla
-// DisablePlayerControls with partial flags. Avoid interfering while those
-// menus/scripts are active.
+// Functional Backpack uses the vanilla container menu — player inventory snapshots
+// run live during container UI so the physical Pip-Boy stays in sync. Other mod
+// gameplay menus (barter, repair, etc.) still pause snapshots.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 static UInt32 GetOpenMenuMask() {
@@ -272,9 +272,8 @@ static void LogMenuMaskIfChanged() {
   g_lastLoggedMenuMask = mask;
 }
 
-static bool IsModGameplayMenuOpen() {
-  return InterfaceManager::IsMenuVisible(kMenuType_Container) ||
-         InterfaceManager::IsMenuVisible(kMenuType_Barter) ||
+static bool ShouldSkipSnapshotDuringModMenu() {
+  return InterfaceManager::IsMenuVisible(kMenuType_Barter) ||
          InterfaceManager::IsMenuVisible(kMenuType_Repair) ||
          InterfaceManager::IsMenuVisible(kMenuType_Message) ||
          InterfaceManager::IsMenuVisible(kMenuType_SleepWait) ||
@@ -1649,7 +1648,7 @@ static int GetItemCountForEquip(PlayerCharacter *player, UInt32 targetFormId) {
         count += entry->countDelta;
     }
   }
-  return count > 0 ? count : 1;
+  return count;
 }
 
 static void ExecutePipBoyCommand(const std::string &line) {
@@ -1682,6 +1681,12 @@ static void ExecutePipBoyCommand(const std::string &line) {
     return;
 
   if (verb == "USE" || verb == "EQUIP") {
+    int countToEquip = GetItemCountForEquip(player, formId);
+    if (countToEquip <= 0) {
+      PipBoyLog("CMD-IN", "%s rejected — item %08X not in player inventory",
+                verb.c_str(), formId);
+      return;
+    }
     if (verb == "EQUIP") {
       const DWORD now = GetTickCount();
       if (formId == g_lastEquipFormId && now - g_lastEquipTime < 500) {
@@ -1691,7 +1696,6 @@ static void ExecutePipBoyCommand(const std::string &line) {
       g_lastEquipFormId = formId;
       g_lastEquipTime = now;
     }
-    int countToEquip = GetItemCountForEquip(player, formId);
     if (countToEquip > 1) {
       // Direct call is required for stacked items to prevent the engine from
       // splitting the stack into 1 equipped and (N-1) unequipped.
@@ -1961,10 +1965,10 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
       DWORD now = GetTickCount();
       if (now - g_lastSnapshotTime >= SNAPSHOT_INTERVAL_MS) {
         g_lastSnapshotTime = now;
-        if (!g_syncLockRequested.load() && IsModGameplayMenuOpen() &&
+        if (!g_syncLockRequested.load() && ShouldSkipSnapshotDuringModMenu() &&
             !IsPipBoyMenuOpen()) {
           if (now - g_lastSnapshotSkipLogTime >= 1000) {
-            PipBoyLog("SNAP", "skip snapshot during mod gameplay menu");
+            PipBoyLog("SNAP", "skip snapshot during mod gameplay menu (not container)");
             g_lastSnapshotSkipLogTime = now;
           }
           break;
