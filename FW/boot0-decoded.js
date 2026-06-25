@@ -130,8 +130,22 @@ global.cmode = !1;
     };
   }
 
+  // Items of the same form but different condition are distinct stacks, so adds
+  // and removes must target the row matching BOTH form ID and condition instead
+  // of the first form-ID match. Condition 0 is stored as 100 by InvFile.add
+  // (cnd||100), so normalise both sides the same way when comparing.
+  function findInvIdCnd(inv, id, cnd) {
+    const want = cnd || 100;
+    for (let i = 0; i < inv.count; i++) {
+      const it = inv.get(i);
+      if (it && it.id === id && (it.cnd || 100) === want) return i;
+    }
+    return -1;
+  }
+
   Player.prototype.additemhealthpercent = function (id, cnt, cnd) {
     if (cnt <= 0) return;
+    const wantCnd = cnd || 100;
     // A form ID belongs to exactly one category, so stop opening DataFiles as
     // soon as we find the match (saves up to 4 file opens per added item).
     const cats = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
@@ -145,11 +159,11 @@ global.cmode = !1;
         const inv = onMenu
           ? Pip.inv
           : new InvFile(`INV/${NV ? 'NV' : 'F3'}/${v}.INV`, { idOrder: db.ids });
-        const inx = inv.indexOf(id);
+        const inx = findInvIdCnd(inv, id, wantCnd);
         if (inx >= 0) {
           let it = inv.get(inx);
           ((it.cnt += cnt), inv.set(inx, it));
-        } else inv.add({ id: id, cnt: cnt, cnd: cnd });
+        } else inv.add({ id: id, cnt: cnt, cnd: wantCnd });
         if (onMenu) {
           Pip.emit('scroller', 'count', inv.count);
           if (v === 'MISC' && id === CAPS_FORM_ID && Pip.MODE === 1 && Pip.renderHeader)
@@ -161,7 +175,7 @@ global.cmode = !1;
     return !1;
   };
 
-  Player.prototype.removeitem = function (id, qty) {
+  Player.prototype.removeitem = function (id, qty, cnd) {
     if (qty <= 0) return;
     const cats = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
     for (let ci = 0; ci < cats.length; ci++) {
@@ -174,7 +188,7 @@ global.cmode = !1;
         const inv = onMenu
           ? Pip.inv
           : new InvFile(`INV/${NV ? 'NV' : 'F3'}/${v}.INV`, { idOrder: db.ids });
-        const inx = inv.indexOf(id);
+        const inx = cnd === undefined ? inv.indexOf(id) : findInvIdCnd(inv, id, cnd);
         if (inx >= 0) {
           let it = inv.get(inx);
           it.cnt -= qty;
@@ -342,17 +356,24 @@ global.cmode = !1;
     } catch (e) {}
   };
 
-  Player.prototype.equipapparel = function (ids) {
+  Player.prototype.equipapparel = function (ids, cnds) {
     try {
       var active = [0, 0, 0, 0],
+        activeCnd = [0, 0, 0, 0],
         m = NV ? 'NV' : 'F3',
         db = new DataFile('DATA/' + m + '/APPAREL.DAT');
-      ids.forEach(function (id) {
+      ids.forEach(function (id, idx) {
         var it = db.getId(id);
-        if (it && it.es != null) active[it.es] = id;
+        if (it && it.es != null) {
+          active[it.es] = id;
+          activeCnd[it.es] = cnds && cnds[idx] != null ? cnds[idx] : 100;
+        }
       });
       db.close();
       this.setav('equippedApparel', active, !0);
+      // Per-slot equipped condition lets APPAREL.JS flag only the worn condition
+      // row when several conditions of one apparel form are carried at once.
+      this.setav('equippedApparelCnd', activeCnd, !1);
       this.refreshequip();
     } catch (e) {}
   };

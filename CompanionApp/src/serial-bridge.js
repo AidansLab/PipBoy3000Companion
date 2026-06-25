@@ -26,7 +26,8 @@ const KNOWN_PRODUCTS = [
 ];
 
 const DEFAULT_BAUD_RATE = 9600;
-const COMMAND_SPACING_MS = 50;       // Min time between commands
+const COMMAND_SPACING_MS = 25;       // Min time between commands
+const AUDIO_GUARD_MS = 350;          // Hold commands after device equip/use so audio plays cleanly
 const RESPONSE_TIMEOUT_MS = 3000;    // Timeout waiting for eval response
 const RECONNECT_DELAY_MS = 5000;     // Delay before reconnection attempt
 
@@ -48,6 +49,10 @@ export class SerialBridge extends EventEmitter {
     // File Protocol State
     this.pendingPacketAck = null;
     this.packetTimeout = null;
+
+    // Audio guard: commands are held back after a device-initiated equip/use
+    // so the Espruino's single-threaded JS doesn't block audio timer callbacks.
+    this._audioGuardUntil = 0;
   }
 
   /**
@@ -232,12 +237,16 @@ export class SerialBridge extends EventEmitter {
       const line = this._lineBuffer.substring(0, newlineIdx);
       this._lineBuffer = this._lineBuffer.substring(newlineIdx + 1);
 
-      const match = line.match(/PIPSYNC:(USE|EQUIP|UNEQUIP):([A-Z]+):([0-9A-Fa-f]{1,8})/);
+      const match = line.match(
+        /PIPSYNC:(USE|EQUIP|UNEQUIP):([A-Z]+):([0-9A-Fa-f]{1,8})(?::(\d{1,3}))?/
+      );
       if (match) {
         this.emit('device-event', {
           action: match[1].toLowerCase(),                       // 'use' | 'equip' | 'unequip'
           category: match[2],                                   // 'AID' | 'APPAREL' | 'WEAPONS'
           formId: '0x' + match[3].toLowerCase().padStart(8, '0'),
+          // Optional condition (0–100) for selecting a specific stack instance.
+          condition: match[4] !== undefined ? parseInt(match[4], 10) : undefined,
         });
         continue;
       }
@@ -263,6 +272,19 @@ export class SerialBridge extends EventEmitter {
   }
 
   /**
+   * Open a brief window during which regular (non-equip) commands are deferred,
+   * letting audio timer callbacks run without the event loop being blocked by
+   * JS command execution. Call this whenever the device triggers a sound.
+   *
+   * The guard is intentionally checked BEFORE enqueuing (in sendCommand), not
+   * inside the mutex. That way equip confirmation commands (sendEquipCommand) can
+   * jump straight to the front of an already-drained queue without waiting.
+   */
+  guardAudio() {
+    this._audioGuardUntil = Date.now() + AUDIO_GUARD_MS;
+  }
+
+  /**
    * Serialize all USB REPL traffic so eval() and sendCommand() never interleave.
    */
   _runSerialIO(fn) {
@@ -283,9 +305,33 @@ export class SerialBridge extends EventEmitter {
   }
 
   /**
-   * Send a raw JavaScript command to the Pip-Boy REPL
+   * Send a raw JavaScript command to the Pip-Boy REPL.
+   * Respects the audio guard — waits until the guard window expires before
+   * joining the serial queue so the device is command-free during playback.
    */
   sendCommand(command) {
+    // Pre-sleep outside the mutex so the equip fast-path can still jump the queue.
+    const guardWait = this._audioGuardUntil - Date.now();
+    const enqueue = guardWait > 0
+      ? this._sleep(guardWait).then(() => this._runSerialIO(async () => {
+          await this._writeRaw(`\x10${command}\n`);
+          this.emit('command-sent', command);
+        }))
+      : this._runSerialIO(async () => {
+          await this._writeRaw(`\x10${command}\n`);
+          this.emit('command-sent', command);
+        });
+    return enqueue;
+  }
+
+  /**
+   * Send a high-priority equip/unequip confirmation command.
+   * Bypasses the audio guard so the split appears as soon as the game
+   * round-trip completes (~200 ms) rather than waiting out the full guard.
+   * Pre-click commands drain in ~100 ms (4–6 × 25 ms spacing), so the queue
+   * is typically empty by the time the equip confirmation arrives.
+   */
+  sendEquipCommand(command) {
     return this._runSerialIO(async () => {
       await this._writeRaw(`\x10${command}\n`);
       this.emit('command-sent', command);

@@ -58,7 +58,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #define PLUGIN_NAME "FalloutPipBoySync"
-#define PLUGIN_VERSION 27
+#define PLUGIN_VERSION 32
 
 // Write FalloutPipBoySync.log beside this DLL (Data/NVSE/Plugins/).
 #ifndef PIPBOY_VERBOSE_LOG
@@ -322,6 +322,40 @@ static int GetInventoryItemConditionPct(TESForm *baseForm,
 
   return (int)(currentHealth / maxHealth * 100.0f + 0.5f);
 }
+
+// Condition (0–100) of the actually-worn instance of `baseForm`. A form's
+// container entry can list several stacks (worn + bag) in any order, so we must
+// find the ExtraDataList carrying the worn flag rather than reading the first
+// one. A worn pristine item has no ExtraHealth, so it correctly reports 100.
+static int GetWornConditionPct(PlayerCharacter *player, TESForm *baseForm) {
+  if (!player || !baseForm)
+    return 100;
+  ExtraContainerChanges *cc =
+      (ExtraContainerChanges *)player->extraDataList.GetByType(
+          kExtraData_ContainerChanges);
+  if (!cc || !cc->data || !cc->data->objList)
+    return 100;
+  for (auto it = cc->data->objList->Begin(); !it.End(); ++it) {
+    auto *entry = it.Get();
+    if (!entry || !entry->type || entry->type->refID != baseForm->refID)
+      continue;
+    if (entry->extendData) {
+      for (auto eit = entry->extendData->Begin(); !eit.End(); ++eit) {
+        ExtraDataList *xdl = eit.Get();
+        if (xdl && (xdl->GetByType(kExtraData_Worn) ||
+                    xdl->GetByType(kExtraData_WornLeft)))
+          return GetInventoryItemConditionPct(baseForm, xdl);
+      }
+    }
+    break; // found the form's entry; no worn list ⇒ pristine worn item (100)
+  }
+  return 100;
+}
+
+// Thrown weapons (grenades, mines, throwing spears) equip as a whole stack, so
+// the Pip-Boy must not split one copy off the equipped row. Defined below;
+// forward-declared here for the snapshot's equipped-weapon reporting.
+static bool IsThrownWeapon(TESForm *form);
 
 // Pip-Boy GENERAL screen order (must match FW/GENERAL-decoded.js and REP.IMG).
 struct FactionRepDef {
@@ -1137,6 +1171,16 @@ std::string BuildPlayerSnapshot() {
     TESObjectWEAP *eqWeapon = player->GetEquippedWeapon();
     json.keyInt("equippedweap", eqWeapon ? (int)eqWeapon->refID : 0);
 
+    // Condition of the equipped weapon stack — lets the Pip-Boy flag only the
+    // matching condition row as equipped when several conditions of one weapon
+    // are carried at once.
+    int equippedWeapCnd = eqWeapon ? GetWornConditionPct(player, eqWeapon) : 100;
+    json.keyInt("equippedweapcnd", equippedWeapCnd);
+
+    // Thrown weapons ready the whole stack, so the Pip-Boy keeps them as one
+    // row; all other weapons equip a single copy and the list splits it off.
+    json.keyBool("equippedweapwhole", eqWeapon && IsThrownWeapon(eqWeapon));
+
     // ─── Weapon ammo (for Pip-Boy ammo selection) ────────────────────
     // A weapon's ammo is a BGSAmmoForm whose inner form is either a single
     // TESAmmo or a BGSListForm of several TESAmmo (e.g. the 10mm pistol can
@@ -1197,6 +1241,30 @@ std::string BuildPlayerSnapshot() {
       }
     }
     json.endArray();
+
+    // Conditions parallel to "equippedapparel" (same iteration order + dedup),
+    // so the Pip-Boy can flag only the worn condition row of each apparel form.
+    json.key("equippedapparelcnd");
+    json.beginArray();
+    {
+      ExtraContainerDataArray equipped = player->GetEquippedEntryDataList();
+      std::set<UInt32> seenApparel;
+      for (size_t i = 0; i < equipped.size(); i++) {
+        ExtraContainerChanges::EntryData *entry = equipped[i];
+        if (!entry || !entry->type)
+          continue;
+        if (entry->type->typeID == kFormType_TESObjectWEAP)
+          continue;
+        if (entry->type->typeID != kFormType_TESObjectARMO)
+          continue;
+        UInt32 apparelId = entry->type->refID;
+        if (seenApparel.count(apparelId))
+          continue;
+        seenApparel.insert(apparelId);
+        json.arrayElementInt(GetWornConditionPct(player, entry->type));
+      }
+    }
+    json.endArray();
   }
   json.endObject();
 
@@ -1209,10 +1277,12 @@ std::string BuildPlayerSnapshot() {
   {
     struct AggInvItem {
       int count;
-      int condition;
       const char *typeStr;
     };
-    std::map<UInt32, AggInvItem> agg;
+    // Keyed by (formId, conditionPct) so items of differing condition stay
+    // separate stacks (matches the game's per-condition inventory rows) instead
+    // of collapsing into one stack at the first-seen condition.
+    std::map<std::pair<UInt32, int>, AggInvItem> agg;
 
     ExtraContainerChanges *containerChanges =
         (ExtraContainerChanges *)player->extraDataList.GetByType(
@@ -1234,33 +1304,55 @@ std::string BuildPlayerSnapshot() {
         if (count <= 0)
           continue;
 
-        ExtraDataList *stackExtra = nullptr;
-        if (entry->extendData) {
-          auto extIter = entry->extendData->Begin();
-          if (!extIter.End())
-            stackExtra = extIter.Get();
-        }
-        const int conditionPct =
-            GetInventoryItemConditionPct(baseForm, stackExtra);
+        const char *typeStr = GetFormTypeString(baseForm->typeID);
 
-        AggInvItem &slot = agg[formId];
-        if (slot.count == 0) {
-          slot.condition = conditionPct;
-          slot.typeStr = GetFormTypeString(baseForm->typeID);
+        // A single base form occupies ONE container entry (countDelta = total),
+        // but instances of differing condition live as separate ExtraDataLists in
+        // its extendData (each optionally carrying an ExtraCount for how many
+        // share that data). Split the total across those per-condition sub-stacks
+        // so the Pip-Boy lists them apart; any remainder are pristine,
+        // full-condition items that carry no extra data.
+        int remaining = count;
+        if (entry->extendData) {
+          for (auto extIter = entry->extendData->Begin();
+               !extIter.End() && remaining > 0; ++extIter) {
+            ExtraDataList *xdl = extIter.Get();
+            if (!xdl)
+              continue;
+            int subCount = 1;
+            ExtraCount *xCount = (ExtraCount *)xdl->GetByType(kExtraData_Count);
+            if (xCount && xCount->count > 0)
+              subCount = xCount->count;
+            if (subCount > remaining)
+              subCount = remaining;
+            const int conditionPct =
+                GetInventoryItemConditionPct(baseForm, xdl);
+            AggInvItem &slot = agg[std::make_pair(formId, conditionPct)];
+            if (slot.count == 0)
+              slot.typeStr = typeStr;
+            slot.count += subCount;
+            remaining -= subCount;
+          }
         }
-        slot.count += count;
+        if (remaining > 0) {
+          AggInvItem &slot = agg[std::make_pair(formId, 100)];
+          if (slot.count == 0)
+            slot.typeStr = typeStr;
+          slot.count += remaining;
+        }
       }
     }
 
     for (const auto &pair : agg) {
-      const UInt32 formId = pair.first;
+      const UInt32 formId = pair.first.first;
+      const int conditionPct = pair.first.second;
       const AggInvItem &item = pair.second;
       json.arrayElement();
       json.beginObject();
       json.keyStr("formId", FormatFormId(formId));
       json.keyStr("type", item.typeStr);
       json.keyInt("count", item.count);
-      json.keyInt("condition", item.condition);
+      json.keyInt("condition", conditionPct);
       json.endObject();
     }
   }
@@ -1629,6 +1721,7 @@ static void ApplySyncLock(bool wantLock) {
 
 static DWORD g_lastEquipFormId = 0;
 static DWORD g_lastEquipTime = 0;
+static int g_lastEquipCnd = -1;
 
 static int GetItemCountForEquip(PlayerCharacter *player, UInt32 targetFormId) {
   if (!player)
@@ -1651,6 +1744,79 @@ static int GetItemCountForEquip(PlayerCharacter *player, UInt32 targetFormId) {
   return count;
 }
 
+// Thrown weapons (grenades, mines, throwing spears/knives) must equip the whole
+// stack so the player can throw all of them; everything else equips one instance.
+static bool IsThrownWeapon(TESForm *form) {
+  if (!form || form->typeID != kFormType_TESObjectWEAP)
+    return false;
+  UInt8 wt = ((TESObjectWEAP *)form)->eWeaponType;
+  return wt >= TESObjectWEAP::kWeapType_OneHandGrenade &&
+         wt <= TESObjectWEAP::kWeapType_OneHandThrown;
+}
+
+// Locate the specific carried instance of `baseForm` whose condition matches
+// `wantCnd`, so a Pip-Boy equip targets the row the user actually selected
+// instead of the engine's default (highest-condition) match. Degraded instances
+// carry their own ExtraDataList; pristine, full-condition items carry none, so a
+// 100% request with no matching list resolves to NULL (engine equips a bare
+// item). `found` is false only when no instance of that condition exists.
+static ExtraDataList *FindStackByCondition(PlayerCharacter *player,
+                                           TESForm *baseForm, int wantCnd,
+                                           bool *found) {
+  *found = false;
+  if (!player || !baseForm)
+    return nullptr;
+  ExtraContainerChanges *cc =
+      (ExtraContainerChanges *)player->extraDataList.GetByType(
+          kExtraData_ContainerChanges);
+  if (!cc || !cc->data || !cc->data->objList)
+    return nullptr;
+
+  ExtraContainerChanges::EntryData *entry = nullptr;
+  for (auto it = cc->data->objList->Begin(); !it.End(); ++it) {
+    auto *e = it.Get();
+    if (e && e->type && e->type->refID == baseForm->refID) {
+      entry = e;
+      break;
+    }
+  }
+  if (!entry || entry->countDelta <= 0)
+    return nullptr;
+
+  int remaining = entry->countDelta;
+  ExtraDataList *wornMatch = nullptr;
+  if (entry->extendData) {
+    for (auto eit = entry->extendData->Begin(); !eit.End(); ++eit) {
+      ExtraDataList *xdl = eit.Get();
+      if (!xdl)
+        continue;
+      int subCount = 1;
+      ExtraCount *xc = (ExtraCount *)xdl->GetByType(kExtraData_Count);
+      if (xc && xc->count > 0)
+        subCount = xc->count;
+      remaining -= subCount;
+      if (GetInventoryItemConditionPct(baseForm, xdl) == wantCnd) {
+        // Prefer a non-worn instance; remember a worn match as a fallback.
+        if (!xdl->GetByType(kExtraData_Worn)) {
+          *found = true;
+          return xdl;
+        }
+        wornMatch = xdl;
+      }
+    }
+  }
+  if (wornMatch) {
+    *found = true;
+    return wornMatch;
+  }
+  // Remaining items carry no extra data → pristine, full condition.
+  if (wantCnd >= 100 && remaining > 0) {
+    *found = true;
+    return nullptr;
+  }
+  return nullptr;
+}
+
 static void ExecutePipBoyCommand(const std::string &line) {
   PipBoyLog("CMD-IN", "%s", line.c_str());
   if (line == "TORCH ON") {
@@ -1671,7 +1837,17 @@ static void ExecutePipBoyCommand(const std::string &line) {
     return;
 
   std::string verb = line.substr(0, space);
-  UInt32 formId = (UInt32)strtoul(line.substr(space + 1).c_str(), NULL, 16);
+  std::string args = line.substr(space + 1);
+  // args is "<hexFormId>" or "<hexFormId> <conditionPct>". The condition (when
+  // present) selects which carried instance to equip for multi-condition stacks.
+  int wantCnd = -1;
+  size_t argSpace = args.find(' ');
+  std::string formIdStr =
+      (argSpace == std::string::npos) ? args : args.substr(0, argSpace);
+  if (argSpace != std::string::npos)
+    wantCnd = atoi(args.substr(argSpace + 1).c_str());
+
+  UInt32 formId = (UInt32)strtoul(formIdStr.c_str(), NULL, 16);
   if (formId == 0)
     return;
 
@@ -1689,19 +1865,36 @@ static void ExecutePipBoyCommand(const std::string &line) {
     }
     if (verb == "EQUIP") {
       const DWORD now = GetTickCount();
-      if (formId == g_lastEquipFormId && now - g_lastEquipTime < 500) {
+      // Key the debounce on form + condition so switching between two condition
+      // instances of the same form isn't swallowed as a duplicate.
+      if (formId == g_lastEquipFormId && wantCnd == g_lastEquipCnd &&
+          now - g_lastEquipTime < 500) {
         PipBoyLog("CMD-IN", "EQUIP debounced (duplicate within 500ms)");
         return;
       }
       g_lastEquipFormId = formId;
+      g_lastEquipCnd = wantCnd;
       g_lastEquipTime = now;
     }
-    if (countToEquip > 1) {
-      // Direct call is required for stacked items to prevent the engine from
-      // splitting the stack into 1 equipped and (N-1) unequipped.
+    if (verb == "EQUIP" && countToEquip > 1 && IsThrownWeapon(form)) {
+      // Thrown weapons: equip the whole stack so the player can throw all of
+      // them (no 1-vs-(N-1) split).
+      player->EquipItem(form, countToEquip, NULL, 1, false, 1);
+    } else if (verb == "EQUIP" && countToEquip > 1 && wantCnd >= 0) {
+      // Several instances of one form differ by condition. Equip the exact
+      // instance the user picked on the Pip-Boy instead of the engine's default
+      // (highest-condition) match.
+      bool found = false;
+      ExtraDataList *xdl = FindStackByCondition(player, form, wantCnd, &found);
+      player->EquipItem(form, 1, found ? xdl : NULL, 1, false, 1);
+      PipBoyLog("CMD-IN", "EQUIP %08X targeted cnd=%d (%s)", formId, wantCnd,
+                found ? (xdl ? "matched stack" : "pristine") : "no match");
+    } else if (countToEquip > 1) {
+      // Stacked but no per-instance target (e.g. no condition supplied):
+      // preserve whole-stack equip to avoid splitting.
       player->EquipItem(form, countToEquip, NULL, 1, false, 1);
     } else {
-      // USE (ingestibles) and EQUIP both go through vanilla equipitem
+      // Single item: USE (ingestibles) and EQUIP both go through vanilla equipitem
       if (!RunVanillaItemCommand(player, form, true))
         player->EquipItem(form, 1, NULL, 1, false, 1);
     }

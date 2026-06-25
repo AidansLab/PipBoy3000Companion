@@ -303,7 +303,13 @@ export class SyncEngine extends EventEmitter {
         this.emit('syncing', { commandCount: commands.length });
 
         for (const cmd of commands) {
-          await this.bridge.sendCommand(cmd);
+          // Equip confirmation commands bypass the audio guard so the split
+          // appears as soon as the game round-trip completes.
+          if (this._isEquipCommand(cmd)) {
+            await this.bridge.sendEquipCommand(cmd);
+          } else {
+            await this.bridge.sendCommand(cmd);
+          }
           this.stats.commandsSent++;
         }
 
@@ -411,25 +417,37 @@ export class SyncEngine extends EventEmitter {
     commands.push(...this._diffWeight(player, prevPlayer));
     commands.push(...this._diffAP(player, prevPlayer));
 
-    // --- Inventory diffs (before equip so items exist on the device) ---
+    // --- Inventory diffs ---
     const invCommands = this._diffInventory(
       snapshot.inventory || [],
       prev.inventory || []
     );
-    commands.push(...invCommands);
+
+    // --- Equip diffs ---
+    // Run inventory diff first so _resyncEquipAfterInventory is set, then
+    // decide ordering: equip command goes BEFORE inventory changes (fast split
+    // on device) unless this is an authoritative re-sync after removals (it
+    // must come after so the device sees the correct post-removal state).
+    if (!this._inventorySyncPaused) {
+      if (this._resyncEquipAfterInventory) {
+        // Inventory removed items — push inventory first, then re-authorise equip
+        this._resyncEquipAfterInventory = false;
+        commands.push(...invCommands);
+        commands.push(...this._buildAuthoritativeEquipCommands(player));
+      } else {
+        // Normal case: equip command first so split appears as fast as possible,
+        // then inventory count updates follow.
+        commands.push(...this._diffEquipped(player, prevPlayer));
+        commands.push(...invCommands);
+      }
+    } else {
+      commands.push(...invCommands);
+    }
 
     // Weapon ammo — ephemeral UI state; always sync (not gated on inventory pause)
     commands.push(...this._diffWeaponAmmo(player, prevPlayer));
 
     if (!this._inventorySyncPaused) {
-      // After inventory removals, re-push game equipped state — the device may
-      // have optimistically equipped an item that left the bag.
-      if (this._resyncEquipAfterInventory) {
-        this._resyncEquipAfterInventory = false;
-        commands.push(...this._buildAuthoritativeEquipCommands(player));
-      } else {
-        commands.push(...this._diffEquipped(player, prevPlayer));
-      }
 
       // --- Perk diffs ---
       const perkCommands = this._diffPerks(
@@ -749,6 +767,15 @@ export class SyncEngine extends EventEmitter {
   /**
    * Diff two inventory arrays and generate add/remove commands
    */
+  /**
+   * Composite stack identity: form ID + condition percent. Two entries of the
+   * same form but different displayed condition are distinct stacks (so they no
+   * longer merge into one stack at the highest condition).
+   */
+  _inventoryStackKey(item) {
+    return `${item.formId}|${this._normalizeItemCondition(item.condition)}`;
+  }
+
   _diffInventory(current, previous) {
     const commands = [];
     this._lastChangedCategories = new Set();
@@ -757,15 +784,15 @@ export class SyncEngine extends EventEmitter {
       return commands;
     }
 
-    // Build maps keyed by formId for fast lookup
+    // Build maps keyed by (formId, condition) for fast lookup
     const currentMap = new Map();
     for (const item of current) {
-      currentMap.set(item.formId, item);
+      currentMap.set(this._inventoryStackKey(item), item);
     }
 
     const previousMap = new Map();
     for (const item of previous) {
-      previousMap.set(item.formId, item);
+      previousMap.set(this._inventoryStackKey(item), item);
     }
 
     // Check for too many changes — might indicate a save load or major event
@@ -814,16 +841,20 @@ export class SyncEngine extends EventEmitter {
       }
     }
 
-    // Items where count changed
-    for (const [id, currentItem] of currentMap) {
-      if (previousMap.has(id)) {
-        const prevItem = previousMap.get(id);
+    // Stacks where only the count changed (same form + same condition). A
+    // condition change instead surfaces as a removed key + an added key, handled
+    // by the add/remove loops, so the cnd is carried on remove to target the
+    // correct stack on the device.
+    for (const [key, currentItem] of currentMap) {
+      if (previousMap.has(key)) {
+        const prevItem = previousMap.get(key);
+        const gameFormId = currentItem.formId;
         const countDelta = (currentItem.count || 1) - (prevItem.count || 1);
 
         if (countDelta > 0) {
-          const formId = this._resolveFormId(id);
+          const formId = this._resolveFormId(gameFormId);
           if (formId === null) continue;
-          const addQty = countDelta - this._takeDeviceEquipPending(id, countDelta, 'up');
+          const addQty = countDelta - this._takeDeviceEquipPending(gameFormId, countDelta, 'up');
           if (addQty <= 0) continue;
           const cat = this._toPipBoyCategory(currentItem.type);
           if (cat) this._lastChangedCategories.add(cat);
@@ -839,48 +870,37 @@ export class SyncEngine extends EventEmitter {
           // on the Pip-Boy and mirrored into the game by us)
           const removeQty =
             Math.abs(countDelta) -
-            this._takeDeviceConsumed(id, Math.abs(countDelta)) -
-            this._takeDeviceEquipPending(id, Math.abs(countDelta), 'down');
+            this._takeDeviceConsumed(gameFormId, Math.abs(countDelta)) -
+            this._takeDeviceEquipPending(gameFormId, Math.abs(countDelta), 'down');
           if (removeQty <= 0) continue;
 
-          const formId = this._resolveFormId(id);
+          const formId = this._resolveFormId(gameFormId);
           if (formId === null) continue;
           const cat = this._toPipBoyCategory(currentItem.type);
           if (cat) this._lastChangedCategories.add(cat);
-          const removeCmd = this._buildRemoveItemCommand(cat, formId, removeQty);
+          const removeCmd = this._buildRemoveItemCommand(cat, formId, removeQty, currentItem.condition);
           commands.push(removeCmd);
           this._resyncEquipAfterInventory = true;
-        }
-
-        // Condition change — update cnd in place (Pip-Boy stores 0–100 per stack)
-        if (this._itemConditionChanged(currentItem, prevItem)) {
-          const formId = this._resolveFormId(id);
-          if (formId !== null) {
-            const cat = this._toPipBoyCategory(currentItem.type);
-            if (cat) this._lastChangedCategories.add(cat);
-            commands.push(
-              this._buildSetItemConditionCommand(formId, currentItem.condition)
-            );
-          }
         }
       }
     }
 
-    // Items removed (formIds in previous but not in current)
-    for (const id of removedIds) {
-      const prevItem = previousMap.get(id);
+    // Stacks removed (form+condition present before but not now)
+    for (const key of removedIds) {
+      const prevItem = previousMap.get(key);
+      const gameFormId = prevItem.formId;
       // Skip units the device already removed from itself
       const prevCount = prevItem.count || 1;
-      const removeQty = prevCount - this._takeDeviceConsumed(id, prevCount);
+      const removeQty = prevCount - this._takeDeviceConsumed(gameFormId, prevCount);
       if (removeQty <= 0) continue;
 
-      this._deviceEquipPending.delete(String(id).toLowerCase());
+      this._deviceEquipPending.delete(String(gameFormId).toLowerCase());
 
-      const formId = this._resolveFormId(id);
+      const formId = this._resolveFormId(gameFormId);
       if (formId !== null) {
         const cat = this._toPipBoyCategory(prevItem.type);
         if (cat) this._lastChangedCategories.add(cat);
-        const removeCmd = this._buildRemoveItemCommand(cat, formId, removeQty);
+        const removeCmd = this._buildRemoveItemCommand(cat, formId, removeQty, prevItem.condition);
         commands.push(removeCmd);
         this._resyncEquipAfterInventory = true;
       }
@@ -1117,12 +1137,30 @@ export class SyncEngine extends EventEmitter {
     return commands;
   }
 
+  /**
+   * Returns true for commands that confirm an equip/unequip state change.
+   * These are routed through sendEquipCommand() to bypass the audio guard.
+   */
+  _isEquipCommand(cmd) {
+    return (
+      cmd.includes('equippedWeap') ||
+      cmd.includes('refreshequip') ||
+      cmd.includes('equipapparel')
+    );
+  }
+
   _buildAuthoritativeEquipCommands(player) {
     const commands = [];
     const weapon = this._toFormIdInt(player.equippedweap) ?? 0;
-    commands.push(`player.setav('equippedWeap', ${weapon}, !0);${REFRESH_EQUIP_CMD}`);
+    const weapCnd = this._normalizeItemCondition(player.equippedweapcnd);
+    const weapWhole = player.equippedweapwhole ? 1 : 0;
+    // skipRefresh=!0 prevents a redundant Pip.refreshEquipState() inside setav;
+    // REFRESH_EQUIP_CMD (player.refreshequip()) does the single authoritative render.
     commands.push(
-      this._buildEquipApparelCommand(this._normalizeEquippedApparel(player.equippedapparel))
+      `player.setav('equippedWeap', ${weapon}, !0, !0);player.setav('equippedWeapCnd', ${weapCnd}, !1);player.setav('equippedWeapWhole', ${weapWhole}, !1);${REFRESH_EQUIP_CMD}`
+    );
+    commands.push(
+      this._buildEquipApparelCommand(this._normalizeEquippedApparelWithCnd(player))
     );
     return commands;
   }
@@ -1136,17 +1174,45 @@ export class SyncEngine extends EventEmitter {
 
     const currentWeapon = this._toFormIdInt(player.equippedweap) ?? 0;
     const previousWeapon = this._toFormIdInt(prevPlayer.equippedweap) ?? 0;
-    if (currentWeapon !== previousWeapon) {
-      commands.push(`player.setav('equippedWeap', ${currentWeapon}, !0);${REFRESH_EQUIP_CMD}`);
+    const currentWeapCnd = this._normalizeItemCondition(player.equippedweapcnd);
+    const previousWeapCnd = this._normalizeItemCondition(prevPlayer.equippedweapcnd);
+    const currentWeapWhole = player.equippedweapwhole ? 1 : 0;
+    const previousWeapWhole = prevPlayer.equippedweapwhole ? 1 : 0;
+    if (
+      currentWeapon !== previousWeapon ||
+      currentWeapCnd !== previousWeapCnd ||
+      currentWeapWhole !== previousWeapWhole
+    ) {
+      // skipRefresh=!0 avoids a double Pip.refreshEquipState() call; refreshequip() renders once.
+      commands.push(
+        `player.setav('equippedWeap', ${currentWeapon}, !0, !0);player.setav('equippedWeapCnd', ${currentWeapCnd}, !1);player.setav('equippedWeapWhole', ${currentWeapWhole}, !1);${REFRESH_EQUIP_CMD}`
+      );
     }
 
-    const currentApparel = this._normalizeEquippedApparel(player.equippedapparel);
-    const previousApparel = this._normalizeEquippedApparel(prevPlayer.equippedapparel);
+    const currentApparel = this._normalizeEquippedApparelWithCnd(player);
+    const previousApparel = this._normalizeEquippedApparelWithCnd(prevPlayer);
     if (JSON.stringify(currentApparel) !== JSON.stringify(previousApparel)) {
       commands.push(this._buildEquipApparelCommand(currentApparel));
     }
 
     return commands;
+  }
+
+  /**
+   * Equipped apparel as {id, cnd} pairs (sorted by id), so the device can flag
+   * only the worn condition row of each apparel form. Falls back to condition
+   * 100 when the snapshot omits per-slot conditions.
+   */
+  _normalizeEquippedApparelWithCnd(player) {
+    const ids = Array.isArray(player?.equippedapparel) ? player.equippedapparel : [];
+    const cnds = Array.isArray(player?.equippedapparelcnd) ? player.equippedapparelcnd : [];
+    return ids
+      .map((id, i) => ({
+        id: this._toFormIdInt(id),
+        cnd: this._normalizeItemCondition(cnds[i]),
+      }))
+      .filter((p) => p.id !== null && p.id !== 0)
+      .sort((a, b) => a.id - b.id);
   }
 
   _normalizeEquippedApparel(value) {
@@ -1213,15 +1279,24 @@ export class SyncEngine extends EventEmitter {
     const weaponChanged =
       (this._toFormIdInt(player.equippedweap) ?? 0) !==
       (this._toFormIdInt(prevPlayer.equippedweap) ?? 0);
+    const weapCndChanged =
+      this._normalizeItemCondition(player.equippedweapcnd) !==
+      this._normalizeItemCondition(prevPlayer.equippedweapcnd);
+    const weapWholeChanged = !!(player.equippedweapwhole) !== !!(prevPlayer.equippedweapwhole);
     const apparelChanged =
       JSON.stringify(this._normalizeEquippedApparel(player.equippedapparel)) !==
       JSON.stringify(this._normalizeEquippedApparel(prevPlayer.equippedapparel));
-    return weaponChanged || apparelChanged;
+    return weaponChanged || weapCndChanged || weapWholeChanged || apparelChanged;
   }
 
-  _buildEquipApparelCommand(apparelIds) {
-    const idList = apparelIds.join(',');
-    return `player.equipapparel([${idList}])`;
+  _buildEquipApparelCommand(apparel) {
+    // Accepts either [{id, cnd}] pairs or a bare [id] list (back-compat).
+    const pairs = apparel.map((p) =>
+      typeof p === 'object' && p !== null ? p : { id: p, cnd: 100 }
+    );
+    const idList = pairs.map((p) => p.id).join(',');
+    const cndList = pairs.map((p) => this._normalizeItemCondition(p.cnd)).join(',');
+    return `player.equipapparel([${idList}],[${cndList}])`;
   }
 
   _buildSafeAddPerk(formId) {
@@ -1267,8 +1342,12 @@ export class SyncEngine extends EventEmitter {
     return this._buildAddItemHealthPercentCommand(formId, count, 100);
   }
 
-  _buildRemoveItemCommand(cat, formId, removeQty) {
-    return `player.removeitem(${formId},${removeQty})`;
+  _buildRemoveItemCommand(cat, formId, removeQty, condition) {
+    if (condition === undefined || condition === null) {
+      return `player.removeitem(${formId},${removeQty})`;
+    }
+    const cnd = this._normalizeItemCondition(condition);
+    return `player.removeitem(${formId},${removeQty},${cnd})`;
   }
 
   /**

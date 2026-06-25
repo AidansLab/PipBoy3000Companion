@@ -9,20 +9,65 @@
     ammoIds = ammoInv.ids(),
     imgs = E.openFile(`DATA/${NV ? 'NV' : 'F3'}/WEAPONS.IMG`, 'r');
   let active = player.getav('equippedWeap');
+  let activeCnd = player.getav('equippedWeapCnd');
+  const cndMode = () => typeof cmode !== 'undefined' && cmode;
+  // Virtual rows: when a multi-count stack of the equipped (id + condition) is
+  // worn, the game has split one copy off the stack. Mirror that by listing the
+  // equipped item as its own 1-count row with the remaining (cnt-1) directly
+  // below it. Thrown weapons (grenades/spears) ready the whole stack, so they
+  // are flagged whole and never split. Disconnected (no cmode) keeps stock 1:1
+  // rows. part: -1 normal, 0 worn single, 1 remainder.
+  //
+  // virtEquipPending: set while waiting for the game to confirm equippedWeapWhole
+  // after a device-initiated equip. Suppresses the split during that window so
+  // thrown weapons never flash a spurious split row. Cleared by refreshEquip.
+  let virtEquipPending = false;
+  let virt = [];
+  const buildVirt = () => {
+    const out = [];
+    const aware = cndMode();
+    const eq = aware ? player.getav('equippedWeap') : void 0;
+    const eqCnd = aware ? player.getav('equippedWeapCnd') : void 0;
+    const whole = aware ? player.getav('equippedWeapWhole') : void 0;
+    for (let i = 0; i < inv.count; i++) {
+      const it = inv.get(i);
+      out.push({ realN: i, part: -1 });
+      if (
+        it &&
+        !virtEquipPending &&
+        !whole &&
+        eq &&
+        it.id === eq &&
+        (eqCnd === undefined || it.cnd === eqCnd) &&
+        it.cnt > 1
+      ) {
+        out[out.length - 1].part = 0;
+        out.push({ realN: i, part: 1 });
+      }
+    }
+    return out;
+  };
+  const vAt = (n) => virt[n] || { realN: n, part: -1 };
+  virt = buildVirt();
   const scroller = Pip.createScroller({
     hasEquipStates: !0,
-    itemCount: inv.count,
+    itemCount: virt.length,
     scrollStart: params.scrollTo ? inv.indexOf(params.scrollTo) : 0,
     getItem: (n) => {
-      const it = inv.get(n),
+      const v = vAt(n),
+        it = inv.get(v.realN),
         item = db.getId(it.id),
-        equipped = player.getav('equippedWeap');
-      if (
-        (it.id === equipped && (item.activ = !0),
-        (item.cnd = it.cnd),
-        it.cnt > 1 && (item.txt = `${item.txt} (${it.cnt})`),
-        item.ammo)
-      ) {
+        equipped = player.getav('equippedWeap'),
+        equippedCnd = cndMode() ? player.getav('equippedWeapCnd') : void 0,
+        matches =
+          it.id === equipped &&
+          (equippedCnd === undefined || it.cnd === equippedCnd);
+      if (v.part === 0) item.activ = !0;
+      else if (v.part !== 1 && matches) item.activ = !0;
+      item.cnd = it.cnd;
+      const dispCnt = v.part === 0 ? 1 : v.part === 1 ? it.cnt - 1 : it.cnt;
+      if (dispCnt > 1) item.txt = `${item.txt} (${dispCnt})`;
+      if (item.ammo) {
         const ammo = ammoDb.getId(item.ammo),
           i = ammoIds.indexOf(item.ammo),
           am = ammoInv.get(i),
@@ -68,27 +113,47 @@
         NV && item.ef && Pip.renderBlock(210, 248, 253, 'EFFECTS', effectStr));
     },
     onClick: (n) => {
-      const it = inv.get(n),
-        item = db.getId(it.id);
-      (active === it.id
-        ? ((active = void 0),
-          item.fxu && Pip.audioStart(`SOUND/FX/WPN/${item.fxu}.WAV`),
-          console.log('PIPSYNC:UNEQUIP:WEAPONS:' + Pip.formatId(it.id)))
-        : (() => {
-            const prevId = active;
-            active = it.id;
-            item.fxe && Pip.audioStart(`SOUND/FX/WPN/${item.fxe}.WAV`);
-            if (prevId != null && prevId !== it.id) {
-              console.log('PIPSYNC:UNEQUIP:WEAPONS:' + Pip.formatId(prevId));
-            }
-            console.log('PIPSYNC:EQUIP:WEAPONS:' + Pip.formatId(it.id));
-          })(),
-        player.setav('equippedWeap', active, !0, !0),
-        scroller.updateItemCount(inv.count));
+      const v = vAt(n),
+        it = inv.get(v.realN),
+        item = db.getId(it.id),
+        cndAware = cndMode(),
+        // The remainder row (part=1) shares the same (id, cnd) as the equipped
+        // row but must never unequip — clicking it should equip that copy.
+        isActive =
+          v.part !== 1 && active === it.id && (!cndAware || activeCnd === it.cnd);
+      if (isActive) {
+        active = void 0;
+        activeCnd = void 0;
+        virtEquipPending = false;
+        item.fxu && Pip.audioStart(`SOUND/FX/WPN/${item.fxu}.WAV`);
+        console.log('PIPSYNC:UNEQUIP:WEAPONS:' + Pip.formatId(it.id));
+      } else {
+        const prevId = active;
+        const prevCnd = activeCnd;
+        active = it.id;
+        activeCnd = it.cnd;
+        // Suppress the split until the game confirms equippedWeapWhole, but
+        // only when switching to a genuinely different weapon. If the same
+        // (id, cnd) is already equipped (remainder-row click), equippedWeapWhole
+        // cannot have changed — no flash is possible and no suppression needed.
+        // Setting the flag in that case would leave it stuck (the snapshot never
+        // changes, so refreshEquip is never sent and the split never returns).
+        virtEquipPending = prevId !== it.id ||
+          (cndAware && prevCnd !== it.cnd);
+        item.fxe && Pip.audioStart(`SOUND/FX/WPN/${item.fxe}.WAV`);
+        if (prevId != null && prevId !== it.id) {
+          console.log('PIPSYNC:UNEQUIP:WEAPONS:' + Pip.formatId(prevId));
+        }
+        console.log('PIPSYNC:EQUIP:WEAPONS:' + Pip.formatId(it.id) + ':' + it.cnd);
+      }
+      player.setav('equippedWeap', active, !0, !0);
+      player.setav('equippedWeapCnd', activeCnd, !1);
+      virt = buildVirt();
+      scroller.updateItemCount(virt.length);
     },
     onLongClick: (n) => {
       if (typeof cmode !== 'undefined' && cmode) return;
-      const it = inv.get(n);
+      const it = inv.get(vAt(n).realN);
       (Pip.playSound('TAB'),
         setTimeout(
           () =>
@@ -103,13 +168,20 @@
     }
   });
   const onScroller = (action, arg) => {
-    if (action === 'count') scroller.updateItemCount(arg !== void 0 ? arg : inv.count);
-    else if (action === 'render') scroller.render(arg);
+    if (action === 'count') {
+      const prevLen = virt.length;
+      virt = buildVirt();
+      scroller.updateItemCount(virt.length);
+      if (virt.length !== prevLen) scroller.render({ listOnly: !0 });
+    } else if (action === 'render') scroller.render(arg);
     else if (action === 'refresh') {
-      scroller.updateItemCount(inv.count);
+      virt = buildVirt();
+      scroller.updateItemCount(virt.length);
       scroller.render(arg);
     } else if (action === 'refreshEquip') {
-      scroller.updateItemCount(inv.count);
+      virtEquipPending = false;
+      virt = buildVirt();
+      scroller.updateItemCount(virt.length);
       scroller.render({ listOnly: !1 });
     }
   };

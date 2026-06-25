@@ -325,14 +325,30 @@ export class CompanionApp extends EventEmitter {
 
       if (evt.action === 'use') {
         this.syncEngine.notifyDeviceConsumed(pipeFormId);
-      } else if (evt.action === 'equip') {
-        this.syncEngine.notifyDeviceEquipped(pipeFormId);
-      } else if (evt.action === 'unequip') {
-        this.syncEngine.notifyDeviceUnequipped(pipeFormId);
       }
+      // Give the device a command-free window so audio timer callbacks aren't
+      // blocked by incoming serial commands while a sound is playing.
+      if (evt.action === 'equip' || evt.action === 'unequip' || evt.action === 'use') {
+        this.bridge.guardAudio();
+      }
+      // notifyDeviceEquipped/Unequipped are intentionally not called here:
+      // the plugin always counts both worn and bagged copies of a form together,
+      // so equipping/unequipping never causes a net count change in the snapshot.
+      // Storing a pending credit would falsely suppress legitimate subsequent
+      // drops of the unequipped copy (the "remainder" after a split-stack equip).
 
       if (this.pipeClient.connected) {
-        this.pipeClient.send(`${evt.action.toUpperCase()} ${pipeFormId}`);
+        let pipeCmd = `${evt.action.toUpperCase()} ${pipeFormId}`;
+        // Carry the selected condition so the game equips the exact stack
+        // instance (otherwise the engine equips its default highest-condition one).
+        if (
+          evt.action === 'equip' &&
+          evt.condition !== undefined &&
+          Number.isFinite(evt.condition)
+        ) {
+          pipeCmd += ` ${evt.condition}`;
+        }
+        this.pipeClient.send(pipeCmd);
         if (pipeFormId.toLowerCase() !== String(evt.formId).toLowerCase()) {
           this.log('sync', `Pip-Boy → game: ${evt.action} ${evt.category} ${evt.formId} → ${pipeFormId}`);
         } else {

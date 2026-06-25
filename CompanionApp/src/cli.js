@@ -258,14 +258,29 @@ async function main() {
     // sync engine doesn't echo the game's matching decrement back to it
     if (evt.action === 'use') {
       syncEngine.notifyDeviceConsumed(pipeFormId);
-    } else if (evt.action === 'equip') {
-      syncEngine.notifyDeviceEquipped(pipeFormId);
-    } else if (evt.action === 'unequip') {
-      syncEngine.notifyDeviceUnequipped(pipeFormId);
     }
+    // Give the device a command-free window so audio timer callbacks aren't
+    // blocked by incoming serial commands while a sound is playing.
+    if (evt.action === 'equip' || evt.action === 'unequip' || evt.action === 'use') {
+      bridge.guardAudio();
+    }
+    // notifyDeviceEquipped/Unequipped intentionally not called: the plugin
+    // always includes both worn and bagged copies in the inventory total, so
+    // equip/unequip never produces a net count change in the snapshot and no
+    // credit is needed. A stale credit would falsely suppress a real drop of
+    // the remainder copy after a split-stack equip.
 
     if (pipeClient.connected) {
-      pipeClient.send(`${evt.action.toUpperCase()} ${pipeFormId}`);
+      let pipeCmd = `${evt.action.toUpperCase()} ${pipeFormId}`;
+      // Carry the selected condition so the game equips the exact stack instance.
+      if (
+        evt.action === 'equip' &&
+        evt.condition !== undefined &&
+        Number.isFinite(evt.condition)
+      ) {
+        pipeCmd += ` ${evt.condition}`;
+      }
+      pipeClient.send(pipeCmd);
       if (pipeFormId.toLowerCase() !== String(evt.formId).toLowerCase()) {
         logSync(`Pip-Boy → game: ${evt.action} ${evt.category} ${evt.formId} → ${pipeFormId}`);
       } else {
