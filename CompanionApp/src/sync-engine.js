@@ -86,6 +86,11 @@ export class SyncEngine extends EventEmitter {
     // Device-initiated torch toggles — don't let a stale game snapshot turn the LED off.
     this._deviceTorchPending = null;
     this._resyncEquipAfterInventory = false;
+    // Bumped on save load / forced resync. A snapshot that began processing
+    // under an older generation must not write its (now stale) state back into
+    // previousState, or it would downgrade the next post-load full sync to an
+    // incremental diff and leave inventory out of sync.
+    this._stateGeneration = 0;
     this.stats = {
       snapshotsProcessed: 0,
       commandsSent: 0,
@@ -226,6 +231,11 @@ export class SyncEngine extends EventEmitter {
     this._processingSnapshot = true;
     this.stats.snapshotsProcessed++;
 
+    // Capture the generation this snapshot is processed under. If a save load
+    // (or forced resync) bumps the generation mid-flight, we must not let this
+    // snapshot's stale state overwrite the freshly-reset previousState.
+    const processingGeneration = this._stateGeneration;
+
     // Remap form IDs when runtime load order differs from Pip-Boy fixed offsets.
     if (snapshot.loadOrder && this.mapper?.setLoadOrder) {
       const loadOrderChanged = this.mapper.setLoadOrder(snapshot.loadOrder);
@@ -330,7 +340,13 @@ export class SyncEngine extends EventEmitter {
         this.emit('initial-sync-complete');
       }
 
-      this.previousState = this._cloneSnapshot(snapshot);
+      // Only cache this snapshot as previousState if no save load / forced
+      // resync happened while we were processing it. Otherwise a stale pre-load
+      // snapshot would clobber the null reset and turn the next post-load
+      // snapshot into an incremental diff (inventory ends up out of sync).
+      if (processingGeneration === this._stateGeneration) {
+        this.previousState = this._cloneSnapshot(snapshot);
+      }
     } catch (err) {
       this.stats.errors++;
       this.emit('error', err);
@@ -1483,11 +1499,7 @@ export class SyncEngine extends EventEmitter {
    * Force a full resync from scratch
    */
   async forceFullSync() {
-    this._inventorySyncPaused = false;
-    this.previousState = null;
-    this._deviceConsumed.clear();
-    this._deviceEquipPending.clear();
-    this._deviceTorchPending = null;
+    this._resetForFullSync();
     this.emit('status', 'Forced full resync on next snapshot');
   }
 
@@ -1495,12 +1507,31 @@ export class SyncEngine extends EventEmitter {
    * Game loaded a save or started a new game — discard cached state.
    */
   handleSaveLoad() {
+    this._resetForFullSync();
+    this.emit('status', 'Game save loaded — full resync on next snapshot');
+  }
+
+  /**
+   * Reset all cached/queued snapshot state so the next processed snapshot is a
+   * guaranteed full sync. Bumps the state generation so any snapshot currently
+   * mid-flight cannot write its stale state back into previousState, and drops
+   * any debounced/pending pre-load snapshots that would otherwise seed an
+   * incremental diff.
+   */
+  _resetForFullSync() {
+    this._stateGeneration++;
     this._inventorySyncPaused = false;
     this.previousState = null;
     this._deviceConsumed.clear();
     this._deviceEquipPending.clear();
     this._deviceTorchPending = null;
-    this.emit('status', 'Game save loaded — full resync on next snapshot');
+    this._resyncEquipAfterInventory = false;
+    if (this._debounceTimer) {
+      clearTimeout(this._debounceTimer);
+      this._debounceTimer = null;
+    }
+    this._debouncedSnapshot = null;
+    this._pendingSnapshot = null;
   }
 
   /**

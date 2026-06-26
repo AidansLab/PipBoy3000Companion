@@ -25,7 +25,7 @@ const KNOWN_PRODUCTS = [
   '5740', // STM32 Virtual COM Port
 ];
 
-const DEFAULT_BAUD_RATE = 9600;
+const DEFAULT_BAUD_RATE = 19200;
 const COMMAND_SPACING_MS = 25;       // Min time between commands
 const AUDIO_GUARD_MS = 350;          // Hold commands after device equip/use so audio plays cleanly
 const RESPONSE_TIMEOUT_MS = 3000;    // Timeout waiting for eval response

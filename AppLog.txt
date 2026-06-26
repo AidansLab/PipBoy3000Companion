@@ -1,8 +1,0 @@
-[2:00:16 PM] Pip-Boy → game: equip WEAPONS 0x00004335
-[2:00:16 PM] Form ID 0x4000872 → 0x9000872
-[2:00:16 PM] Sending 4 update(s)...
-[2:00:16 PM] player.setav('ammoActive', 132978, !1)
-[2:00:17 PM] player.setav('ammoUsable', [132978,1409759,1409760,1409811,150997106], !1)
-[2:00:17 PM] player.refreshequip('AMMO')
-[2:00:17 PM] player.setav('equippedWeap', 17205, !0);player.setav('equippedWeapCnd', 100, !1);player.refreshequip()
-[2:00:17 PM] 4 command(s) sent

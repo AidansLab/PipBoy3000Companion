@@ -128,6 +128,16 @@ global.cmode = !1;
       if (dat && 'cnt' in dat) dat.cnt = E.clip(dat.cnt, 1, INV_MAX_CNT);
       return _invSet.call(this, i, dat);
     };
+    // clearinv() rewrites the .INV files from scratch while an inventory menu may
+    // still hold a now-stale InvFile in its closure. When that menu is later torn
+    // down (changeMenu during full sync) its remove() calls inv.sync(), which
+    // would write the stale pre-clear data back over the freshly synced items.
+    // Flagging the orphaned instance and skipping its sync prevents that clobber.
+    const _invSync = InvFile.prototype.sync;
+    InvFile.prototype.sync = function () {
+      if (this._invalidated) return;
+      return _invSync.apply(this, arguments);
+    };
   }
 
   // Items of the same form but different condition are distinct stacks, so adds
@@ -339,6 +349,9 @@ global.cmode = !1;
 
   Player.prototype.clearinv = function () {
     if (typeof Pip !== 'undefined' && Pip.inv) {
+      // Mark the open menu's InvFile as stale so its later remove()/sync() can't
+      // write pre-clear data back over the items we're about to re-add.
+      Pip.inv._invalidated = !0;
       delete Pip.inv;
     }
     var fs = require('fs'), m = NV ? 'NV' : 'F3';
