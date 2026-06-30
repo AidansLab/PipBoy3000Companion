@@ -46,7 +46,7 @@
         getItem: (n) => db.getId(Object.keys(userPerks)[n]),
         render: renderPerk,
         onLongClick: (n) => {
-          if (typeof cmode !== 'undefined' && cmode) return;
+          if (cmode) return;
           (Pip.playSound('TAB'),
             h.clearRect(BR),
             (scroller = (function (scrollToID) {

@@ -303,6 +303,138 @@
         'Start Demo Mode': () => setTimeout(Pip.demoMode, 500)
       })));
   }
+  const presyncCats = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
+  function tryStat(path) {
+    try {
+      fs.statSync(path);
+      return !0;
+    } catch (e) {}
+    return !1;
+  }
+  function tryRead(path) {
+    try {
+      const data = fs.readFileSync(path);
+      if (data && data.length) return data;
+    } catch (e) {}
+    return '';
+  }
+  function ensureDir(dir) {
+    const parts = dir.split('/');
+    let p = '';
+    for (let i = 0; i < parts.length; i++) {
+      if (!parts[i]) continue;
+      p = p ? p + '/' + parts[i] : parts[i];
+      try {
+        fs.statSync(p);
+      } catch (e) {
+        try {
+          fs.mkdirSync(p);
+        } catch (e2) {}
+      }
+    }
+  }
+  function hasPreSyncBackupFiles(mode) {
+    if (tryStat('SETTINGS/PRESYNC/PLAYER.JSON')) return !0;
+    if (tryStat('SETTINGS/PRESYNC/' + mode + '_PERKS.JSON')) return !0;
+    if (tryStat('SETTINGS/PRESYNC/' + mode + '_SKILLS.JSON')) return !0;
+    const base = 'INV/PRESYNC/' + mode;
+    for (let i = 0; i < presyncCats.length; i++) {
+      if (tryStat(base + '/' + presyncCats[i] + '.INV')) return !0;
+    }
+    return !1;
+  }
+  function hasPreSyncBackup(mode) {
+    if (!hasPreSyncBackupFiles(mode)) return !1;
+    const manifestRaw = tryRead('INV/PRESYNC/MANIFEST.JSON');
+    if (!manifestRaw) return !0;
+    try {
+      const m = JSON.parse(manifestRaw);
+      if (m && m.v && m.v < 2) return !1;
+      if (m && m.mode && m.mode !== mode) return !1;
+    } catch (e) {
+      return !1;
+    }
+    return !0;
+  }
+  function clearPreSyncBackup() {
+    const settingsFiles = [
+      'PLAYER.JSON',
+      'F3_PERKS.JSON',
+      'F3_SKILLS.JSON',
+      'NV_PERKS.JSON',
+      'NV_SKILLS.JSON'
+    ];
+    const tryUnlink = (p) => {
+      try {
+        fs.unlinkSync(p);
+      } catch (e) {}
+    };
+    settingsFiles.forEach((f) => tryUnlink('SETTINGS/PRESYNC/' + f));
+    ['F3', 'NV'].forEach((m) => {
+      presyncCats.forEach((c) => tryUnlink('INV/PRESYNC/' + m + '/' + c + '.INV'));
+    });
+    tryUnlink('INV/PRESYNC/MANIFEST.JSON');
+  }
+  function readPresyncOrDefault(src, defaults) {
+    const data = tryRead(src);
+    if (data) return data;
+    for (let i = 0; i < defaults.length; i++) {
+      const fallback = tryRead(defaults[i]);
+      if (fallback) return fallback;
+    }
+    return '';
+  }
+  function restorePreSyncData() {
+    const mode = NV ? 'NV' : 'F3',
+      srcDir = 'INV/PRESYNC/' + mode,
+      dstDir = 'INV/' + mode,
+      refreshIds = [
+        'WEAPONS',
+        'APPAREL',
+        'AID',
+        'MISC',
+        'AMMO',
+        'SPECIAL',
+        'SKILLS',
+        'PERKS'
+      ];
+    if (!hasPreSyncBackup(mode)) return !1;
+    if (typeof cmode !== 'undefined' && cmode) return !1;
+    try {
+      ensureDir(dstDir);
+      typeof Pip !== 'undefined' && Pip.inv && delete Pip.inv;
+      const playerData = tryRead('SETTINGS/PRESYNC/PLAYER.JSON');
+      if (playerData) {
+        fs.writeFileSync('SETTINGS/PLAYER.JSON', playerData);
+        const restored = JSON.parse(playerData);
+        for (let k in restored) player.player[k] = restored[k];
+        player.ephemeral = {};
+        player.modified = !0;
+        player.sync();
+      }
+      [mode + '_PERKS.JSON', mode + '_SKILLS.JSON'].forEach((v) => {
+        const data = tryRead('SETTINGS/PRESYNC/' + v);
+        if (data.length > 2) fs.writeFileSync('SETTINGS/' + v, data);
+      });
+      presyncCats.forEach((v) => {
+        const live = dstDir + '/' + v + '.INV',
+          def = 'INV/DEFAULT/' + mode + '/' + v + '.INV';
+        const data = readPresyncOrDefault(srcDir + '/' + v + '.INV', [def]);
+        fs.writeFileSync(live, data || '');
+      });
+      player.calculateInvWeight && player.calculateInvWeight();
+      Pip.renderHeader && Pip.renderHeader();
+      clearPreSyncBackup();
+      console.log('PIPSYNC:RESTORE:PRESYNC');
+      Pip.CURRENT &&
+        refreshIds.indexOf(Pip.CURRENT.id) >= 0 &&
+        Pip.changeMenu &&
+        Pip.changeMenu();
+      return !0;
+    } catch (e) {
+      return !1;
+    }
+  }
   function showUserMenu() {
     (menu && menu.remove(),
       (menu = showMenu({
@@ -341,25 +473,22 @@
                   '': { title: 'Cannot Restore', back: showUserMenu },
                   'Not allowed while in companion mode.': () => {}
                 }))
-              : (() => {
-                  let ps;
-                  try {
-                    ps = eval(fs.readFileSync('JS/PRESYNC.JS'));
-                  } catch (e) {
-                    ps = null;
-                  }
-                  !ps || !ps.hasPreSyncBackup(mode)
-                    ? (menu = showMenu({
-                        '': { title: 'No Backup', back: showUserMenu },
-                        'No pre-sync data backup found for this mode.': () => {}
-                      }))
-                    : (menu = showMenu({
-                        '': { title: 'Restore pre-sync data?', back: showUserMenu },
-                        Yes: function () {
-                          (ps.restore(mode), showUserMenu());
-                        }
-                      }));
-                })());
+              : hasPreSyncBackup(mode)
+                ? (menu = showMenu({
+                    '': { title: 'Restore pre-sync data?', back: showUserMenu },
+                    Yes: function () {
+                      restorePreSyncData()
+                        ? showUserMenu()
+                        : (menu = showMenu({
+                            '': { title: 'Restore Failed', back: showUserMenu },
+                            'Could not restore pre-sync data.': () => {}
+                          }));
+                    }
+                  }))
+                : (menu = showMenu({
+                    '': { title: 'No Backup', back: showUserMenu },
+                    'No pre-sync data backup found for this mode.': () => {}
+                  })));
         },
         'Reset inventory': function () {
           (menu && menu.remove(),

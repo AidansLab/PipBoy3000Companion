@@ -111,14 +111,14 @@
       }, 500)));
   }
   function onKnob1(v) {
-    if (typeof cmode !== 'undefined' && cmode) return;
+    if (cmode) return;
     0 == v &&
       ((withdrawal = !withdrawal),
         player.setav('withdrawal', withdrawal),
         renderStatusGuy());
   }
   function onKnob2(v) {
-    if (typeof cmode !== 'undefined' && cmode) return;
+    if (cmode) return;
     for (let k in cnd)
       ((cnd[k] = Math.floor(E.clip(cnd[k] + v * Math.random() * 6, 0, 100))),
         player.setav(avs[k], cnd[k]));

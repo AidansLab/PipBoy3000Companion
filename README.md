@@ -1,10 +1,25 @@
-# Pip-Boy 3000 Companion App
+<div align="center">
+<h1>Pip-Boy 3000 Companion App</h1>
 
-Sync your **Fallout 3** and **Fallout: New Vegas** player stats and inventory to [The Wand Company's Pip-Boy 3000](https://www.thewandcompany.com/pip-boy-3000/) replica in real-time over USB.
+<a href="https://www.paypal.com/donate/?hosted_button_id=YCQRQCCNQGCHY">
+  <img src="https://img.shields.io/badge/PayPal-Donate-blue?logo=paypal&logoColor=white&style=for-the-badge" alt="PayPal">
+</a>
+<img alt="GitHub package.json version" src="https://img.shields.io/github/package-json/v/:AidansLab/:PipBoy3000CompanionApp?style=for-the-badge&filename=CompanionApp/package.json">
+<img alt="GitHub commits since latest release" src="https://img.shields.io/github/commits-since/:AidansLab/:PipBoy3000CompanionApp/latest?style=for-the-badge">
+<p></p>
+<img alt="GitHub License" src="https://img.shields.io/github/license/:AidansLab/:PipBoy3000CompanionApp?style=flat-square">
+<img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/:AidansLab/:PipBoy3000CompanionApp?style=flat-square">
+<img alt="GitHub last commit" src="https://img.shields.io/github/last-commit/:AidansLab/:PipBoy3000CompanionApp?flat-square">
+<img alt="GitHub forks" src="https://img.shields.io/github/forks/:AidansLab/:PipBoy3000CompanionApp?style=flat-square">
+
+
+</div>
+
+Sync your **Fallout: New Vegas** and **Fallout 3** player stats and inventory to [The Wand Company's Pip-Boy 3000](https://www.thewandcompany.com/pip-boy-3000/) replica in real-time over USB.
 
 > **⚠ DISCLAIMER**: This is an unofficial fan project. Not affiliated with or endorsed by Bethesda Softworks, The Wand Company, or any other entity.
 
-> **⚠ WARNING**: Compatibility with mods and modpacks that add or modify items and/or modify gameplay is not guaranteed. YUP is specifically not supported because the mod changes the formid's on some vanilla items.
+> **⚠ WARNING**: Compatibility with mods and modpacks that add or modify items and/or modify gameplay is not guaranteed. YUP is specifically known to have issues because the mod changes the formid's on some vanilla items. I am one person, so bugs are innevitable, please open an issue if you run into any bugs or errors. Donations help me to continue this project.
 
 ## How It Works
 
@@ -22,7 +37,7 @@ Sync your **Fallout 3** and **Fallout: New Vegas** player stats and inventory to
 ## Quick Start
 - Download the latest companion app exe from the [Releases page](https://github.com/AidansLab/PipBoy3000CompanionApp/releases)
 - Install [NVSE](https://github.com/xNVSE/NVSE/releases) or [xFOSE](https://www.nexusmods.com/fallout3/mods/8606?tab=description) depending on your game.
-- Install the latest plugin DLL from [Nexus mods]() by clicking the Mod manager download if you are using a mod manager, or manually install from the [Releases page](https://github.com/AidansLab/PipBoy3000CompanionApp/releases) to your NVSE/FOSE plugins folder.
+- Install the latest plugin DLL for [Fallout New Vegas]() or [Fallout 3]() by clicking the Mod manager download if you are using a mod manager, or manually install from the [Releases page](https://github.com/AidansLab/PipBoy3000CompanionApp/releases) to your NVSE/FOSE plugins folder.
 - Plug in your Pip-Boy 3000 with a USB C cable, make sure to use a USB cable that supports data transfer, not just charging.
 - Open the companion app and click "Install Companion Menus & Boot Patch" to install the companion firmware to your device.
 - Make sure your Pip-Boy is set to the same mode as the game you want to sync with by going to DATA>Settings>Pip-Boy mode and selecting New Vegas or Fallout 3.
@@ -52,8 +67,6 @@ npm run flash-fw
 
 The game plugin requires:
 - Visual Studio 2022+ with C++ Desktop Development
-- [xFOSE SDK](https://github.com/xFOSE/xFOSE) for Fallout 3
-- [xNVSE SDK](https://github.com/xNVSE/NVSE) for New Vegas
 
 ### Instructions
 - Go to GamePlugin\build and open FalloutPipBoySync.sln
@@ -62,4 +75,4 @@ The game plugin requires:
 
 ## License
 
-This software is licensed under the AGPLv3. For commercial use without the AGPL's copyleft restrictions, please contact me to purchase a commercial license.
+This software is licensed under the CC BY-NC-SA 4.0.

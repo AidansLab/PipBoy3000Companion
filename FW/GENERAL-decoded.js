@@ -7,39 +7,8 @@
   const scroller = NV
     ? (function () {
         imgFile = E.openFile('DATA/REP.IMG', 'r');
-        const factionRep = [
-            'Idolized',
-            'Liked',
-            'Accepted',
-            'Good-Natured Rascal',
-            'Smiling Troublemaker',
-            'Neutral',
-            'Mixed',
-            'Dark Hero',
-            'Unpredictable',
-            'Wild Child',
-            'Soft-Hearted Devil',
-            'Shunned',
-            'Sneering Punk',
-            'Merciful Thug',
-            'Hated',
-            'Vilified'
-          ],
-          allFactions = [
-            'Boomers',
-            'Brotherhood of Steel',
-            "Caesar's Legion",
-            'Followers of the Apocalypse',
-            'Freeside',
-            'Goodsprings',
-            'Great Khans',
-            'NCR',
-            'Novac',
-            'Powder Gangers',
-            'Primm',
-            'The Strip',
-            'White Glove Society'
-          ],
+        const factionRep = 'Idolized\nLiked\nAccepted\nGood-Natured Rascal\nSmiling Troublemaker\nNeutral\nMixed\nDark Hero\nUnpredictable\nWild Child\nSoft-Hearted Devil\nShunned\nSneering Punk\nMerciful Thug\nHated\nVilified'.split('\n'),
+          allFactions = 'Boomers\nBrotherhood of Steel\nCaesar\'s Legion\nFollowers of the Apocalypse\nFreeside\nGoodsprings\nGreat Khans\nNCR\nNovac\nPowder Gangers\nPrimm\nThe Strip\nWhite Glove Society'.split('\n'),
           uRep = loadJSONWithDefaults(
             'SETTINGS/REP.JSON',
             Object.fromEntries(allFactions.map((f) => [f, 5]))
@@ -62,7 +31,7 @@
             return filtered;
           })(),
           displayFactions =
-            typeof cmode !== 'undefined' && cmode ? visibleFactions : allFactions,
+            cmode ? visibleFactions : allFactions,
           s = Pip.createScroller({
             width: 240,
             itemCount: displayFactions.length,
@@ -78,7 +47,7 @@
             }
           });
         function onKnob2(dir) {
-          if (typeof cmode !== 'undefined' && cmode) return;
+          if (cmode) return;
           const fac = displayFactions[s.selectedIndex],
             v = E.clip(uRep[fac] + dir, 0, 15);
           v != uRep[fac] &&
@@ -100,7 +69,7 @@
             (Pip.removeListener('knob2', onKnob2),
               Pip.removeListener('factions', onFactionSync),
               modified &&
-                !(typeof cmode !== 'undefined' && cmode) &&
+                !(cmode) &&
                 (debug('Writing to REP.JSON'),
                 fs.writeFileSync('SETTINGS/REP.JSON', JSON.stringify(uRep))));
           }),
@@ -126,109 +95,17 @@
             })(e[0], e[1])
         ),
           (imgFile = E.openFile('DATA/KARMA.IMG', 'r')));
-        const karmaGood = [
-            'Vault Guardian',
-            'Vault Martyr',
-            'Sentinel',
-            'Defender',
-            'Dignitary',
-            'Peacekeeper',
-            'Ranger of the Wastes',
-            'Protector',
-            'Urban Avenger',
-            'Exemplar',
-            'Capitol Crusader',
-            'Paladin',
-            'Vault Legend',
-            'Ambassador of Peace',
-            'Urban Legend',
-            'Hero of the Wastes',
-            'Paragon',
-            'Wasteland Savior',
-            'Saint',
-            'Last,Best Hope of Humanity',
-            'Restorer of Faith',
-            'Model of Selflessness',
-            'Shepherd',
-            'Friend of the People',
-            'Champion of Justice',
-            'Symbol of Order',
-            'Herald of Tranquility',
-            'Lightbringer',
-            'Earthly Angel',
-            'Messiah'
-          ],
-          karmaBad = [
-            'Vault Delinquent',
-            'Vault Outlaw',
-            'Opportunist',
-            'Plunderer',
-            'Fat Cat',
-            'Marauder',
-            'Pirate of the Wastes',
-            'Reaver',
-            'Urban Invader',
-            "Ne'er-do-well",
-            'Capitol Crimelord',
-            'Defiler',
-            'Vault Boogeyman',
-            'Harbinger of War',
-            'Urban Superstition',
-            'Villain of the Wastes',
-            'Fiend',
-            'Wasteland Destroyer',
-            'Evil Incarnate',
-            'Scourge of Humanity',
-            'Architect of Doom',
-            'Bringer of Sorrow',
-            'Deceiver',
-            'Consort of Discord',
-            'Stuff of Nightmares',
-            'Agent of Chaos',
-            'Instrument of Ruin',
-            'Soultaker',
-            "Demon's Spawn",
-            'Devil'
-          ];
-        let karma = [
-            'Vault Dweller',
-            'Vault Renegade',
-            'Seeker',
-            'Wanderer',
-            'Citizen',
-            'Adventurer',
-            'Vagabond of the Wastes',
-            'Mercenary',
-            'Urban Ranger',
-            'Observer',
-            'Capitol Councilor',
-            'Keeper',
-            'Vault Descendant',
-            'Pinnacle of Survival',
-            'Urban Myth',
-            'Strider of the Wastes',
-            'Beholder',
-            'Wasteland Watcher',
-            'Super-Human',
-            'Paradigm of Humanity',
-            'Soldier of Fortune',
-            'Profiteer',
-            'Egocentric',
-            'Loner',
-            'Hero for Hire',
-            'Model of Apathy',
-            'Person of Refinement',
-            'Moneygrubber',
-            'Gray Stranger',
-            'True Mortal'
-          ][Math.min(playerlevel - 1, 29)],
-          karmaLevel = 2;
-        playerKarma > 249
-          ? ((karma = karmaGood[Math.min(playerlevel - 1, 29)]),
-            (karmaLevel = playerKarma > 749 ? 4 : 3))
-          : playerKarma < -249 &&
-            ((karma = karmaBad[Math.min(playerlevel - 1, 29)]),
-            (karmaLevel = playerKarma < -749 ? 0 : 1));
+        const lvlIdx = Math.min(playerlevel - 1, 29);
+        let karma, karmaLevel = 2;
+        if (playerKarma > 249) {
+          karmaLevel = playerKarma > 749 ? 4 : 3;
+          karma = 'Vault Guardian\nVault Martyr\nSentinel\nDefender\nDignitary\nPeacekeeper\nRanger of the Wastes\nProtector\nUrban Avenger\nExemplar\nCapitol Crusader\nPaladin\nVault Legend\nAmbassador of Peace\nUrban Legend\nHero of the Wastes\nParagon\nWasteland Savior\nSaint\nLast,Best Hope of Humanity\nRestorer of Faith\nModel of Selflessness\nShepherd\nFriend of the People\nChampion of Justice\nSymbol of Order\nHerald of Tranquility\nLightbringer\nEarthly Angel\nMessiah'.split('\n')[lvlIdx];
+        } else if (playerKarma < -249) {
+          karmaLevel = playerKarma < -749 ? 0 : 1;
+          karma = 'Vault Delinquent\nVault Outlaw\nOpportunist\nPlunderer\nFat Cat\nMarauder\nPirate of the Wastes\nReaver\nUrban Invader\nNe\'er-do-well\nCapitol Crimelord\nDefiler\nVault Boogeyman\nHarbinger of War\nUrban Superstition\nVillain of the Wastes\nFiend\nWasteland Destroyer\nEvil Incarnate\nScourge of Humanity\nArchitect of Doom\nBringer of Sorrow\nDeceiver\nConsort of Discord\nStuff of Nightmares\nAgent of Chaos\nInstrument of Ruin\nSoultaker\nDemon\'s Spawn\nDevil'.split('\n')[lvlIdx];
+        } else {
+          karma = 'Vault Dweller\nVault Renegade\nSeeker\nWanderer\nCitizen\nAdventurer\nVagabond of the Wastes\nMercenary\nUrban Ranger\nObserver\nCapitol Councilor\nKeeper\nVault Descendant\nPinnacle of Survival\nUrban Myth\nStrider of the Wastes\nBeholder\nWasteland Watcher\nSuper-Human\nParadigm of Humanity\nSoldier of Fortune\nProfiteer\nEgocentric\nLoner\nHero for Hire\nModel of Apathy\nPerson of Refinement\nMoneygrubber\nGray Stranger\nTrue Mortal'.split('\n')[lvlIdx];
+        }
         const s = Pip.createScroller({
           width: 240,
           itemCount: Object.entries(general).length,

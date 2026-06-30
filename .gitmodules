@@ -1,0 +1,4 @@
+[submodule "GamePlugin/xNVSE"]
+path = GamePlugin/xNVSE
+url = https://github.com/xNVSE/NVSE.git
+branch = master

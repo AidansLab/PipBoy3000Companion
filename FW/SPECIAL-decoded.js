@@ -34,7 +34,7 @@
     });
   let headerRenderTimer;
   function onKnob2(dir) {
-    if (typeof cmode !== 'undefined' && cmode) return;
+    if (cmode) return;
     const av = avs[scroller.selectedIndex],
       currentVal = player.getav(av),
       newVal = E.clip(currentVal + dir, 1, 10);

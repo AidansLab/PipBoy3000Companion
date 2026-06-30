@@ -45,7 +45,7 @@
           h.setFontAlign(-1, -1).drawString('EDIT SKILLS', 220, 51, !0)));
     },
     onLongClick: () => {
-      if (typeof cmode !== 'undefined' && cmode) return;
+      if (cmode) return;
       (Pip.playSound('TAB'),
         (editMode = !editMode),
         editMode

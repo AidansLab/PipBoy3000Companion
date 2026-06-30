@@ -52,6 +52,11 @@ const FULL_SYNC_UI_REFRESH_CMD = 'player.fullsyncrefresh();';
 
 const INVENTORY_CATEGORIES = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
 const CLEAR_INV_CMD = 'player.clearinv()';
+
+// Weapon DAM (skill/condition-adjusted display damage) lives in a side
+// *_DAM.INV file, mirrored one (formId, condition) entry at a time.
+const CLEAR_DAM_CMD = 'player.cleardam()';
+const REFRESH_WEAPON_DAM_CMD = 'player.refreshweapondam()';
 const CLEAR_PERKS_CMD = 'player.clearperks()';
 /** Refresh open WEAPONS/APPAREL scroller after remote equip; safe if .boot0 not loaded */
 const REFRESH_EQUIP_CMD = 'player.refreshequip()';
@@ -312,15 +317,30 @@ export class SyncEngine extends EventEmitter {
 
         this.emit('syncing', { commandCount: commands.length });
 
-        for (const cmd of commands) {
-          // Equip confirmation commands bypass the audio guard so the split
-          // appears as soon as the game round-trip completes.
-          if (this._isEquipCommand(cmd)) {
-            await this.bridge.sendEquipCommand(cmd);
-          } else {
-            await this.bridge.sendCommand(cmd);
+        const guardActive =
+          typeof this.bridge.isAudioGuardActive === 'function' &&
+          this.bridge.isAudioGuardActive();
+
+        if (guardActive) {
+          // A device sound is playing: keep the per-command path so equip
+          // confirmations bypass the guard while regular commands wait it out.
+          for (const cmd of commands) {
+            if (this._isEquipCommand(cmd)) {
+              await this.bridge.sendEquipCommand(cmd);
+            } else {
+              await this.bridge.sendCommand(cmd);
+            }
+            this.stats.commandsSent++;
           }
-          this.stats.commandsSent++;
+        } else {
+          // Common case (game-driven sync, no sound playing): send the whole
+          // ordered list as a batch. The device receives the exact same framed
+          // lines, just without the 25ms inter-command spacing — collapsing a
+          // typical 6–10 command sync from ~150–250ms of pure spacing to one or
+          // two writes. Equip vs regular distinction is irrelevant here since the
+          // guard is closed and everything may flow immediately.
+          await this.bridge.sendBatch(commands);
+          this.stats.commandsSent += commands.length;
         }
 
         // SYNC-DISABLED: player.sync() — inventory menus flush .INV on page exit
@@ -404,6 +424,10 @@ export class SyncEngine extends EventEmitter {
         if (current !== undefined && current !== previous) {
           if (attr === 'level') {
             commands.push(`player.setlevel(${player.level})`);
+            // Also push XP on level-up so the display reflects the new total.
+            if (player.xp !== undefined) {
+              commands.push(`player.setav('xp',${player.xp},!0)`);
+            }
           } else if (attr === 'name') {
             commands.push(`player.setav('name', ${JSON.stringify(player.name)}, !0)`);
           } else {
@@ -449,7 +473,7 @@ export class SyncEngine extends EventEmitter {
         // Inventory removed items — push inventory first, then re-authorise equip
         this._resyncEquipAfterInventory = false;
         commands.push(...invCommands);
-        commands.push(...this._buildAuthoritativeEquipCommands(player));
+        commands.push(...this._buildAuthoritativeEquipCommands(player, prevPlayer));
       } else {
         // Normal case: equip command first so split appears as fast as possible,
         // then inventory count updates follow.
@@ -459,6 +483,10 @@ export class SyncEngine extends EventEmitter {
     } else {
       commands.push(...invCommands);
     }
+
+    // Weapon DAM (skill/condition-adjusted) — mirror per-stack deltas. Self-gated
+    // on inventory pause; placed after inventory so the rows it annotates exist.
+    commands.push(...this._diffWeaponDamage(snapshot.inventory || [], prev.inventory || []));
 
     // Weapon ammo — ephemeral UI state; always sync (not gated on inventory pause)
     commands.push(...this._diffWeaponAmmo(player, prevPlayer));
@@ -549,6 +577,11 @@ export class SyncEngine extends EventEmitter {
         commands.push(`player.setlevel(${player.level})`);
       }
 
+      // XP — pushed on first sync and save-loads (full syncs only)
+      if (player.xp !== undefined) {
+        commands.push(`player.setav('xp',${player.xp},!0)`);
+      }
+
       // Set all scalar attributes (hp = true health pool from the game;
       // maxHP is omitted — the Pip-Boy calculates it itself)
       const attrs = ['hp', 'karma', 'perceptioncondition', 'endurancecondition', 'leftattackcondition', 'rightattackcondition', 'leftmobilitycondition', 'rightmobilitycondition'];
@@ -582,16 +615,26 @@ export class SyncEngine extends EventEmitter {
       for (const item of inventory) {
         const formId = this._resolveFormId(item.formId);
         if (formId === null) continue;
+        const cat = this._toPipBoyCategory(item.type);
 
         if (this._itemHasDegradedCondition(item)) {
           commands.push(
-            this._buildAddItemHealthPercentCommand(formId, item.count || 1, item.condition)
+            this._buildAddItemHealthPercentCommand(formId, item.count || 1, item.condition, cat)
           );
         } else {
           commands.push(
-            this._buildAddItemCommand(formId, item.count || 1)
+            this._buildAddItemCommand(formId, item.count || 1, cat)
           );
         }
+      }
+
+      // Reset and repopulate weapon DAM (skill/condition-adjusted display damage).
+      commands.push(CLEAR_DAM_CMD);
+      for (const item of inventory) {
+        if (item.dam == null) continue;
+        const formId = this._resolveFormId(item.formId);
+        if (formId === null) continue;
+        commands.push(this._buildSetDamCommand(formId, item.condition, item.dam));
       }
       // SYNC-DISABLED: calculateInvWeight() writes every .INV file
       // commands.push('player.calculateInvWeight()');
@@ -825,22 +868,76 @@ export class SyncEngine extends EventEmitter {
       for (const item of current) {
         const formId = this._resolveFormId(item.formId);
         if (formId === null) continue;
+        const cat = this._toPipBoyCategory(item.type);
         if (this._itemHasDegradedCondition(item)) {
           commands.push(
-            this._buildAddItemHealthPercentCommand(formId, item.count || 1, item.condition)
+            this._buildAddItemHealthPercentCommand(formId, item.count || 1, item.condition, cat)
           );
         } else {
           commands.push(
-            this._buildAddItemCommand(formId, item.count || 1)
+            this._buildAddItemCommand(formId, item.count || 1, cat)
           );
         }
       }
       return commands;
     }
 
+    // Forms whose per-condition stack distribution changed while the form still
+    // exists before AND after (e.g. a weapon/armor degraded or was repaired).
+    // Representing that as add(newCond)+remove(oldCond) is fragile: if the remove
+    // half is lost or the device already moved past that condition, a stale row
+    // is orphaned and shows as a duplicate. Instead authoritatively rebuild just
+    // that form's rows from the current snapshot — atomic, and self-heals any
+    // pre-existing orphan. Pure adds/removals stay on the incremental path so
+    // device equip/use credits keep working.
+    const rebuildForms = new Set();
+    {
+      const condsByForm = (map) => {
+        const m = new Map();
+        for (const it of map.values()) {
+          const set = m.get(it.formId) || m.set(it.formId, new Set()).get(it.formId);
+          set.add(this._normalizeItemCondition(it.condition));
+        }
+        return m;
+      };
+      const curConds = condsByForm(currentMap);
+      const prevConds = condsByForm(previousMap);
+      const sameSet = (a, b) =>
+        a && b && a.size === b.size && [...a].every((v) => b.has(v));
+      for (const [gameFormId, curSet] of curConds) {
+        const prevSet = prevConds.get(gameFormId);
+        if (!prevSet) continue; // pure add — handled incrementally
+        if (sameSet(curSet, prevSet)) continue; // only counts changed, if anything
+        if (this._resolveFormId(gameFormId) === null) continue;
+        rebuildForms.add(gameFormId);
+      }
+
+      for (const gameFormId of rebuildForms) {
+        const formId = this._resolveFormId(gameFormId);
+        let type = null;
+        const stacks = [];
+        for (const it of currentMap.values()) {
+          if (it.formId !== gameFormId) continue;
+          if (type === null) type = it.type;
+          stacks.push({
+            cnt: it.count || 1,
+            cnd: this._normalizeItemCondition(it.condition),
+          });
+        }
+        // Intentionally do NOT add to _lastChangedCategories here.
+        // setformstacks sorts the INV inline (dbIds is already cached, no extra
+        // flash read) and syncs/persists the result, so a separate sortandrefreshinv
+        // is unnecessary. The equip re-sync that always follows provides the
+        // required UI refresh.
+        commands.push(this._buildSetFormStacksCommand(formId, stacks));
+        this._resyncEquipAfterInventory = true;
+      }
+    }
+
     // Items added (new formIds not in previous)
     for (const id of addedIds) {
       const item = currentMap.get(id);
+      if (rebuildForms.has(item.formId)) continue;
       const formId = this._resolveFormId(item.formId);
       if (formId === null) continue;
       const cat = this._toPipBoyCategory(item.type);
@@ -848,11 +945,11 @@ export class SyncEngine extends EventEmitter {
 
       if (this._itemHasDegradedCondition(item)) {
         commands.push(
-          this._buildAddItemHealthPercentCommand(formId, item.count || 1, item.condition)
+          this._buildAddItemHealthPercentCommand(formId, item.count || 1, item.condition, cat)
         );
       } else {
         commands.push(
-          this._buildAddItemCommand(formId, item.count || 1)
+          this._buildAddItemCommand(formId, item.count || 1, cat)
         );
       }
     }
@@ -862,6 +959,7 @@ export class SyncEngine extends EventEmitter {
     // by the add/remove loops, so the cnd is carried on remove to target the
     // correct stack on the device.
     for (const [key, currentItem] of currentMap) {
+      if (rebuildForms.has(currentItem.formId)) continue;
       if (previousMap.has(key)) {
         const prevItem = previousMap.get(key);
         const gameFormId = currentItem.formId;
@@ -873,13 +971,16 @@ export class SyncEngine extends EventEmitter {
           const addQty = countDelta - this._takeDeviceEquipPending(gameFormId, countDelta, 'up');
           if (addQty <= 0) continue;
           const cat = this._toPipBoyCategory(currentItem.type);
-          if (cat) this._lastChangedCategories.add(cat);
+          // Don't add to _lastChangedCategories: additemhealthpercent already emits
+          // 'count' on-menu and syncs off-menu, so sortandrefreshinv is redundant for
+          // count-only increases on existing forms. For new forms the addedIds path
+          // (above) is responsible for adding to _lastChangedCategories.
           if (this._itemHasDegradedCondition(currentItem)) {
             commands.push(
-              this._buildAddItemHealthPercentCommand(formId, addQty, currentItem.condition)
+              this._buildAddItemHealthPercentCommand(formId, addQty, currentItem.condition, cat)
             );
           } else {
-            commands.push(this._buildAddItemCommand(formId, addQty));
+            commands.push(this._buildAddItemCommand(formId, addQty, cat));
           }
         } else if (countDelta < 0) {
           // Skip decrements the device already applied to itself (item used
@@ -893,10 +994,14 @@ export class SyncEngine extends EventEmitter {
           const formId = this._resolveFormId(gameFormId);
           if (formId === null) continue;
           const cat = this._toPipBoyCategory(currentItem.type);
-          if (cat) this._lastChangedCategories.add(cat);
+          // Don't add to _lastChangedCategories: removeitem already emits 'count' on-menu
+          // and syncs off-menu, making sortandrefreshinv redundant here (it would open
+          // the DAT + INV files, find _requiresSort = false, and do nothing useful).
           const removeCmd = this._buildRemoveItemCommand(cat, formId, removeQty, currentItem.condition);
           commands.push(removeCmd);
-          this._resyncEquipAfterInventory = true;
+          // Only weapons and apparel can affect equip state; ammo/aid/misc removals
+          // never change what is equipped, so skip the expensive authoritative resync.
+          if (cat === 'WEAPONS' || cat === 'APPAREL') this._resyncEquipAfterInventory = true;
         }
       }
     }
@@ -904,6 +1009,7 @@ export class SyncEngine extends EventEmitter {
     // Stacks removed (form+condition present before but not now)
     for (const key of removedIds) {
       const prevItem = previousMap.get(key);
+      if (rebuildForms.has(prevItem.formId)) continue;
       const gameFormId = prevItem.formId;
       // Skip units the device already removed from itself
       const prevCount = prevItem.count || 1;
@@ -915,13 +1021,56 @@ export class SyncEngine extends EventEmitter {
       const formId = this._resolveFormId(gameFormId);
       if (formId !== null) {
         const cat = this._toPipBoyCategory(prevItem.type);
-        if (cat) this._lastChangedCategories.add(cat);
+        // Don't add to _lastChangedCategories: removeitem's 'count' event handles
+        // the on-menu display, and inv.sync() handles off-menu persistence.
+        // sortandrefreshinv would open DAT+INV from flash for nothing (no sort needed
+        // since only a row was removed, not reordered).
         const removeCmd = this._buildRemoveItemCommand(cat, formId, removeQty, prevItem.condition);
         commands.push(removeCmd);
-        this._resyncEquipAfterInventory = true;
+        if (cat === 'WEAPONS' || cat === 'APPAREL') this._resyncEquipAfterInventory = true;
       }
     }
 
+    return commands;
+  }
+
+  /**
+   * Per-(formId, condition) weapon DAM sync. The plugin tags each weapon
+   * inventory stack with `dam` (its game-calculated, skill+condition-adjusted
+   * display damage); we mirror only the deltas into the device's *_DAM.INV so
+   * a single degradation or skill change updates one entry rather than the
+   * whole file. Removed stacks have their DAM entry dropped so the file does
+   * not accumulate stale rows as weapons degrade into new condition stacks.
+   * Gated on inventory pause, since DAM tracks the inventory it describes.
+   */
+  _diffWeaponDamage(current, previous) {
+    const commands = [];
+    if (this._inventorySyncPaused) return commands;
+
+    const prevMap = new Map();
+    for (const it of previous) {
+      if (it && it.dam != null) prevMap.set(this._inventoryStackKey(it), it);
+    }
+
+    for (const it of current) {
+      if (!it || it.dam == null) continue;
+      const formId = this._resolveFormId(it.formId);
+      if (formId === null) continue;
+      const key = this._inventoryStackKey(it);
+      const prev = prevMap.get(key);
+      if (!prev || prev.dam !== it.dam) {
+        commands.push(this._buildSetDamCommand(formId, it.condition, it.dam));
+      }
+      prevMap.delete(key);
+    }
+
+    for (const it of prevMap.values()) {
+      const formId = this._resolveFormId(it.formId);
+      if (formId === null) continue;
+      commands.push(this._buildRemoveDamCommand(formId, it.condition));
+    }
+
+    if (commands.length) commands.push(REFRESH_WEAPON_DAM_CMD);
     return commands;
   }
 
@@ -980,6 +1129,7 @@ export class SyncEngine extends EventEmitter {
       cmd.includes('additem') ||
       cmd.includes('removeitem') ||
       cmd.includes('setitemcondition') ||
+      cmd.includes('setformstacks') ||
       cmd.includes('additemhealthpercent')
     ) {
       return true;
@@ -1165,7 +1315,7 @@ export class SyncEngine extends EventEmitter {
     );
   }
 
-  _buildAuthoritativeEquipCommands(player) {
+  _buildAuthoritativeEquipCommands(player, prevPlayer = {}) {
     const commands = [];
     const weapon = this._toFormIdInt(player.equippedweap) ?? 0;
     const weapCnd = this._normalizeItemCondition(player.equippedweapcnd);
@@ -1175,9 +1325,17 @@ export class SyncEngine extends EventEmitter {
     commands.push(
       `player.setav('equippedWeap', ${weapon}, !0, !0);player.setav('equippedWeapCnd', ${weapCnd}, !1);player.setav('equippedWeapWhole', ${weapWhole}, !1);${REFRESH_EQUIP_CMD}`
     );
-    commands.push(
-      this._buildEquipApparelCommand(this._normalizeEquippedApparelWithCnd(player))
-    );
+    // equipapparel re-reads APPAREL.DAT from flash AND triggers its own
+    // refreshequip() (a second full render). For the common case — a weapon's
+    // condition degrading — apparel is unchanged, so re-asserting it is pure
+    // waste: it doubles the render count and adds a flash read for nothing. Only
+    // send it when the equipped apparel set actually changed. The weapon line
+    // above already provides the single authoritative render.
+    const curApparel = this._normalizeEquippedApparelWithCnd(player);
+    const prevApparel = this._normalizeEquippedApparelWithCnd(prevPlayer);
+    if (JSON.stringify(curApparel) !== JSON.stringify(prevApparel)) {
+      commands.push(this._buildEquipApparelCommand(curApparel));
+    }
     return commands;
   }
 
@@ -1348,22 +1506,54 @@ export class SyncEngine extends EventEmitter {
     return `player.setitemcondition(${formId},${cnd})`;
   }
 
-  _buildAddItemHealthPercentCommand(formId, count, condition) {
+  _buildAddItemHealthPercentCommand(formId, count, condition, cat) {
     const cnt = count || 1;
     const cnd = this._normalizeItemCondition(condition);
-    return `player.additemhealthpercent(${formId},${cnt},${cnd})`;
+    // Optional category hint lets the firmware open a single DataFile instead of
+    // scanning all five categories for the form ID.
+    const hint = cat ? `,'${cat}'` : '';
+    return `player.additemhealthpercent(${formId},${cnt},${cnd}${hint})`;
   }
 
-  _buildAddItemCommand(formId, count) {
-    return this._buildAddItemHealthPercentCommand(formId, count, 100);
+  _buildAddItemCommand(formId, count, cat) {
+    return this._buildAddItemHealthPercentCommand(formId, count, 100, cat);
   }
 
   _buildRemoveItemCommand(cat, formId, removeQty, condition) {
+    const hint = cat ? `,'${cat}'` : '';
     if (condition === undefined || condition === null) {
-      return `player.removeitem(${formId},${removeQty})`;
+      // No condition: pass `undefined` as a placeholder so the category hint
+      // lands in the 4th argument slot (firmware treats undefined cnd as
+      // "match by id only").
+      return cat
+        ? `player.removeitem(${formId},${removeQty},undefined,'${cat}')`
+        : `player.removeitem(${formId},${removeQty})`;
     }
     const cnd = this._normalizeItemCondition(condition);
-    return `player.removeitem(${formId},${removeQty},${cnd})`;
+    return `player.removeitem(${formId},${removeQty},${cnd}${hint})`;
+  }
+
+  /**
+   * Authoritatively rebuild every row of `formId` on the device from the given
+   * per-condition stacks. Used for condition-distribution changes so a single
+   * command replaces a fragile add+remove pair (and clears any orphaned row).
+   */
+  _buildSetFormStacksCommand(formId, stacks) {
+    const list = stacks
+      .filter((s) => (s.cnt || 0) > 0)
+      .map((s) => `{cnt:${s.cnt || 1},cnd:${this._normalizeItemCondition(s.cnd)}}`)
+      .join(',');
+    return `player.setformstacks(${formId},[${list}])`;
+  }
+
+  _buildSetDamCommand(formId, condition, dam) {
+    const cnd = this._normalizeItemCondition(condition);
+    return `player.setdam(${formId},${cnd},${Math.max(0, Math.round(dam))})`;
+  }
+
+  _buildRemoveDamCommand(formId, condition) {
+    const cnd = this._normalizeItemCondition(condition);
+    return `player.removedam(${formId},${cnd})`;
   }
 
   /**

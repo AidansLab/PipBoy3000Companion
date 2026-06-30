@@ -10,7 +10,7 @@
     return [raw[0] || 0, raw[1] || 0, raw[2] || 0, raw[3] || 0];
   }
   let active = normalizeActive(player.getav('equippedApparel'));
-  const cndMode = () => typeof cmode !== 'undefined' && cmode;
+  const cndMode = () => cmode;
   const readActiveCnd = () =>
     cndMode() ? player.getav('equippedApparelCnd') || [] : [];
   let activeCnd = readActiveCnd();
@@ -75,6 +75,7 @@
       else if (v.part !== 1 && slotMatch) item.activ = !0;
       item.cnd = it.cnd;
       const dispCnt = v.part === 0 ? 1 : v.part === 1 ? it.cnt - 1 : it.cnt;
+      item.dispCnt = dispCnt;
       if (dispCnt > 1) item.txt = `${item.txt} (${dispCnt})`;
       return item;
     },
@@ -88,7 +89,7 @@
         (NV ? item.dt : item.dr) || '--'
       ),
         Pip.renderBlock(296, 192, 80, 'WG', item.wt || '--'),
-        Pip.renderBlock(382, 192, 80, 'VAL', item.val || '--'),
+        Pip.renderBlock(382, 192, 80, 'VAL', Math.round(item.val * Math.pow((item.cnd / 100), 1.5) * (item.dispCnt || 1)) || '--'),
         Pip.renderBlock(210, 220, 80, 'CND', ''),
         h.fillRect(244, 228, 244 + ((item.cnd || 100) / 100) * 40, 237),
         NV &&
@@ -154,7 +155,7 @@
       updateDtDr();
     },
     onLongClick: (n) => {
-      if (typeof cmode !== 'undefined' && cmode) return;
+      if (cmode) return;
       const it = inv.get(vAt(n).realN);
       (Pip.playSound('TAB'),
         setTimeout(

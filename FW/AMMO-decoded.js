@@ -7,7 +7,7 @@
   // equipped weapon can use (ammoUsable) and which is loaded right now
   // (ammoActive). We mark the active one, dim the ones the weapon can't use,
   // and only let usable ammo be selected.
-  const isCmode = () => typeof cmode !== 'undefined' && cmode;
+  const isCmode = () => cmode;
   let active = player.getav('ammoActive'),
     usable = player.getav('ammoUsable') || [];
   const getEquippedWeap = () => player.getav('equippedweap') || 0;

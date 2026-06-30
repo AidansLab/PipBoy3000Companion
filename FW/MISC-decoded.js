@@ -51,7 +51,7 @@
         }, 10));
     },
     onLongClick: (n) => {
-      if (typeof cmode !== 'undefined' && cmode) return;
+      if (cmode) return;
       if (n < appn) return;
       const it = inv.get(n - appn);
       (Pip.playSound('TAB'),

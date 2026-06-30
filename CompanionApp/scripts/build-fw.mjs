@@ -5,20 +5,25 @@
  *   boot0-decoded.js → FW Build/.boot0   (Storage boot patch; patches stock FW.JS)
  *   *-decoded.js     → FW Build/*.JS      (menu scripts → SD JS/)
  *   FW-decoded.js    — not built (stock FW.JS on device is unchanged)
- *   - Minification: off
- *   - Esprima mangle: off (stock menus keep names like params/db/inv)
- *   - Pretokenise: always
  *
- * Stock menu files are pretokenised decoded source, not esprima-mangled.
- * Web IDE "Module Minification → Esprima" + mangle applies when uploading
- * modules to flash via Modules.addCached, not to SD-card .JS storage files.
+ * Pipeline: optional Terser minify/mangle → Espruino pretokenise.
+ *
+ * Espruino's built-in Esprima minifier (MINIFICATION_LEVEL=ESPRIMA) cannot
+ * handle ES6+ menu source — it emits empty output. Terser runs first when
+ * BUILD_MINIFY is true; BUILD_MANGLE controls Terser identifier shortening.
  */
+
+/** Run Terser compress before pretokenise. */
+const BUILD_MINIFY = true;
+/** Shorten local identifiers during Terser minify. Requires BUILD_MINIFY. */
+const BUILD_MANGLE = true;
 
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import { execSync } from 'child_process';
+import { minify as terserMinify } from 'terser';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const companionRoot = path.resolve(__dirname, '..');
@@ -48,6 +53,7 @@ function initEspruinoTools() {
 }
 
 function applyBuildConfig(Espruino) {
+  // Espruino Minify plugin is not used — Terser handles ES6 source first.
   Object.assign(Espruino.Config, {
     MINIFICATION_LEVEL: '',
     MODULE_MINIFICATION_LEVEL: '',
@@ -57,6 +63,27 @@ function applyBuildConfig(Espruino) {
     COMPILATION: false,
     ENV_ON_CONNECT: false,
   });
+}
+
+async function minifyCode(code, name) {
+  const before = code.length;
+  const result = await terserMinify(code, {
+    ecma: 2020,
+    // Menu files are `(function (params) { ... });` — not invoked here.
+    // Terser compress treats them as dead code and drops the whole file.
+    compress: false,
+    mangle: BUILD_MANGLE,
+    format: { comments: false },
+  });
+  if (result.error) {
+    throw new Error(`${name}: terser failed — ${result.error}`);
+  }
+  const minified = result.code;
+  if (!minified?.length || minified.length < before * 0.05) {
+    throw new Error(`${name}: terser produced unusable output (${before} → ${minified?.length ?? 0} bytes)`);
+  }
+  console.log(`  minify ${name}: ${before} → ${minified.length} bytes (mangle=${BUILD_MANGLE})`);
+  return minified;
 }
 
 function pretokeniseCode(Espruino, code, name) {
@@ -71,6 +98,14 @@ function pretokeniseCode(Espruino, code, name) {
   }
   console.log(`  tokenise ${name}: ${before} → ${tokenised.length} bytes`);
   return tokenised;
+}
+
+async function buildFile(Espruino, source, name) {
+  let code = source;
+  if (BUILD_MINIFY) {
+    code = await minifyCode(code, name);
+  }
+  return pretokeniseCode(Espruino, code, name);
 }
 
 function decodedToOutputName(filename) {
@@ -106,7 +141,9 @@ async function main() {
   applyBuildConfig(Espruino);
 
   console.log(`Building ${sources.length} firmware file(s) → ${fwBuildDir}`);
-  console.log('Settings: minify=off, mangle=off, pretokenise=always');
+  console.log(
+    `Settings: minify=${BUILD_MINIFY ? 'terser' : 'off'}, mangle=${BUILD_MINIFY && BUILD_MANGLE}, pretokenise=always`
+  );
 
   for (const sourceName of sources) {
     const sourcePath = path.join(fwDir, sourceName);
@@ -115,7 +152,8 @@ async function main() {
     const source = fs.readFileSync(sourcePath, 'utf8');
 
     console.log(`${sourceName} → FW Build/${outName}`);
-    fs.writeFileSync(outPath, pretokeniseCode(Espruino, source, outName), 'binary');
+    const built = await buildFile(Espruino, source, outName);
+    fs.writeFileSync(outPath, built, 'binary');
   }
 
   console.log('Firmware build complete.');

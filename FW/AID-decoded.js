@@ -49,6 +49,48 @@
       onClick: (n) => {
         const it = inv.get(n),
           item = db.getId(it.id);
+        // When connected to the game, prevent consuming items that can have no
+        // effect in their current state, mirroring the game's own block logic.
+        if (cmode) {
+          // HP-restoring items (stimpaks, food…) are blocked when HP is full.
+          const curHp = player.getav('hp');
+          if (curHp !== undefined) {
+            const info = player.getinfo();
+            if (info.maxHP > 0 && curHp >= info.maxHP &&
+                item.ef && item.ef.some(e => e.indexOf('HP') >= 0)) {
+              return;
+            }
+          }
+          // Limb-fixing items (Doctor's Bag) are blocked when no limb is
+          // crippled (condition == 0).
+          if (item.ef && item.ef.some(e => /cripple|limb/i.test(e))) {
+            const limbAvs = [
+              'leftattackcondition', 'rightattackcondition',
+              'leftmobilitycondition', 'rightmobilitycondition',
+              'perceptioncondition', 'endurancecondition'
+            ];
+            const anyCrippled = limbAvs.some(av => {
+              const v = player.getav(av);
+              return v !== undefined && v <= 0;
+            });
+            if (!anyCrippled) return;
+          }
+          // Weapon Repair Kits are blocked when nothing is equipped or the
+          // equipped weapon is already at full condition (mirrors in-game use).
+          const isWeaponRepairKit =
+            (item.txt && /weapon repair kit/i.test(item.txt)) ||
+            (item.ef && item.ef.some((e) =>
+              /weapon/i.test(e) &&
+              /cnd|condition|repair/i.test(e) &&
+              !/limb|cripple/i.test(e)
+            ));
+          if (isWeaponRepairKit) {
+            const eq = player.getav('equippedWeap');
+            if (eq === undefined || !eq) return;
+            const eqCnd = player.getav('equippedWeapCnd');
+            if (eqCnd !== undefined && eqCnd >= 99) return;
+          }
+        }
         // Notify the companion app (if listening on USB) that this item was
         // consumed, so it can mirror the action in-game.
         console.log('PIPSYNC:USE:AID:' + Pip.formatId(it.id));
@@ -79,7 +121,7 @@
           Pip.renderHeader());
       },
       onLongClick: (n) => {
-        if (typeof cmode !== 'undefined' && cmode) return;
+        if (cmode) return;
         const it = inv.get(n);
         (Pip.playSound('TAB'),
           setTimeout(

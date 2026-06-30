@@ -4,8 +4,6 @@
  * Runs before FW.JS on the SD card and patches stock Pip-OS once Player/Pip exist.
  * Menu scripts (JS/*.JS) are deployed separately; stock FW.JS is left untouched.
  */
-global.cmode = !1;
-
 (function pipCompanionBoot0() {
   if (
     typeof Pip === 'undefined' ||
@@ -45,11 +43,20 @@ global.cmode = !1;
     } catch (e) {}
   })();
 
+  // Shared across all inventory methods — hoisted here to avoid re-allocating
+  // the array on every additemhealthpercent / removeitem / setformstacks call.
+  const cats = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
+
+  // Normalizer for skill name matching in syncskills — hoisted so it isn't
+  // re-created on every syncskills call.
+  const nm = function (s) {
+    return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  };
+
   const _emit = Pip.emit;
   Pip.emit = function (event, a, b, c) {
     if (
       event === 'knob2' &&
-      typeof cmode !== 'undefined' &&
       cmode &&
       Pip.CURRENT &&
       Pip.CURRENT.id === 'STATUS'
@@ -62,7 +69,7 @@ global.cmode = !1;
   const _getinfo = Player.prototype.getinfo;
   Player.prototype.getinfo = function (refresh) {
     const p = _getinfo.call(this, refresh);
-    if (typeof cmode !== 'undefined' && cmode) {
+    if (cmode) {
       const hp = this.getav('hp');
       if (void 0 !== hp) p.hp = E.clip(hp, 0, p.maxHP) / p.maxHP;
       // Carry weight is copied straight from the game (see sync-engine
@@ -153,14 +160,16 @@ global.cmode = !1;
     return -1;
   }
 
-  Player.prototype.additemhealthpercent = function (id, cnt, cnd) {
+  Player.prototype.additemhealthpercent = function (id, cnt, cnd, cat) {
     if (cnt <= 0) return;
     const wantCnd = cnd || 100;
     // A form ID belongs to exactly one category, so stop opening DataFiles as
-    // soon as we find the match (saves up to 4 file opens per added item).
-    const cats = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
-    for (let ci = 0; ci < cats.length; ci++) {
-      const v = cats[ci];
+    // soon as we find the match (saves up to 4 file opens per added item). When
+    // the companion knows the category it passes it as a hint, so we open just
+    // that one DataFile; otherwise fall back to scanning all five.
+    const scanCats = cat ? [cat] : cats;
+    for (let ci = 0; ci < scanCats.length; ci++) {
+      const v = scanCats[ci];
       try {
         const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/${v}.DAT`),
           i = db.ids.indexOf(id);
@@ -175,7 +184,7 @@ global.cmode = !1;
           ((it.cnt += cnt), inv.set(inx, it));
         } else inv.add({ id: id, cnt: cnt, cnd: wantCnd });
         if (onMenu) {
-          Pip.emit('scroller', 'count', inv.count);
+          Pip.emit('scroller', 'refresh');
           if (v === 'MISC' && id === CAPS_FORM_ID && Pip.MODE === 1 && Pip.renderHeader)
             Pip.renderHeader();
         } else inv.sync();
@@ -185,11 +194,13 @@ global.cmode = !1;
     return !1;
   };
 
-  Player.prototype.removeitem = function (id, qty, cnd) {
+  Player.prototype.removeitem = function (id, qty, cnd, cat) {
     if (qty <= 0) return;
-    const cats = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
-    for (let ci = 0; ci < cats.length; ci++) {
-      const v = cats[ci];
+    // cat is an optional single-category hint from the companion (see
+    // additemhealthpercent); without it we scan all five categories.
+    const scanCats = cat ? [cat] : cats;
+    for (let ci = 0; ci < scanCats.length; ci++) {
+      const v = scanCats[ci];
       try {
         const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/${v}.DAT`),
           i = db.ids.indexOf(id);
@@ -205,7 +216,7 @@ global.cmode = !1;
           if (it.cnt > 0) inv.set(inx, it);
           else inv.remove(inx);
           if (onMenu) {
-            Pip.emit('scroller', 'count', inv.count);
+            Pip.emit('scroller', 'refresh');
             if (v === 'MISC' && id === CAPS_FORM_ID && Pip.MODE === 1 && Pip.renderHeader)
               Pip.renderHeader();
           } else inv.sync();
@@ -217,7 +228,6 @@ global.cmode = !1;
   };
 
   Player.prototype.setitemcondition = function (id, cnd) {
-    const cats = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
     for (let ci = 0; ci < cats.length; ci++) {
       const v = cats[ci];
       try {
@@ -241,6 +251,125 @@ global.cmode = !1;
       } catch (e) {}
     }
     return !1;
+  };
+
+  // Authoritatively rebuild every row of `id` from `stacks` ([{cnt,cnd},...]).
+  // Used when an item's per-condition distribution changes (degrade/repair): a
+  // single atomic replace instead of add+remove, so a lost remove can't leave a
+  // duplicate condition row, and any pre-existing orphan of this form is cleared.
+  Player.prototype.setformstacks = function (id, stacks) {
+    for (let ci = 0; ci < cats.length; ci++) {
+      const v = cats[ci];
+      try {
+        const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/${v}.DAT`);
+        // Cache ids before close so they survive the DataFile being released.
+        const dbIds = db.ids, i = dbIds.indexOf(id);
+        db.close();
+        if (i < 0) continue;
+        const onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === v;
+        const inv = onMenu
+          ? Pip.inv
+          : new InvFile(`INV/${NV ? 'NV' : 'F3'}/${v}.INV`, { idOrder: dbIds });
+        for (let n = inv.count - 1; n >= 0; n--) {
+          const it = inv.get(n);
+          if (it && it.id === id) inv.remove(n);
+        }
+        (stacks || []).forEach(function (s) {
+          if (s && s.cnt > 0) inv.add({ id: id, cnt: s.cnt, cnd: s.cnd || 100 });
+        });
+        // Re-sort inline so the rebuilt entry sits in the correct DAT-order position.
+        // inv.add() always appends, so without a sort the item drifts to the bottom.
+        // Sorting here costs nothing extra (dbIds is already in memory, DAT already
+        // closed). For off-menu we also persist the sorted order via sync(), which
+        // sortandrefreshinv never did — keeping the file consistent for future opens.
+        if (inv._requiresSort) inv.sort(dbIds);
+        if (onMenu) {
+          Pip.emit('scroller', 'count', inv.count);
+          if (v === 'MISC' && id === CAPS_FORM_ID && Pip.MODE === 1 && Pip.renderHeader)
+            Pip.renderHeader();
+        } else inv.sync();
+        return !0;
+      } catch (e) {}
+    }
+    return !1;
+  };
+
+  // ── Weapon DAM (display damage) sync ──────────────────────────────────────
+  // The companion computes the game's dynamic weapon damage (base × skill ×
+  // condition) and mirrors it here one (formId, condition) entry at a time, in a
+  // side InvFile keyed exactly like the inventory stacks. The damage value is
+  // stored in the entry's `cnt` field. WEAPONS.JS looks it up by (id, cnd) on
+  // render and shows it instead of the static DAT damage.
+  //
+  // _damCache mirrors the InvFile in memory so that WEAPONS.JS's loadDamMap()
+  // never needs to reopen the file on a damrefresh. setdam/removedam/cleardam
+  // keep it in sync after every flash write. null means "not yet populated"
+  // (WEAPONS.JS falls through to a one-time file read on first load).
+  //
+  // Must be on `global`, not `var`, so that WEAPONS.JS (which runs outside this
+  // IIFE) can read and write the same reference. A `var` here would be scoped to
+  // the IIFE closure, making it invisible to WEAPONS.JS and causing loadDamMap to
+  // always fall back to a flash read — and worse, to create a shadowing global
+  // that setdam/removedam/cleardam never update.
+  global._damCache = null;
+
+  function damInvFile() {
+    var m = NV ? 'NV' : 'F3';
+    return new InvFile('INV/' + m + '/' + m + '_DAM.INV');
+  }
+
+  function _snapshotDamCache(inv) {
+    var c = {};
+    for (var i = 0; i < inv.count; i++) {
+      var e = inv.get(i);
+      if (e) c[e.id + ':' + (e.cnd || 100)] = e.cnt;
+    }
+    return c;
+  }
+
+  Player.prototype.setdam = function (id, cnd, dam) {
+    try {
+      var inv = damInvFile(),
+        wantCnd = cnd || 100,
+        inx = findInvIdCnd(inv, id, wantCnd);
+      if (inx >= 0) {
+        var it = inv.get(inx);
+        it.cnt = dam;
+        inv.set(inx, it);
+      } else {
+        inv.add({ id: id, cnt: dam, cnd: wantCnd });
+      }
+      inv.sync();
+      _damCache = _snapshotDamCache(inv);
+    } catch (e) {}
+  };
+
+  Player.prototype.removedam = function (id, cnd) {
+    try {
+      var inv = damInvFile(),
+        inx = findInvIdCnd(inv, id, cnd || 100);
+      if (inx >= 0) {
+        inv.remove(inx);
+        inv.sync();
+        _damCache = _snapshotDamCache(inv);
+      }
+    } catch (e) {}
+  };
+
+  Player.prototype.cleardam = function () {
+    try {
+      var m = NV ? 'NV' : 'F3';
+      require('fs').writeFileSync('INV/' + m + '/' + m + '_DAM.INV', '');
+      _damCache = {};
+    } catch (e) {}
+  };
+
+  // Nudge the open WEAPONS menu to re-read the DAM file after a batch of
+  // setdam/removedam writes (e.g. a skill change with no inventory delta).
+  Player.prototype.refreshweapondam = function () {
+    if (typeof Pip !== 'undefined' && Pip.CURRENT && Pip.CURRENT.id === 'WEAPONS' && Pip.emit) {
+      Pip.emit('scroller', 'damrefresh');
+    }
   };
 
   Player.prototype.safeaddperk = function (p) {
@@ -273,9 +402,6 @@ global.cmode = !1;
         p = 'SETTINGS/' + m + '_SKILLS.JSON',
         u = loadJSONWithDefaults(p, 'SETTINGS/DEFAULT/' + m + '_SKILLS.JSON'),
         chg = !1,
-        nm = function (s) {
-          return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        },
         i, id, dat, k, lvl, dt;
       for (i = 0; i < db.ids.length; i++) {
         id = db.ids[i];
@@ -355,7 +481,7 @@ global.cmode = !1;
       delete Pip.inv;
     }
     var fs = require('fs'), m = NV ? 'NV' : 'F3';
-    ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'].forEach(function (v) {
+    cats.forEach(function (v) {
       try {
         fs.writeFileSync('INV/' + m + '/' + v + '.INV', '');
       } catch (e) {}
@@ -515,6 +641,7 @@ global.cmode = !1;
     return _checkChargeStatus.apply(this, arguments);
   };
 
+
   companionClearCmodeOnUsbDisconnect();
 
   // Companion header fixes: STATS AP from game sync; ITEMS caps from in-memory inv.
@@ -529,12 +656,24 @@ global.cmode = !1;
         const _header = m.header;
         m.header = function () {
           const rows = _header.call(this);
-          if (typeof cmode !== 'undefined' && cmode) {
+          if (cmode) {
             const USER = player.getinfo();
             if (USER.ap !== undefined) {
               for (let ri = 0; ri < rows.length; ri++) {
                 if (rows[ri][0] === 'AP') {
                   rows[ri][1] = `${USER.ap}/${USER.maxAP}`;
+                  break;
+                }
+              }
+            }
+            // XP is pushed from the game on first sync, save-load, and level-up
+            // only (see sync-engine). Until then keep stock FW placeholder display.
+            if (USER.xp !== undefined) {
+              for (let ri = 0; ri < rows.length; ri++) {
+                if (rows[ri][0] === 'XP') {
+                  rows[ri][1] = USER.xpNext
+                    ? `${USER.xp}/${USER.xpNext}`
+                    : 'MAX';
                   break;
                 }
               }
@@ -584,7 +723,7 @@ global.cmode = !1;
     Pip.setTorch = function (on) {
       const explicit = void 0 !== on;
       const wasOn = !!Pip.torchOn;
-      if (typeof cmode !== 'undefined' && cmode) {
+      if (cmode) {
         const nextOn = explicit ? !!on : !wasOn;
         if (nextOn === wasOn) {
           return;

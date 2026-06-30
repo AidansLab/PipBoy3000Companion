@@ -284,6 +284,11 @@ export class SerialBridge extends EventEmitter {
     this._audioGuardUntil = Date.now() + AUDIO_GUARD_MS;
   }
 
+  /** True while the post-sound guard window is open (regular commands deferred). */
+  isAudioGuardActive() {
+    return this._audioGuardUntil - Date.now() > 0;
+  }
+
   /**
    * Serialize all USB REPL traffic so eval() and sendCommand() never interleave.
    */
@@ -392,13 +397,57 @@ export class SerialBridge extends EventEmitter {
   }
 
   /**
-   * Send multiple commands in sequence (batched)
-   * @param {string[]} commands - Array of JavaScript commands
+   * Send an ordered list of commands as few USB writes as possible.
+   *
+   * Each command is framed exactly as sendCommand frames it — `\x10${cmd}\n` —
+   * so the device parses and executes each line identically to the per-command
+   * path; the ONLY difference is that we concatenate the framed lines and write
+   * them together, eliminating the COMMAND_SPACING_MS gap between every command.
+   * Because each line keeps its own \x10 prefix and trailing newline, the device
+   * still executes them as independent REPL lines (an error in one line does not
+   * abort the rest), and the firmware's internal try/catch blocks keep failures
+   * contained.
+   *
+   * Lines are packed into chunks no larger than maxBytes so a single write never
+   * floods the device's USB RX ring buffer; each chunk passes through
+   * _runSerialIO, so spacing is paid once per chunk instead of once per command.
+   *
+   * Ordering is preserved exactly. Callers that need the audio-guard / equip
+   * bypass semantics must check isAudioGuardActive() first; this method is meant
+   * for the common case where the guard is closed and every command may flow
+   * immediately.
    */
-  async sendBatch(commands) {
+  async sendBatch(commands, { maxBytes = 512 } = {}) {
+    if (!commands || commands.length === 0) return;
+
+    // Honor the audio guard once for the whole batch (defensive — callers
+    // normally only batch when the guard is closed).
+    const guardWait = this._audioGuardUntil - Date.now();
+    if (guardWait > 0) await this._sleep(guardWait);
+
+    let chunk = '';
+    let chunkCmds = [];
+    const flush = async () => {
+      if (!chunk) return;
+      const data = chunk;
+      const sent = chunkCmds;
+      chunk = '';
+      chunkCmds = [];
+      await this._runSerialIO(() => this._writeRaw(data));
+      for (const c of sent) this.emit('command-sent', c);
+    };
+
     for (const cmd of commands) {
-      await this.sendCommand(cmd);
+      const line = `\x10${cmd}\n`;
+      // Flush before exceeding the cap, but always allow at least one line per
+      // chunk even if a single command is longer than maxBytes.
+      if (chunk && chunk.length + line.length > maxBytes) {
+        await flush();
+      }
+      chunk += line;
+      chunkCmds.push(cmd);
     }
+    await flush();
   }
 
   /**

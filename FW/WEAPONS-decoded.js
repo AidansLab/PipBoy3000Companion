@@ -8,9 +8,36 @@
     ammoInv = new InvFile(`INV/${NV ? 'NV' : 'F3'}/AMMO.INV`),
     ammoIds = ammoInv.ids(),
     imgs = E.openFile(`DATA/${NV ? 'NV' : 'F3'}/WEAPONS.IMG`, 'r');
+  // Dynamic DAM: the companion mirrors the game's skill/condition-adjusted weapon
+  // damage into a side *_DAM.INV (damage stored in each entry's cnt), keyed by
+  // (formId, condition). Load it into a lookup so getItem can override the static
+  // DAT damage; reloaded on sync events that may change it. Falls back to DAT.
+  const damFile = `INV/${NV ? 'NV' : 'F3'}/${NV ? 'NV' : 'F3'}_DAM.INV`;
+  const loadDamMap = () => {
+    // Fast path: boot0 keeps global._damCache in sync after every setdam/
+    // removedam/cleardam write. _damCache is declared via global._damCache (not
+    // var) so this IIFE and WEAPONS.JS share the exact same reference.
+    if (typeof _damCache !== 'undefined' && _damCache !== null) return _damCache;
+    // First load (boot before any setdam call, or after a failed clear): read
+    // from flash once and prime the shared cache so future damrefresh events hit
+    // the fast path.
+    const m = {};
+    try {
+      const di = new InvFile(damFile);
+      for (let i = 0; i < di.count; i++) {
+        const e = di.get(i);
+        if (e) m[e.id + ':' + (e.cnd || 100)] = e.cnt;
+      }
+    } catch (e) {}
+    // Write back to the global so setdam/removedam/cleardam and future calls to
+    // loadDamMap all converge on the same object.
+    global._damCache = m;
+    return m;
+  };
+  let damMap = loadDamMap();
   let active = player.getav('equippedWeap');
   let activeCnd = player.getav('equippedWeapCnd');
-  const cndMode = () => typeof cmode !== 'undefined' && cmode;
+  const cndMode = () => cmode;
   // Virtual rows: when a multi-count stack of the equipped (id + condition) is
   // worn, the game has split one copy off the stack. Mirror that by listing the
   // equipped item as its own 1-count row with the remaining (cnt-1) directly
@@ -65,7 +92,10 @@
       if (v.part === 0) item.activ = !0;
       else if (v.part !== 1 && matches) item.activ = !0;
       item.cnd = it.cnd;
+      const dyn = damMap[it.id + ':' + (it.cnd || 100)];
+      if (dyn != null) item.dam = dyn;
       const dispCnt = v.part === 0 ? 1 : v.part === 1 ? it.cnt - 1 : it.cnt;
+      item.dispCnt = dispCnt;
       if (dispCnt > 1) item.txt = `${item.txt} (${dispCnt})`;
       if (item.ammo) {
         const ammo = ammoDb.getId(item.ammo),
@@ -84,7 +114,7 @@
       (h.drawImage(img, 340, 114, { rotate: 0 }),
         Pip.renderBlock(210, 192, 80, 'DAM', item.dam || '--'),
         Pip.renderBlock(296, 192, 80, 'WG', item.wt || '--'),
-        Pip.renderBlock(382, 192, 80, 'VAL', item.val || '--'),
+        Pip.renderBlock(382, 192, 80, 'VAL', Math.round(item.val * Math.pow((item.cnd / 100), 1.5) * (item.dispCnt || 1)) || '--'),
         NV && Pip.renderBlock(382, 164, 80, 'STR', item.str || '--'),
         Pip.renderBlock(210, 220, 80, 'CND', ''),
         h.fillRect(244, 228, 244 + ((item.cnd || 100) / 100) * 40, 237),
@@ -152,7 +182,7 @@
       scroller.updateItemCount(virt.length);
     },
     onLongClick: (n) => {
-      if (typeof cmode !== 'undefined' && cmode) return;
+      if (cmode) return;
       const it = inv.get(vAt(n).realN);
       (Pip.playSound('TAB'),
         setTimeout(
@@ -174,12 +204,21 @@
       scroller.updateItemCount(virt.length);
       if (virt.length !== prevLen) scroller.render({ listOnly: !0 });
     } else if (action === 'render') scroller.render(arg);
-    else if (action === 'refresh') {
+    else if (action === 'damrefresh') {
+      // DAM values changed (degradation/skill) — re-read and repaint the rows.
+      damMap = loadDamMap();
+      scroller.render({ listOnly: !1 });
+    } else if (action === 'refresh') {
       virt = buildVirt();
       scroller.updateItemCount(virt.length);
-      scroller.render(arg);
+      // List-only: a sort/reorder doesn't change the detail panel content, and
+      // the full-render (image read + drawImage) here was the second-largest
+      // contributor to the post-condition-change freeze.
+      scroller.render({ listOnly: !0 });
     } else if (action === 'refreshEquip') {
       virtEquipPending = false;
+      active = player.getav('equippedWeap');
+      activeCnd = cndMode() ? player.getav('equippedWeapCnd') : void 0;
       virt = buildVirt();
       scroller.updateItemCount(virt.length);
       scroller.render({ listOnly: !1 });
