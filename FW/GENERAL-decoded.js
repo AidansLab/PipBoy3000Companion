@@ -30,8 +30,7 @@
             } catch {}
             return filtered;
           })(),
-          displayFactions =
-            cmode ? visibleFactions : allFactions,
+          displayFactions = visibleFactions,
           s = Pip.createScroller({
             width: 240,
             itemCount: displayFactions.length,

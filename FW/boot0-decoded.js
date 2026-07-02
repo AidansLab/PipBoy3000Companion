@@ -35,8 +35,14 @@
           v = !!v;
           if (_cmode === v) return;
           _cmode = v;
-          if (typeof Pip !== 'undefined' && Pip.CURRENT && Pip.emit) {
-            Pip.emit('scroller', 'refreshEquip');
+          if (typeof Pip !== 'undefined') {
+            if (_cmode && Pip.timers && Pip.timers.idle) {
+              clearTimeout(Pip.timers.idle);
+              Pip.timers.idle = void 0;
+            }
+            if (Pip.CURRENT && Pip.emit) {
+              Pip.emit('scroller', 'refreshEquip');
+            }
           }
         }
       });
@@ -53,17 +59,41 @@
     return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   };
 
-  const _emit = Pip.emit;
-  Pip.emit = function (event, a, b, c) {
-    if (
-      event === 'knob2' &&
+  // STATUS (STATS > Status) has CND / RAD / CLK / ENG tabs. Knob2 on CND edits
+  // limb condition — block that in cmode so game sync stays authoritative. CLK
+  // uses knob2 for global brightness (manual § CLK) and must keep working.
+  let companionStatusTab = 0;
+  function companionResetStatusTab() {
+    companionStatusTab = 0;
+  }
+  function companionStatusKnob2Blocked() {
+    return (
       cmode &&
       Pip.CURRENT &&
-      Pip.CURRENT.id === 'STATUS'
-    ) {
+      Pip.CURRENT.id === 'STATUS' &&
+      companionStatusTab === 0
+    );
+  }
+
+  const _emit = Pip.emit;
+  Pip.emit = function (event, a, b, c) {
+    if (Pip.CURRENT && Pip.CURRENT.id === 'STATUS') {
+      if (event === 'knob1' && a) {
+        companionStatusTab = E.clip(companionStatusTab + a, 0, 3);
+      }
+    } else if (event === 'mode') {
+      companionResetStatusTab();
+    }
+    if (event === 'knob2' && companionStatusKnob2Blocked()) {
       return;
     }
     return _emit.apply(this, arguments);
+  };
+
+  const _changeMenu = Pip.changeMenu;
+  Pip.changeMenu = function () {
+    companionResetStatusTab();
+    return _changeMenu.apply(this, arguments);
   };
 
   const _getinfo = Player.prototype.getinfo;
@@ -742,6 +772,23 @@
         return;
       }
       return _setTorch.apply(this, arguments);
+    };
+  }
+
+  // Override kickIdleTimer to prevent the device from entering sleep mode
+  // while Companion Mode (cmode) is active. Sleeping clears button watches,
+  // which broke Pip-Boy to game flashlight sync after 5 minutes of inactivity.
+  if (typeof Pip.kickIdleTimer === 'function') {
+    const _kickIdleTimer = Pip.kickIdleTimer;
+    Pip.kickIdleTimer = function () {
+      if (cmode) {
+        if (Pip.timers && Pip.timers.idle) {
+          clearTimeout(Pip.timers.idle);
+          Pip.timers.idle = void 0;
+        }
+        return;
+      }
+      return _kickIdleTimer.apply(this, arguments);
     };
   }
 })();

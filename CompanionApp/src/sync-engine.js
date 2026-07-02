@@ -274,7 +274,7 @@ export class SyncEngine extends EventEmitter {
       }
 
       if (commands.length > 0) {
-        const factionCmd = commands.find((c) => c.includes('REP_VISIBLE.JSON'));
+        const factionCmd = commands.find((c) => c.startsWith('player.syncfactions('));
         if (factionCmd) {
           const discovered = this._normalizeFactions(this._getFactions(snapshot)).filter(
             (f) => f.discovered
@@ -1187,7 +1187,11 @@ export class SyncEngine extends EventEmitter {
     const normalized = this._normalizeFactions(factions);
     if (normalized.length === 0) return null;
 
-    const curVis = normalized.filter((f) => f.discovered).map((f) => f.name);
+    // Only send discovered factions — the firmware skips undiscovered ones
+    // anyway. Sending the full list (13+ NV factions) can OOM the device.
+    const discovered = normalized.filter((f) => f.discovered);
+
+    const curVis = discovered.map((f) => f.name);
     let visListChanged = !previous;
     if (previous) {
       const prevVis = this._normalizeFactions(previous)
@@ -1198,7 +1202,11 @@ export class SyncEngine extends EventEmitter {
         curVis.some((n, i) => n !== prevVis[i]);
     }
 
-    const payload = JSON.stringify(normalized);
+    // If nothing is discovered yet, nothing to write — return null to skip the
+    // command entirely (avoids writing empty REP.JSON which clears the UI).
+    if (discovered.length === 0) return null;
+
+    const payload = JSON.stringify(discovered);
     return `player.syncfactions(${payload},${visListChanged ? '!0' : '!1'})`;
   }
 
