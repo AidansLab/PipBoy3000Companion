@@ -183,9 +183,17 @@
   // (cnd||100), so normalise both sides the same way when comparing.
   function findInvIdCnd(inv, id, cnd) {
     const want = cnd || 100;
+    if (!inv.buf || !inv.count) return -1;
+    // Scan the raw 8-byte rows directly (id = first u32, cnd = byte 6) instead
+    // of inv.get(i), which allocates an object + Uint8Array per row — that GC
+    // churn adds up during sync bursts over large inventories.
+    const u32 = new Uint32Array(inv.buf);
     for (let i = 0; i < inv.count; i++) {
-      const it = inv.get(i);
-      if (it && it.id === id && (it.cnd || 100) === want) return i;
+      if (
+        u32[2 * i] === id &&
+        (((u32[2 * i + 1] >> 16) & 255) || 100) === want
+      )
+        return i;
     }
     return -1;
   }
@@ -348,40 +356,55 @@
     return new InvFile('INV/' + m + '/' + m + '_DAM.INV');
   }
 
-  function _snapshotDamCache(inv) {
-    var c = {};
-    for (var i = 0; i < inv.count; i++) {
-      var e = inv.get(i);
-      if (e) c[e.id + ':' + (e.cnd || 100)] = e.cnt;
+  // Apply one (id, cnd, dam) entry to an already-open DAM InvFile and mirror
+  // the single affected key into _damCache. Updating in place (instead of
+  // re-snapshotting the whole file after every write) keeps a batch of M
+  // updates O(M) instead of O(M×N). A null cache stays null — WEAPONS.JS
+  // does its one-time file read on first load and populates it then.
+  function _applyDamEntry(inv, id, cnd, dam) {
+    var wantCnd = cnd || 100,
+      inx = findInvIdCnd(inv, id, wantCnd);
+    if (inx >= 0) {
+      var it = inv.get(inx);
+      it.cnt = dam;
+      inv.set(inx, it);
+    } else {
+      inv.add({ id: id, cnt: dam, cnd: wantCnd });
     }
-    return c;
+    if (_damCache) _damCache[id + ':' + wantCnd] = dam;
   }
 
   Player.prototype.setdam = function (id, cnd, dam) {
     try {
-      var inv = damInvFile(),
-        wantCnd = cnd || 100,
-        inx = findInvIdCnd(inv, id, wantCnd);
-      if (inx >= 0) {
-        var it = inv.get(inx);
-        it.cnt = dam;
-        inv.set(inx, it);
-      } else {
-        inv.add({ id: id, cnt: dam, cnd: wantCnd });
+      var inv = damInvFile();
+      _applyDamEntry(inv, id, cnd, dam);
+      inv.sync();
+    } catch (e) {}
+  };
+
+  // Batch form: entries is [[id, cnd, dam], ...]. One file open and one flash
+  // write for the whole batch — a skill change touching every carried weapon
+  // costs one sync() instead of one per weapon.
+  Player.prototype.setdams = function (entries) {
+    try {
+      var inv = damInvFile();
+      for (var i = 0; i < entries.length; i++) {
+        var e = entries[i];
+        if (e) _applyDamEntry(inv, e[0], e[1], e[2]);
       }
       inv.sync();
-      _damCache = _snapshotDamCache(inv);
     } catch (e) {}
   };
 
   Player.prototype.removedam = function (id, cnd) {
     try {
       var inv = damInvFile(),
-        inx = findInvIdCnd(inv, id, cnd || 100);
+        wantCnd = cnd || 100,
+        inx = findInvIdCnd(inv, id, wantCnd);
       if (inx >= 0) {
         inv.remove(inx);
         inv.sync();
-        _damCache = _snapshotDamCache(inv);
+        if (_damCache) delete _damCache[id + ':' + wantCnd];
       }
     } catch (e) {}
   };
@@ -432,20 +455,19 @@
         p = 'SETTINGS/' + m + '_SKILLS.JSON',
         u = loadJSONWithDefaults(p, 'SETTINGS/DEFAULT/' + m + '_SKILLS.JSON'),
         chg = !1,
-        i, id, dat, k, lvl, dt;
+        gn = {},
+        i, id, k, lvl, dt;
+      // Normalize the incoming skill names once — nm() is a regex pass, so
+      // doing it per (DAT skill × game key) pair cost ~N×M regex runs.
+      for (k in g) gn[nm(k)] = g[k];
       for (i = 0; i < db.ids.length; i++) {
         id = db.ids[i];
-        dat = db.getId(id);
-        dt = nm(dat.txt);
-        for (k in g) {
-          if (dt === nm(k)) {
-            lvl = E.clip(Math.round(g[k]), 1, 100);
-            if (u[Pip.formatId(id)] !== lvl) {
-              u[Pip.formatId(id)] = lvl;
-              chg = !0;
-            }
-            break;
-          }
+        dt = nm(db.getId(id).txt);
+        if (!gn.hasOwnProperty(dt)) continue;
+        lvl = E.clip(Math.round(gn[dt]), 1, 100);
+        if (u[Pip.formatId(id)] !== lvl) {
+          u[Pip.formatId(id)] = lvl;
+          chg = !0;
         }
       }
       db.close();

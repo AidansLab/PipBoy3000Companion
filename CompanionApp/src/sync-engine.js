@@ -54,8 +54,13 @@ const INVENTORY_CATEGORIES = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
 const CLEAR_INV_CMD = 'player.clearinv()';
 
 // Weapon DAM (skill/condition-adjusted display damage) lives in a side
-// *_DAM.INV file, mirrored one (formId, condition) entry at a time.
+// *_DAM.INV file, mirrored via batched player.setdams() calls so the device
+// opens and flash-writes the file once per batch instead of once per entry.
 const CLEAR_DAM_CMD = 'player.cleardam()';
+// Entries per setdams command. Each `[id,cnd,dam],` triple is ~16 chars and the
+// serial bridge packs lines into 512-byte chunks — 24 keeps a full command
+// safely inside one chunk so it never floods the device's USB RX buffer.
+const MAX_DAM_BATCH = 24;
 const REFRESH_WEAPON_DAM_CMD = 'player.refreshweapondam()';
 const CLEAR_PERKS_CMD = 'player.clearperks()';
 /** Refresh open WEAPONS/APPAREL scroller after remote equip; safe if .boot0 not loaded */
@@ -630,12 +635,14 @@ export class SyncEngine extends EventEmitter {
 
       // Reset and repopulate weapon DAM (skill/condition-adjusted display damage).
       commands.push(CLEAR_DAM_CMD);
+      const damEntries = [];
       for (const item of inventory) {
         if (item.dam == null) continue;
         const formId = this._resolveFormId(item.formId);
         if (formId === null) continue;
-        commands.push(this._buildSetDamCommand(formId, item.condition, item.dam));
+        damEntries.push(this._toDamEntry(formId, item.condition, item.dam));
       }
+      commands.push(...this._buildSetDamBatchCommands(damEntries));
       // SYNC-DISABLED: calculateInvWeight() writes every .INV file
       // commands.push('player.calculateInvWeight()');
 
@@ -1052,6 +1059,7 @@ export class SyncEngine extends EventEmitter {
       if (it && it.dam != null) prevMap.set(this._inventoryStackKey(it), it);
     }
 
+    const setEntries = [];
     for (const it of current) {
       if (!it || it.dam == null) continue;
       const formId = this._resolveFormId(it.formId);
@@ -1059,10 +1067,14 @@ export class SyncEngine extends EventEmitter {
       const key = this._inventoryStackKey(it);
       const prev = prevMap.get(key);
       if (!prev || prev.dam !== it.dam) {
-        commands.push(this._buildSetDamCommand(formId, it.condition, it.dam));
+        setEntries.push(this._toDamEntry(formId, it.condition, it.dam));
       }
       prevMap.delete(key);
     }
+    // Batched so a skill change (which re-computes DAM for every carried
+    // weapon at once) costs one device file open + flash write per batch
+    // instead of one per weapon stack.
+    commands.push(...this._buildSetDamBatchCommands(setEntries));
 
     for (const it of prevMap.values()) {
       const formId = this._resolveFormId(it.formId);
@@ -1554,9 +1566,29 @@ export class SyncEngine extends EventEmitter {
     return `player.setformstacks(${formId},[${list}])`;
   }
 
-  _buildSetDamCommand(formId, condition, dam) {
-    const cnd = this._normalizeItemCondition(condition);
-    return `player.setdam(${formId},${cnd},${Math.max(0, Math.round(dam))})`;
+  _toDamEntry(formId, condition, dam) {
+    return [
+      formId,
+      this._normalizeItemCondition(condition),
+      Math.max(0, Math.round(dam)),
+    ];
+  }
+
+  /**
+   * Batch form of setdam: `entries` is an array of [formId, cnd, dam] triples,
+   * split into player.setdams() commands of ≤MAX_DAM_BATCH entries each so the
+   * device opens and flash-writes *_DAM.INV once per batch rather than once
+   * per weapon stack (flash writes are the slowest device operation).
+   */
+  _buildSetDamBatchCommands(entries) {
+    const commands = [];
+    for (let i = 0; i < entries.length; i += MAX_DAM_BATCH) {
+      const slice = entries.slice(i, i + MAX_DAM_BATCH);
+      commands.push(
+        `player.setdams([${slice.map((e) => `[${e[0]},${e[1]},${e[2]}]`).join(',')}])`
+      );
+    }
+    return commands;
   }
 
   _buildRemoveDamCommand(formId, condition) {

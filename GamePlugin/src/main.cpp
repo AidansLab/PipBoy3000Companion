@@ -671,6 +671,54 @@ static int ComputePipRepTier(int fame, int infamy, int goodThr, int badThr,
   return 5; // Neutral
 }
 
+// Reading reputation costs 13 factions × 5 NVSE script-expression evaluations,
+// far too heavy to repeat on every 250ms snapshot for a value that changes
+// rarely. Re-evaluate at most every FACTION_REFRESH_INTERVAL_MS and reuse the
+// cached results in between; the cache is invalidated on save load / new game
+// so a different character never shows stale rep. Snapshot diffing is
+// unaffected — cached values keep unchanged snapshots byte-identical.
+// Main-thread only (BuildPlayerSnapshot and MessageHandler both run there).
+#define FACTION_REFRESH_INTERVAL_MS 3000
+
+static const size_t kFactionRepCount =
+    sizeof(kFactionReps) / sizeof(kFactionReps[0]);
+
+struct FactionRepState {
+  int tier;
+  bool discovered;
+  int fame;
+  int infamy;
+};
+static FactionRepState g_factionState[kFactionRepCount];
+static DWORD g_lastFactionEvalTime = 0;
+static bool g_factionStateValid = false;
+
+static void RefreshFactionRepState() {
+  for (size_t i = 0; i < kFactionRepCount; i++) {
+    const FactionRepDef &fac = kFactionReps[i];
+    const char *repEdid = GetReputationEditorId(fac.repFormId);
+    int fame = 0;
+    int infamy = 0;
+    int goodThr = 1;
+    int badThr = 1;
+    int mixedThr = 1;
+    if (g_scriptInterface) {
+      fame = EvalReputationValue(fac.repFormId, repEdid, 1);
+      infamy = EvalReputationValue(fac.repFormId, repEdid, 0);
+      goodThr = EvalReputationThreshold(fac.repFormId, repEdid, 1);
+      badThr = EvalReputationThreshold(fac.repFormId, repEdid, 2);
+      mixedThr = EvalReputationThreshold(fac.repFormId, repEdid, 0);
+    }
+    FactionRepState &st = g_factionState[i];
+    st.tier = ComputePipRepTier(fame, infamy, goodThr, badThr, mixedThr);
+    st.discovered =
+        IsFactionDiscovered(fame, infamy, goodThr, badThr, mixedThr) ||
+        st.tier != 5;
+    st.fame = fame;
+    st.infamy = infamy;
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // JSON HELPER (Minimal — no external dependencies)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1218,35 +1266,28 @@ std::string BuildPlayerSnapshot() {
         float karma = player->avOwner.Fn_03(kAV_Karma);
         json.keyFloat("karma", karma);
 
-    // Faction reputation (FNV Pip-Boy GENERAL screen)
+    // Faction reputation (FNV Pip-Boy GENERAL screen) — served from the
+    // throttled cache; see RefreshFactionRepState.
+    {
+      const DWORD now = GetTickCount();
+      if (!g_factionStateValid ||
+          now - g_lastFactionEvalTime >= FACTION_REFRESH_INTERVAL_MS) {
+        RefreshFactionRepState();
+        g_lastFactionEvalTime = now;
+        g_factionStateValid = true;
+      }
+    }
     json.key("factions");
     json.beginArray();
-    for (const FactionRepDef &fac : kFactionReps) {
-      const char *repEdid = GetReputationEditorId(fac.repFormId);
-      int fame = 0;
-      int infamy = 0;
-      int goodThr = 1;
-      int badThr = 1;
-      int mixedThr = 1;
-      if (g_scriptInterface) {
-        fame = EvalReputationValue(fac.repFormId, repEdid, 1);
-        infamy = EvalReputationValue(fac.repFormId, repEdid, 0);
-        goodThr = EvalReputationThreshold(fac.repFormId, repEdid, 1);
-        badThr = EvalReputationThreshold(fac.repFormId, repEdid, 2);
-        mixedThr = EvalReputationThreshold(fac.repFormId, repEdid, 0);
-      }
-      int tier = ComputePipRepTier(fame, infamy, goodThr, badThr, mixedThr);
-      bool discovered =
-          IsFactionDiscovered(fame, infamy, goodThr, badThr, mixedThr) ||
-          tier != 5;
-
+    for (size_t i = 0; i < kFactionRepCount; i++) {
+      const FactionRepState &st = g_factionState[i];
       json.arrayElement();
       json.beginObject();
-      json.keyStr("name", fac.name);
-      json.keyInt("tier", tier);
-      json.keyBool("discovered", discovered);
-      json.keyInt("fame", fame);
-      json.keyInt("infamy", infamy);
+      json.keyStr("name", kFactionReps[i].name);
+      json.keyInt("tier", st.tier);
+      json.keyBool("discovered", st.discovered);
+      json.keyInt("fame", st.fame);
+      json.keyInt("infamy", st.infamy);
       json.endObject();
     }
     json.endArray();
@@ -2210,6 +2251,7 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
     PipBoyLog("MSG", "PostLoadGame");
             g_gameLoaded = true;
     g_saveLoadPending = true;
+    g_factionStateValid = false; // re-evaluate rep for the loaded character
     ResetSyncLockState(true);
     {
       std::lock_guard<std::mutex> lock(g_snapshotMutex);
@@ -2220,6 +2262,7 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
     PipBoyLog("MSG", "NewGame");
             g_gameLoaded = true;
     g_saveLoadPending = true;
+    g_factionStateValid = false; // re-evaluate rep for the new character
     ResetSyncLockState(true);
     {
       std::lock_guard<std::mutex> lock(g_snapshotMutex);
