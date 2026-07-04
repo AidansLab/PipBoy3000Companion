@@ -134,7 +134,7 @@
           .setFontAlign(0, 0)
           .setFont('Monofonto14')
           .drawString(
-            `${player.getav('name') || 'Albert'} Level ${E.clip(player.getav('level') || 1, 1, NV ? 50 : 30)}`,
+            `${player.getav('name') || 'Albert'} · Level ${E.clip(player.getav('level') || 1, 1, NV ? 50 : 30)}`,
             240,
             260
           ));

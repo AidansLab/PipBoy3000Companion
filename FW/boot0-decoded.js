@@ -59,6 +59,30 @@
     return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   };
 
+  // Launches a holotape/app (MISC.JS's item.exec entries). Deliberately kept
+  // here, at boot0's own top level, instead of inline in MISC.js's onClick:
+  // Pip.loadMenu (stock's normal menu-switch path) evals the next script from
+  // its OWN tiny closure, with no link back to whatever menu was previously
+  // open — that's why switching menus normally doesn't retain the old menu's
+  // memory. MISC.js's onClick, by contrast, is itself a closure nested inside
+  // MISC's big IIFE (db/inv/imgs/apps/scroller). Doing Pip.remove()+eval()
+  // directly inside that nested closure keeps the *entire* MISC working set
+  // reachable for as long as that closure is still executing — including
+  // while eval() parses the holotape's own script, which is the single
+  // largest allocation in the whole flow. Calling this top-level helper
+  // instead means the pending setTimeout only ever closes over `execPath` (a
+  // plain string), so MISC's closure is free to be collected before the
+  // holotape's parse runs rather than competing with it for memory.
+  Pip.launchApp = function (execPath) {
+    debug(`Launch Holotape ${execPath}`);
+    setTimeout(function () {
+      Pip.remove();
+      process.memory(!0);
+      Pip.CURRENT = eval(fs.readFileSync(execPath))();
+      debug(`Holotape ${execPath} loaded`);
+    }, 10);
+  };
+
   // STATUS (STATS > Status) has CND / RAD / CLK / ENG tabs. Knob2 on CND edits
   // limb condition — block that in cmode so game sync stays authoritative. CLK
   // uses knob2 for global brightness (manual § CLK) and must keep working.
@@ -425,9 +449,70 @@
     }
   };
 
+  // sapling 1.1.4 moved perks from JSON (SETTINGS/{m}_PERKS.JSON) to an
+  // InvFile (INV/{m}/PERKS.INV, cnt = rank) — same shape as the item
+  // categories above. Stock Player.prototype.addperk/removeperk (FW-decoded.js)
+  // still write the old JSON, which PERKS.JS no longer reads, so these fully
+  // replace them rather than wrapping them. Pattern mirrors
+  // additemhealthpercent/removeitem: patch the open PERKS menu's live InvFile
+  // (exposed as Pip.inv by PERKS-decoded.js) when present, else open+sync.
+  Player.prototype.addperk = function (id, rank) {
+    if ('number' != typeof id) throw new Error('perk should be a number');
+    try {
+      const m = NV ? 'NV' : 'F3',
+        db = new DataFile(`DATA/${m}/PERKS.DAT`),
+        i = db.ids.indexOf(id);
+      if (i < 0) {
+        db.close();
+        return;
+      }
+      const perkDef = db.getId(id),
+        ids = db.ids;
+      db.close();
+      const wantRank = E.clip(
+        rank === undefined ? 1 : Math.round(rank),
+        1,
+        perkDef.rks || 1
+      );
+      const onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === 'PERKS';
+      const inv = onMenu
+        ? Pip.inv
+        : new InvFile(`INV/${m}/PERKS.INV`, { idOrder: ids });
+      const inx = inv.indexOf(id);
+      if (inx >= 0) {
+        let it = inv.get(inx);
+        it.cnt = wantRank;
+        inv.set(inx, it);
+      } else inv.add({ id: id, cnt: wantRank, cnd: 100, fl: 0 });
+      if (onMenu) Pip.emit('scroller', 'refresh');
+      else inv.sync();
+      debug(`Added perk ${perkDef.txt}`);
+    } catch (e) {}
+  };
+
+  Player.prototype.removeperk = function (id) {
+    if ('number' != typeof id) throw new Error('perk should be a number');
+    try {
+      const m = NV ? 'NV' : 'F3',
+        db = new DataFile(`DATA/${m}/PERKS.DAT`),
+        ids = db.ids;
+      db.close();
+      const onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === 'PERKS';
+      const inv = onMenu
+        ? Pip.inv
+        : new InvFile(`INV/${m}/PERKS.INV`, { idOrder: ids });
+      const inx = inv.indexOf(id);
+      if (inx >= 0) {
+        inv.remove(inx);
+        if (onMenu) Pip.emit('scroller', 'refresh');
+        else inv.sync();
+      }
+    } catch (e) {}
+  };
+
   Player.prototype.safeaddperk = function (p) {
     try {
-      const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/PERK.DAT`);
+      const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/PERKS.DAT`);
       if (db.ids.indexOf(p) >= 0) this.addperk(p);
       db.close();
     } catch (e) {}
@@ -435,7 +520,7 @@
 
   Player.prototype.saferemoveperk = function (p) {
     try {
-      const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/PERK.DAT`);
+      const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/PERKS.DAT`);
       if (db.ids.indexOf(p) >= 0) this.removeperk(p);
       db.close();
     } catch (e) {}
@@ -448,15 +533,20 @@
     }
   };
 
+  // sapling 1.1.4 moved skills from JSON (SETTINGS/{m}_SKILLS.JSON) to an
+  // InvFile (INV/{m}/SKILLS.INV, cnt = level) — same Pip.inv live-patch
+  // pattern as addperk/removeperk above.
   Player.prototype.syncskills = function (g) {
     try {
       var m = NV ? 'NV' : 'F3',
         db = new DataFile('DATA/' + m + '/SKILLS.DAT'),
-        p = 'SETTINGS/' + m + '_SKILLS.JSON',
-        u = loadJSONWithDefaults(p, 'SETTINGS/DEFAULT/' + m + '_SKILLS.JSON'),
+        onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === 'SKILLS',
+        inv = onMenu
+          ? Pip.inv
+          : new InvFile('INV/' + m + '/SKILLS.INV', { idOrder: db.ids }),
         chg = !1,
         gn = {},
-        i, id, k, lvl, dt;
+        i, id, k, lvl, dt, inx, it;
       // Normalize the incoming skill names once — nm() is a regex pass, so
       // doing it per (DAT skill × game key) pair cost ~N×M regex runs.
       for (k in g) gn[nm(k)] = g[k];
@@ -465,17 +555,19 @@
         dt = nm(db.getId(id).txt);
         if (!gn.hasOwnProperty(dt)) continue;
         lvl = E.clip(Math.round(gn[dt]), 1, 100);
-        if (u[Pip.formatId(id)] !== lvl) {
-          u[Pip.formatId(id)] = lvl;
-          chg = !0;
-        }
+        inx = inv.indexOf(id);
+        if (inx >= 0) {
+          it = inv.get(inx);
+          if (it.cnt === lvl) continue;
+          it.cnt = lvl;
+          inv.set(inx, it);
+        } else inv.add({ id: id, cnt: lvl, cnd: 100, fl: 0 });
+        chg = !0;
       }
       db.close();
       if (chg) {
-        require('fs').writeFileSync(p, JSON.stringify(u));
-        if (typeof Pip !== 'undefined' && Pip.CURRENT && Pip.CURRENT.id === 'SKILLS' && Pip.emit) {
-          Pip.emit('skills');
-        }
+        if (onMenu) Pip.emit('scroller', 'refresh');
+        else inv.sync();
       }
     } catch (e) {
       debug('skill sync', e);
@@ -519,7 +611,9 @@
   Player.prototype.fullsyncrefresh = function () {
     if (typeof Pip !== 'undefined' && Pip.CURRENT) {
       if (Pip.CURRENT.id === 'SPECIAL' && Pip.emit) Pip.emit('special');
-      else if (Pip.CURRENT.id === 'SKILLS' && Pip.emit) Pip.emit('skills');
+      // SKILLS and PERKS are now Pip.inv-backed like the item categories, so a
+      // full sync (which can touch many rows at once) just reloads the menu —
+      // same as WEAPONS/APPAREL/etc below rather than a bespoke soft event.
       else if (Pip.MODE === 0 && Pip.CURRENT.id !== 'GENERAL' && Pip.changeMenu) Pip.changeMenu();
       else if (['WEAPONS', 'APPAREL', 'AID', 'MISC', 'AMMO'].indexOf(Pip.CURRENT.id) >= 0 && Pip.changeMenu) Pip.changeMenu();
     }
@@ -541,9 +635,13 @@
   };
 
   Player.prototype.clearperks = function () {
+    if (typeof Pip !== 'undefined' && Pip.inv && Pip.CURRENT && Pip.CURRENT.id === 'PERKS') {
+      Pip.inv._invalidated = !0;
+      delete Pip.inv;
+    }
     var fs = require('fs'), m = NV ? 'NV' : 'F3';
     try {
-      fs.writeFileSync('SETTINGS/' + m + '_PERKS.JSON', '{}');
+      fs.writeFileSync('INV/' + m + '/PERKS.INV', '');
     } catch (e) {}
   };
 

@@ -18,18 +18,21 @@
         return ((dat.rtxt = player.getav(avs[n]) || 1), dat);
       },
       render: (item) => {
-        imgs.seek(item.io);
-        const img = imgs.read(item.il);
-        Pip.renderBlock(190, 193, 275, '', '');
+        (imgs.seek(item.io), Pip.renderBlock(190, 193, 275, '', ''));
         const txt = h
           .setFont('Monofonto14')
           .wrapString(item.desc, 260)
           .join('\n');
         h.setFontAlign(-1, -1)
           .setClipRect(190, 50, 460, 275)
-          .drawString(txt, 190, 198)
-          .drawImage(img, 340, 114, { rotate: 0 })
-          .setClipRect(0, 0, 480, 320);
+          .drawString(txt, 190, 198);
+        try {
+          const img = imgs.read(item.il);
+          h.drawImage(img, 340, 114, { rotate: 0 });
+        } catch (e) {
+          debug(`Error drawing image for SPECIAL: ${e}`);
+        }
+        h.setClipRect(0, 0, 480, 320);
       }
     });
   let headerRenderTimer;

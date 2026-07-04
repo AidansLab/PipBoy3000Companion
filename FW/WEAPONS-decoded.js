@@ -110,9 +110,13 @@
     render: (item) => {
       if (!item) return;
       imgs.seek(item.io);
-      const img = imgs.read(item.il);
-      (h.drawImage(img, 340, 114, { rotate: 0 }),
-        Pip.renderBlock(210, 192, 80, 'DAM', item.dam || '--'),
+      try {
+        const img = imgs.read(item.il);
+        h.drawImage(img, 340, 114, { rotate: 0 });
+      } catch (e) {
+        debug(`Error drawing image for Weapon item: ${e}`);
+      }
+      (Pip.renderBlock(210, 192, 80, 'DAM', item.dam || '--'),
         Pip.renderBlock(296, 192, 80, 'WG', item.wt || '--'),
         Pip.renderBlock(382, 192, 80, 'VAL', Math.round(item.val * Math.pow((item.cnd / 100), 1.5) * (item.dispCnt || 1)) || '--'),
         NV && Pip.renderBlock(382, 164, 80, 'STR', item.str || '--'),

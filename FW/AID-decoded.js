@@ -43,8 +43,12 @@
           '' !== effectStr &&
             Pip.renderBlock(210, 220, 252, 'EFFECTS', effectStr),
           imgs.seek(item.io));
-        const img = imgs.read(item.il);
-        h.drawImage(img, 340, 116, { rotate: 0 });
+        try {
+          const img = imgs.read(item.il);
+          h.drawImage(img, 340, 116, { rotate: 0 });
+        } catch (e) {
+          debug(`Error drawing image for Aid item: ${e}`);
+        }
       },
       onClick: (n) => {
         const it = inv.get(n),
@@ -99,25 +103,41 @@
             const wt = parseFloat(item.wt);
             player.player.invWt[`INV/${NV ? 'NV' : 'F3'}/AID.INV`] -= wt;
           } catch (e) {}
-        ((player.modified = !0),
+        if (
+          ((player.modified = !0),
           item.fx && Pip.audioStart(`SOUND/FX/AID/${item.fx}.WAV`),
-          item.efd > 0 &&
-            (player.effects || (player.effects = {}),
-            (player.effects[it.id] = {
-              txt: item.eft || item.txt,
-              ef: item.ef,
-              d: item.efd
-            }),
-            debug(`EFFECTS: ${item.txt} added (${item.efd}s)`),
-            setTimeout(
-              function (N) {
-                (delete player.effects[N],
-                  debug(`EFFECTS: ${item.txt} expired`),
-                  player.emit('effects'));
-              },
-              1000 * item.efd,
-              it.id
-            )),
+          item.ef)
+        ) {
+          const hpRestore = /^HP \+(\d+)/;
+          item.ef.forEach((e) => {
+            const m = e.match(hpRestore);
+            if (m) {
+              debug(`AID: Used "${item.txt}" to restore ${e}`);
+              try {
+                player.heal(parseInt(m[1]));
+              } catch (e2) {
+                Pip.log(`heal failed for ${it.id}: ${e}: ${e2}`);
+              }
+            }
+          });
+        }
+        (item.efd > 0 &&
+          (player.effects || (player.effects = {}),
+          (player.effects[it.id] = {
+            txt: item.eft || item.txt,
+            ef: item.ef,
+            d: item.efd
+          }),
+          debug(`EFFECTS: ${item.txt} added (${item.efd}s)`),
+          setTimeout(
+            function (N) {
+              (delete player.effects[N],
+                debug(`EFFECTS: ${item.txt} expired`),
+                player.emit('effects'));
+            },
+            1000 * item.efd,
+            it.id
+          )),
           Pip.renderHeader());
       },
       onLongClick: (n) => {

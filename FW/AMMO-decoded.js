@@ -38,8 +38,12 @@
       (Pip.renderBlock(296, 192, 80, 'WG', item.wt || '--'),
         Pip.renderBlock(382, 192, 80, 'VAL', item.val || '--'),
         imgs.seek(item.io));
-      const img = imgs.read(item.il);
-      h.drawImage(img, 340, 114, { rotate: 0 });
+      try {
+        const img = imgs.read(item.il);
+        h.drawImage(img, 340, 114, { rotate: 0 });
+      } catch (e) {
+        debug(`Error drawing image for Ammo item: ${e}`);
+      }
     },
     onClick: (n) => {
       if (!isCmode()) return;

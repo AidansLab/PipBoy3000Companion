@@ -138,10 +138,10 @@ static std::atomic<bool> g_saveLoadPending(false);
 static std::atomic<bool> g_mainMenuPending(false);
 
 // Set by the companion app (SYNC_LOCK / SYNC_UNLOCK) while it performs the
-// initial Pip-Boy sync. Disables player controls and shows a "please wait"
-// message so the player can't move or act mid-sync. Reconciled on the main
-// thread in MainGameLoop; auto-cleared if the companion disconnects so the
-// player is never left stuck.
+// initial Pip-Boy sync. Disables player controls, freezes the game clock, and
+// shows a "please wait" message so nothing can move or act mid-sync.
+// Reconciled on the main thread in MainGameLoop; auto-cleared if the
+// companion disconnects so the player is never left stuck.
 static std::atomic<bool> g_syncLockRequested(false);
 
 // Commands received from the companion app (Pip-Boy initiated actions).
@@ -158,6 +158,33 @@ static NVSEScriptInterface *g_scriptInterface = nullptr;
 // rollover | sneak. (Looking is handled separately via vanilla command)
 static const char *kSyncDisableControlsCmd = "DisablePlayerControlsAltEx 125";
 static const char *kSyncEnableControlsCmd = "EnablePlayerControlsAltEx 125";
+
+// Freezes the world without opening any menu, so our injected HUD overlay and
+// the plugin's own MainGameLoop hook (which drives command execution and the
+// overlay itself) keep running normally — a true engine pause (e.g. the ESC
+// menu) would stop those too.
+//
+// "TFC 1" is vanilla's own "freeze frame for screenshots" mechanism: toggling
+// free camera with the "1" argument also halts the game clock immediately,
+// including actors already mid-path. Two alternatives were tried and
+// rejected first (see commit history):
+//  - "tai" (Toggle AI) only blocks NEW AI decisions — an NPC already walking
+//    a path keeps walking it to completion, unsafe for a player-safety lock.
+//  - SetGameSpeed scales animation/physics/projectile timing but does not
+//    touch AI package evaluation or in-progress movement at all.
+// TFC's cost: it hands WASD/mouse to the free camera, which is a separate
+// flight controller that reads raw input directly — it does NOT go through
+// the normal player-control-disable flags (kSyncDisableControlsCmd), so the
+// player could otherwise fly the detached camera around during the lock.
+// SetUFOCamSpeedMult 0 (script name for the "sucsm" console command) zeroes
+// the free camera's movement speed so that input has no effect while locked;
+// restored to its default of 1 on unlock. Screen-space UI (including our
+// injected sync overlay) lives on menuRoot, not the 3D scene the camera
+// renders, so it is expected to stay visible through the freeze.
+static const char *kSyncFreezeWorldCmd = "TFC 1";
+static const char *kSyncUnfreezeWorldCmd = "TFC";
+static const char *kSyncFreecamSpeedZeroCmd = "SetUFOCamSpeedMult 0";
+static const char *kSyncFreecamSpeedRestoreCmd = "SetUFOCamSpeedMult 1";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // VERBOSE LOGGING
@@ -1754,6 +1781,7 @@ static const char kSyncWaitOverlayXml[] =
     "</rect>";
 
 static bool g_syncControlsDisabled = false;
+static bool g_syncWorldFrozen = false;
 static bool g_syncOverlayInjected = false;
 // Frames to wait after a save/load before touching HUD tiles (HUD is rebuilt).
 static UInt32 g_syncHudReadyDelay = 0;
@@ -1823,6 +1851,18 @@ static void ResetSyncLockState(bool reenableControls) {
     PipBoyLog("SYNC", "ResetSyncLockState: issued %s", kSyncEnableControlsCmd);
     g_syncControlsDisabled = false;
     RequestHudRefreshAfterSyncUnlock();
+  }
+  // Safety net matching g_syncControlsDisabled above — a save/load or exit
+  // mid-lock (e.g. companion crashed during sync) must not leave the world
+  // permanently frozen.
+  if (reenableControls && g_syncWorldFrozen) {
+    if (PlayerCharacter *player = PlayerCharacter::GetSingleton()) {
+      Script::RunScriptLine2(kSyncUnfreezeWorldCmd, player, true);
+      Script::RunScriptLine2(kSyncFreecamSpeedRestoreCmd, player, true);
+    }
+    PipBoyLog("SYNC", "ResetSyncLockState: issued %s and %s",
+              kSyncUnfreezeWorldCmd, kSyncFreecamSpeedRestoreCmd);
+    g_syncWorldFrozen = false;
   }
 }
 
@@ -1895,11 +1935,22 @@ static void ApplySyncLock(bool wantLock) {
       // sneaking — a full "cutscene" style lock so nothing can be done.
       Script::RunScriptLine2(kSyncDisableControlsCmd, player, true);
       // xNVSE's DisablePlayerControlsAltEx misses the camera hook, so the mouse
-      // can still move the camera. We apply the vanilla command ONLY for the 
+      // can still move the camera. We apply the vanilla command ONLY for the
       // Looking flag (arg 5) to freeze the camera without breaking other mods' movement stacks.
       Script::RunScriptLine2("DisablePlayerControls 0 0 0 0 1 0 0", player, true);
       PipBoyLog("SYNC", "Lock ON: issued %s and vanilla Look disable", kSyncDisableControlsCmd);
       g_syncControlsDisabled = true;
+    }
+    if (!g_syncWorldFrozen) {
+      // Freeze NPCs/projectiles/physics too — player controls alone still let
+      // the world move around a player who can't react to it. Zero the free
+      // camera's speed FIRST so there's no window where TFC 1 is active but
+      // WASD can still nudge it before the speed clamp lands.
+      Script::RunScriptLine2(kSyncFreecamSpeedZeroCmd, player, true);
+      Script::RunScriptLine2(kSyncFreezeWorldCmd, player, true);
+      PipBoyLog("SYNC", "Lock ON: issued %s and %s", kSyncFreecamSpeedZeroCmd,
+                kSyncFreezeWorldCmd);
+      g_syncWorldFrozen = true;
     }
     if (IsHudReadyForSyncOverlay() && !g_syncOverlayInjected)
       ShowSyncWaitOverlay();
@@ -1910,6 +1961,13 @@ static void ApplySyncLock(bool wantLock) {
       Script::RunScriptLine2("EnablePlayerControls 0 0 0 0 1 0 0", player, true);
       PipBoyLog("SYNC", "Lock OFF: issued %s and vanilla Look enable", kSyncEnableControlsCmd);
       g_syncControlsDisabled = false;
+    }
+    if (g_syncWorldFrozen) {
+      Script::RunScriptLine2(kSyncUnfreezeWorldCmd, player, true);
+      Script::RunScriptLine2(kSyncFreecamSpeedRestoreCmd, player, true);
+      PipBoyLog("SYNC", "Lock OFF: issued %s and %s", kSyncUnfreezeWorldCmd,
+                kSyncFreecamSpeedRestoreCmd);
+      g_syncWorldFrozen = false;
     }
     if (g_syncOverlayInjected)
       CloseSyncWaitOverlay();

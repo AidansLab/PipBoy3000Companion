@@ -115,8 +115,12 @@
         '' !== effectStr &&
           Pip.renderBlock(210, 248, 252, 'EFFECTS', effectStr),
         imgs.seek(item.io));
-      const img = imgs.read(item.il);
-      h.drawImage(img, 340, 114, { rotate: 0 });
+      try {
+        const img = imgs.read(item.il);
+        h.drawImage(img, 340, 114, { rotate: 0 });
+      } catch (e) {
+        debug(`Error drawing image for Apparel item: ${e}`);
+      }
     },
     onClick: (n) => {
       const v = vAt(n),

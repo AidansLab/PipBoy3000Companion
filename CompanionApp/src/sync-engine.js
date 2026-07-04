@@ -53,6 +53,11 @@ const FULL_SYNC_UI_REFRESH_CMD = 'player.fullsyncrefresh();';
 const INVENTORY_CATEGORIES = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
 const CLEAR_INV_CMD = 'player.clearinv()';
 
+// Perks and Skills are InvFile-backed on the device now (INV/{m}/PERKS.INV,
+// SKILLS.INV — same shape as the item categories), so pre-sync backup/restore
+// treats them as two more INV categories instead of separate JSON files.
+const PRESYNC_CATEGORIES = [...INVENTORY_CATEGORIES, 'PERKS', 'SKILLS'];
+
 // Weapon DAM (skill/condition-adjusted display damage) lives in a side
 // *_DAM.INV file, mirrored via batched player.setdams() calls so the device
 // opens and flash-writes the file once per batch instead of once per entry.
@@ -505,7 +510,7 @@ export class SyncEngine extends EventEmitter {
       );
       commands.push(...perkCommands);
 
-      // --- Skill diffs (written to SETTINGS/*_SKILLS.JSON on device) ---
+      // --- Skill diffs (written to INV/*/SKILLS.INV on device) ---
       commands.push(...this._diffSkills(player, prevPlayer));
     }
 
@@ -609,7 +614,7 @@ export class SyncEngine extends EventEmitter {
       // Carry weight — game-authoritative (see _diffWeight)
       commands.push(...this._diffWeight(player, {}));
 
-      // Skills — stored in SETTINGS/*_SKILLS.JSON (not player.setav)
+      // Skills — stored in INV/*/SKILLS.INV (not player.setav)
       if (player.skills) {
         const skillCmd = this._buildSyncSkillsCommand(player.skills);
         if (skillCmd) commands.push(skillCmd);
@@ -1113,7 +1118,7 @@ export class SyncEngine extends EventEmitter {
   }
 
   /**
-   * Write skill levels to SETTINGS/*_SKILLS.JSON on the Pip-Boy.
+   * Write skill levels to INV/{mode}/SKILLS.INV on the Pip-Boy.
    * Matches game actor-value keys (e.g. "energyweapons") to SKILLS.DAT display names.
    */
   _buildSyncSkillsCommand(skills) {
@@ -1660,7 +1665,10 @@ export class SyncEngine extends EventEmitter {
   }
 
   async _getPresyncBackupStatus() {
-    const expr = `(()=>{try{var f=require('fs'),m=NV?'NV':'F3',r={hasManifest:!1,manifestOld:!0,playerMissing:!0,invMissing:!0,perksMissing:!0,skillsMissing:!0},cats=['AID','AMMO','APPAREL','MISC','WEAPONS'],i,p;try{var man=JSON.parse(f.readFileSync('INV/PRESYNC/MANIFEST.JSON'));r.hasManifest=!0;r.manifestOld=!man.v||man.v<2}catch(e){}try{f.statSync('SETTINGS/PRESYNC/PLAYER.JSON');r.playerMissing=!1}catch(e){}try{f.statSync('INV/PRESYNC/'+m);for(i=0;i<5;i++){p='INV/PRESYNC/'+m+'/'+cats[i]+'.INV';try{f.statSync(p);r.invMissing=!1;break}catch(e){}}}catch(e){}try{f.statSync('SETTINGS/PRESYNC/'+m+'_PERKS.JSON');r.perksMissing=!1}catch(e){}try{f.statSync('SETTINGS/PRESYNC/'+m+'_SKILLS.JSON');r.skillsMissing=!1}catch(e){}return r}catch(e){return{error:!0}}})()`;
+    // manifest v3: presyncCats grew from 5 item categories to 7 (added PERKS,
+    // SKILLS as INV files) — bumping the version forces one fresh backup pass
+    // for installs upgrading from the old JSON-based perk/skill backup.
+    const expr = `(()=>{try{var f=require('fs'),m=NV?'NV':'F3',r={hasManifest:!1,manifestOld:!0,playerMissing:!0,invMissing:!0},cats=['AID','AMMO','APPAREL','MISC','WEAPONS','PERKS','SKILLS'],i,p;try{var man=JSON.parse(f.readFileSync('INV/PRESYNC/MANIFEST.JSON'));r.hasManifest=!0;r.manifestOld=!man.v||man.v<3}catch(e){}try{f.statSync('SETTINGS/PRESYNC/PLAYER.JSON');r.playerMissing=!1}catch(e){}try{f.statSync('INV/PRESYNC/'+m);for(i=0;i<cats.length;i++){p='INV/PRESYNC/'+m+'/'+cats[i]+'.INV';try{f.statSync(p);r.invMissing=!1;break}catch(e){}}}catch(e){}return r}catch(e){return{error:!0}}})()`;
     const raw = await this.bridge.eval(expr);
     return this._parsePresyncBackupStatus(raw);
   }
@@ -1686,43 +1694,26 @@ export class SyncEngine extends EventEmitter {
         );
       }
 
-      if (status.invMissing) {
+      if (status.invMissing || status.manifestOld) {
         this.emit('status', 'Backing up pre-sync inventory...');
         await this.bridge.sendCommand(
           `(()=>{var f=require('fs'),m=NV?'NV':'F3';f.statSync('INV/'+m)||f.mkdirSync('INV/'+m)})()`
         );
-        for (const cat of INVENTORY_CATEGORIES) {
+        for (const cat of PRESYNC_CATEGORIES) {
           await this.bridge.sendCommand(
             `(()=>{var f=require('fs'),m=NV?'NV':'F3',live='INV/'+m+'/${cat}.INV',def='INV/DEFAULT/'+m+'/${cat}.INV',dst='INV/PRESYNC/'+m+'/${cat}.INV',d='';try{d=f.readFileSync(live)}catch(e){}if(!d||!d.length){try{d=f.readFileSync(def)}catch(e){}}try{f.writeFileSync(dst,d||'')}catch(e){}})()`
           );
         }
       }
 
-      if (status.perksMissing || status.manifestOld) {
-        await this._backupPresyncSettingsFile('PERKS');
-      }
-      if (status.skillsMissing || status.manifestOld) {
-        await this._backupPresyncSettingsFile('SKILLS');
-      }
-
       await this.bridge.sendCommand(
-        `(()=>{try{require('fs').writeFileSync('INV/PRESYNC/MANIFEST.JSON',JSON.stringify({mode:NV?'NV':'F3',ts:Date.now(),v:2}))}catch(e){}})()`
+        `(()=>{try{require('fs').writeFileSync('INV/PRESYNC/MANIFEST.JSON',JSON.stringify({mode:NV?'NV':'F3',ts:Date.now(),v:3}))}catch(e){}})()`
       );
 
       this.emit('status', 'Pre-sync data backed up');
     } catch (err) {
       this.emit('warning', `Pre-sync backup failed: ${err.message}`);
     }
-  }
-
-  async _backupPresyncSettingsFile(kind) {
-    const perkFallback =
-      kind === 'PERKS'
-        ? "if(!d||!d.length){try{d=f.readFileSync('SETTINGS/DEFAUlT/'+m+'_PERKS.JSON')}catch(e){}}"
-        : '';
-    await this.bridge.sendCommand(
-      `(()=>{var f=require('fs'),m=NV?'NV':'F3',live='SETTINGS/'+m+'_${kind}.JSON',dst='SETTINGS/PRESYNC/'+m+'_${kind}.JSON',def='SETTINGS/DEFAULT/'+m+'_${kind}.JSON',d='';try{d=f.readFileSync(live)}catch(e){}if(!d||!d.length){try{d=f.readFileSync(def)}catch(e){}}${perkFallback}try{f.writeFileSync(dst,d||'')}catch(e){}})()`
-    );
   }
 
   /**
