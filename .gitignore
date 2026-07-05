@@ -5,6 +5,8 @@ CompanionApp/release/
 
 # C++ Build outputs
 GamePlugin/build/
+GamePlugin/build-nv/
+GamePlugin/build-fo3/
 GamePlugin/x64/
 GamePlugin/.vs/
 *.db

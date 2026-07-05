@@ -16,18 +16,25 @@ set(XNVSE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/xNVSE" CACHE PATH
 set(XFOSE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/xFOSE" CACHE PATH
     "Path to xFOSE source root (containing fose/ directory)")
 
+# Which plugins this build tree produces. Configure separate trees per game
+# so each generated solution builds exactly one plugin:
+#   cmake -S . -B build-nv  -A Win32 -DBUILD_FO3_PLUGIN=OFF
+#   cmake -S . -B build-fo3 -A Win32 -DBUILD_NV_PLUGIN=OFF
+option(BUILD_NV_PLUGIN "Build the Fallout: New Vegas plugin (xNVSE)" ON)
+option(BUILD_FO3_PLUGIN "Build the Fallout 3 plugin (xFOSE)" ON)
+
 set(HAVE_XNVSE FALSE)
 set(HAVE_XFOSE FALSE)
-if(XNVSE_ROOT AND EXISTS "${XNVSE_ROOT}/nvse")
+if(BUILD_NV_PLUGIN AND XNVSE_ROOT AND EXISTS "${XNVSE_ROOT}/nvse")
     set(HAVE_XNVSE TRUE)
 endif()
-if(XFOSE_ROOT AND EXISTS "${XFOSE_ROOT}/fose")
+if(BUILD_FO3_PLUGIN AND XFOSE_ROOT AND EXISTS "${XFOSE_ROOT}/fose")
     set(HAVE_XFOSE TRUE)
 endif()
 
 if(NOT HAVE_XNVSE AND NOT HAVE_XFOSE)
     message(FATAL_ERROR
-        "Neither SDK found.\n"
+        "No plugin target enabled (SDK missing or both BUILD_*_PLUGIN options OFF).\n"
         "Fetch the bundled submodules:  git submodule update --init\n"
         "or point at checkouts manually: cmake -DXNVSE_ROOT=<NVSE> -DXFOSE_ROOT=<xFOSE> .."
     )
@@ -137,7 +144,10 @@ endif() # HAVE_XNVSE
 
 if(HAVE_XFOSE)
 
-if(NOT HAVE_XNVSE)
+# The FO3 target borrows xNVSE's common/ library headers (xFOSE does not
+# bundle them) — the xNVSE checkout must exist even when its plugin target
+# is disabled for this tree.
+if(NOT EXISTS "${XNVSE_ROOT}/common")
     message(FATAL_ERROR
         "The Fallout 3 target needs xNVSE's common/ library headers "
         "(xFOSE does not bundle them). Fetch both submodules: git submodule update --init"
