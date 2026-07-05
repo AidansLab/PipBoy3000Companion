@@ -1,0 +1,348 @@
+/**
+ * fo3_engine.h — Fallout 3 engine glue for the Pip-Boy sync plugin (xFOSE).
+ *
+ * The xNVSE plugin leans on two NVSE conveniences that FOSE does not provide:
+ *   1. Script::RunScriptLine2 — compile-and-run a script line (xFOSE declares
+ *      a console RunScriptLine interface but never registers it: the block in
+ *      PluginManager.cpp is `#if 0 // not yet supported`).
+ *   2. kMessage_MainGameLoop — a per-frame main-thread callback.
+ *
+ * Replacements, built only from data published in the xFOSE SDK:
+ *
+ *   Script lines → direct dispatch into the game's OWN command handlers. The
+ *   vanilla console and script command tables are static CommandInfo arrays at
+ *   addresses published per-version in xFOSE's CommandTable.cpp (for 1.7:
+ *   console 0x00F52B70..0x00F54B50, script 0x00F54B78..0x00F5A438). Commands
+ *   are located BY NAME at runtime — no per-command address guessing — and
+ *   invoked with a hand-built argument buffer in the engine's compiled-arg
+ *   format ('n'+SInt32 int literal, 'z'+double literal, 'r'+UInt16 index into
+ *   the calling script's ref list; UInt16 arg count prefix). The format was
+ *   verified against the vanilla-format parser in xNVSE's GameAPI.cpp
+ *   (v_ExtractArgsEx / ExtractFloat), which reads this same engine encoding.
+ *   Form arguments are carried by a stack-built fake Script whose layout
+ *   (refs tList @0x44, sizeof 0x54) is STATIC_ASSERTed by the SDK; ref
+ *   variables use varIdx=0 so RefVariable::Resolve() leaves the pre-set form
+ *   pointer untouched even with a NULL event list.
+ *
+ *   Reads (perk rank, active-spell checks) → CommandInfo::eval, the
+ *   "arg already extracted" handler used for dialog conditions:
+ *   eval(thisObj, arg1, arg2, &result). No arg buffer needed at all.
+ *
+ *   Main-thread pump → a WM_TIMER TIMERPROC on the game's main window. The
+ *   game's main thread owns the window and dispatches its messages (the
+ *   vanilla console executes commands from this same pump via WM_CHAR), so
+ *   the callback runs in a context equivalent to console command execution.
+ *   Uses zero engine addresses.
+ *
+ *   Player control lock → PlayerCharacter::disabledControlFlags (offset
+ *   0x5DC, STATIC_ASSERTed in the SDK, flag enum included). Only bits we set
+ *   are cleared on unlock, preserving other mods' flags — the same guarantee
+ *   xNVSE's DisablePlayerControlsAltEx provided on the NV side.
+ */
+
+#pragma once
+
+#include <windows.h>
+#include <cstring>
+#include <cstdio>
+
+#include "fose/GameAPI.h"
+#include "fose/GameData.h"
+#include "fose/GameExtraData.h"
+#include "fose/GameForms.h"
+#include "fose/GameInterface.h"
+#include "fose/GameMenus.h"
+#include "fose/GameObjects.h"
+#include "fose/GameRTTI.h"
+#include "fose/GameTiles.h"
+#include "fose/GameTypes.h"
+#include "fose/CommandTable.h"
+#include "fose/PluginAPI.h"
+#include "fose/Utilities.h"
+
+#if FALLOUT_VERSION != FALLOUT_VERSION_1_7
+#error "This plugin is built for Fallout 3 runtime 1.7.0.3 only (FALLOUT_VERSION_1_7)."
+#endif
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// VANILLA COMMAND TABLES (addresses from xFOSE CommandTable.cpp, runtime 1.7)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+static CommandInfo *const kConsoleCommandsBegin = (CommandInfo *)0x00F52B70;
+static CommandInfo *const kConsoleCommandsEnd = (CommandInfo *)0x00F54B50;
+static CommandInfo *const kScriptCommandsBegin = (CommandInfo *)0x00F54B78;
+static CommandInfo *const kScriptCommandsEnd = (CommandInfo *)0x00F5A438;
+
+static CommandInfo *FindCommandIn(CommandInfo *begin, CommandInfo *end,
+                                  const char *name) {
+  for (CommandInfo *info = begin; info < end; info++) {
+    if (info->longName && _stricmp(info->longName, name) == 0)
+      return info;
+    if (info->shortName && _stricmp(info->shortName, name) == 0)
+      return info;
+  }
+  return NULL;
+}
+
+static CommandInfo *FindConsoleCommand(const char *name) {
+  return FindCommandIn(kConsoleCommandsBegin, kConsoleCommandsEnd, name);
+}
+
+static CommandInfo *FindScriptCommand(const char *name) {
+  return FindCommandIn(kScriptCommandsBegin, kScriptCommandsEnd, name);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// COMMAND DISPATCH
+// ═══════════════════════════════════════════════════════════════════════════════
+
+struct GameCommandArg {
+  enum Kind { kInt, kFloat, kForm } kind;
+  SInt32 intVal;
+  double floatVal;
+  TESForm *formVal;
+
+  static GameCommandArg Int(SInt32 v) {
+    GameCommandArg a;
+    a.kind = kInt;
+    a.intVal = v;
+    a.floatVal = 0;
+    a.formVal = NULL;
+    return a;
+  }
+  static GameCommandArg Float(double v) {
+    GameCommandArg a;
+    a.kind = kFloat;
+    a.intVal = 0;
+    a.floatVal = v;
+    a.formVal = NULL;
+    return a;
+  }
+  static GameCommandArg Form(TESForm *f) {
+    GameCommandArg a;
+    a.kind = kForm;
+    a.intVal = 0;
+    a.floatVal = 0;
+    a.formVal = f;
+    return a;
+  }
+};
+
+// Node layout of tList<T> (GameTypes.h _Node: { item, next }).
+struct FO3RawListNode {
+  void *item;
+  FO3RawListNode *next;
+};
+
+static const UInt32 kMaxGameCommandArgs = 4;
+
+// Invoke a vanilla command handler with literal/form arguments. Returns false
+// if the command pointer is NULL or has no execute handler. `outResult`
+// receives the command's numeric result (may be NULL if not wanted).
+static bool CallGameCommand(CommandInfo *info, TESObjectREFR *thisObj,
+                            const GameCommandArg *args, UInt32 numArgs,
+                            double *outResult = NULL) {
+  if (!info || !info->execute)
+    return false;
+  if (numArgs > kMaxGameCommandArgs)
+    return false;
+  // Never pass more args than the command declares — optional trailing params
+  // are simply omitted, matching what the script compiler emits.
+  if (numArgs > info->numParams)
+    numArgs = info->numParams;
+
+  // Compiled-arg buffer: UInt16 numArgs, then 'n'+SInt32 / 'z'+double /
+  // 'r'+UInt16(1-based ref index).
+  UInt8 argBuf[2 + kMaxGameCommandArgs * 9];
+  UInt32 off = 0;
+  *(UInt16 *)(argBuf + off) = (UInt16)numArgs;
+  off += 2;
+
+  // Fake calling script carrying the form refs. Script layout is
+  // STATIC_ASSERTed by the SDK (info @0x18, refs tList @0x44, sizeof 0x54).
+  UInt8 scriptBlock[sizeof(Script)];
+  memset(scriptBlock, 0, sizeof(scriptBlock));
+  Script *fakeScript = (Script *)scriptBlock;
+  fakeScript->typeID = kFormType_Script;
+  fakeScript->refID = 0xFF000FF0; // implausible dynamic id, purely cosmetic
+
+  Script::RefVariable refVars[kMaxGameCommandArgs];
+  FO3RawListNode refNodes[kMaxGameCommandArgs];
+  memset(refVars, 0, sizeof(refVars));
+  memset(refNodes, 0, sizeof(refNodes));
+  UInt32 numRefs = 0;
+
+  for (UInt32 i = 0; i < numArgs; i++) {
+    switch (args[i].kind) {
+    case GameCommandArg::kInt:
+      argBuf[off++] = 'n';
+      *(SInt32 *)(argBuf + off) = args[i].intVal;
+      off += 4;
+      break;
+    case GameCommandArg::kFloat:
+      argBuf[off++] = 'z';
+      *(double *)(argBuf + off) = args[i].floatVal;
+      off += 8;
+      break;
+    case GameCommandArg::kForm: {
+      if (!args[i].formVal)
+        return false;
+      refVars[numRefs].form = args[i].formVal;
+      refVars[numRefs].varIdx = 0; // 0 ⇒ RefVariable::Resolve keeps `form`
+      numRefs++;
+      argBuf[off++] = 'r';
+      *(UInt16 *)(argBuf + off) = (UInt16)numRefs; // ref indices are 1-based
+      off += 2;
+      break;
+    }
+    }
+  }
+
+  // Chain the ref nodes into the fake script's refs tList (offset 0x44).
+  if (numRefs > 0) {
+    for (UInt32 i = 0; i < numRefs; i++) {
+      refNodes[i].item = &refVars[i];
+      refNodes[i].next = (i + 1 < numRefs) ? &refNodes[i + 1] : NULL;
+    }
+    FO3RawListNode *refsHead =
+        (FO3RawListNode *)((UInt8 *)fakeScript + 0x44);
+    refsHead->item = refNodes[0].item;
+    refsHead->next = refNodes[0].next;
+    fakeScript->info.numRefs = numRefs;
+  }
+
+  double result = 0.0;
+  UInt32 opcodeOffset = 0;
+  bool ok = info->execute(info->params, argBuf, thisObj, NULL, fakeScript,
+                          NULL, &result, &opcodeOffset);
+  if (outResult)
+    *outResult = result;
+  return ok;
+}
+
+// Invoke a command's condition-evaluation handler (no arg buffer — args are
+// passed pre-extracted). Used for reads: HasPerk rank, IsSpellTarget, etc.
+static bool EvalGameCommand(CommandInfo *info, TESObjectREFR *thisObj,
+                            void *arg1, void *arg2, double *outResult) {
+  if (!info || !info->eval)
+    return false;
+  double result = 0.0;
+  bool ok = info->eval(thisObj, arg1, arg2, &result);
+  if (outResult)
+    *outResult = result;
+  return ok;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PLAYER CONTROL LOCK (direct flag writes — the AltEx-style "don't clobber
+// other mods" guarantee: only bits *we* turned on get turned back off)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+static const UInt32 kSyncControlFlagsAll =
+    PlayerCharacter::kControlFlag_Movement |
+    PlayerCharacter::kControlFlag_Look |
+    PlayerCharacter::kControlFlag_Pipboy |
+    PlayerCharacter::kControlFlag_Fight |
+    PlayerCharacter::kControlFlag_POVSwitch |
+    PlayerCharacter::kControlFlag_RolloverText |
+    PlayerCharacter::kControlFlag_Sneak;
+
+static UInt32 g_controlFlagsWeSet = 0;
+
+static void FO3DisablePlayerControls(PlayerCharacter *player) {
+  if (!player)
+    return;
+  // Remember exactly which bits were clear before we set them.
+  g_controlFlagsWeSet = kSyncControlFlagsAll & ~player->disabledControlFlags;
+  player->disabledControlFlags |= kSyncControlFlagsAll;
+}
+
+static void FO3EnablePlayerControls(PlayerCharacter *player) {
+  if (!player)
+    return;
+  player->disabledControlFlags &= ~g_controlFlagsWeSet;
+  g_controlFlagsWeSet = 0;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN-THREAD PUMP (WM_TIMER on the game's main window)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+typedef void (*FO3PumpCallback)();
+
+static HWND g_gameWindow = NULL;
+static UINT_PTR g_pumpTimerId = 0;
+static FO3PumpCallback g_pumpCallback = NULL;
+static volatile LONG g_pumpTickCount = 0;
+
+static void CALLBACK FO3PumpTimerProc(HWND, UINT, UINT_PTR, DWORD) {
+  InterlockedIncrement(&g_pumpTickCount);
+  if (g_pumpCallback)
+    g_pumpCallback();
+}
+
+static BOOL CALLBACK FO3FindGameWindowProc(HWND hwnd, LPARAM lparam) {
+  DWORD pid = 0;
+  GetWindowThreadProcessId(hwnd, &pid);
+  if (pid != GetCurrentProcessId())
+    return TRUE;
+  if (!IsWindowVisible(hwnd))
+    return TRUE;
+  if (GetWindow(hwnd, GW_OWNER) != NULL)
+    return TRUE;
+  char title[64] = {};
+  GetWindowTextA(hwnd, title, sizeof(title) - 1);
+  if (!title[0])
+    return TRUE;
+  *(HWND *)lparam = hwnd;
+  return FALSE;
+}
+
+// Try to attach the pump. Safe to call repeatedly (e.g. from the pipe thread)
+// until it succeeds — the game window doesn't exist during plugin load.
+static bool FO3TryInstallMainThreadPump(FO3PumpCallback cb, UINT intervalMs) {
+  if (g_pumpTimerId)
+    return true;
+  HWND hwnd = NULL;
+  EnumWindows(FO3FindGameWindowProc, (LPARAM)&hwnd);
+  if (!hwnd)
+    return false;
+  g_pumpCallback = cb;
+  g_gameWindow = hwnd;
+  // Timer messages are delivered to (and the TIMERPROC runs on) the thread
+  // that owns the window — the game's main thread — regardless of which
+  // thread calls SetTimer.
+  g_pumpTimerId = SetTimer(hwnd, 0x50495042 /* 'PIPB' */, intervalMs,
+                           FO3PumpTimerProc);
+  return g_pumpTimerId != 0;
+}
+
+static LONG FO3PumpTicks() { return g_pumpTickCount; }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RUNTIME FORM DISCOVERY
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Locate the Pip-Boy light SpellItem by scanning the spell list for a full
+// name containing both "pip" and "light" (case-insensitive). Avoids
+// hardcoding a form id the SDK doesn't publish.
+static SpellItem *FO3FindPipBoyLightSpell() {
+  DataHandler *dh = DataHandler::Get();
+  if (!dh)
+    return NULL;
+  for (tList<SpellItem>::Iterator it = dh->spellItemList.Begin(); !it.End();
+       ++it) {
+    SpellItem *spell = it.Get();
+    if (!spell)
+      continue;
+    const char *name = GetFullName(spell);
+    if (!name || !name[0])
+      continue;
+    char lower[128] = {};
+    for (UInt32 i = 0; name[i] && i < sizeof(lower) - 1; i++)
+      lower[i] = (char)tolower((unsigned char)name[i]);
+    if (strstr(lower, "pip") && strstr(lower, "light"))
+      return spell;
+  }
+  return NULL;
+}

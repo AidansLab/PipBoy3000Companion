@@ -176,8 +176,10 @@
         '> User': showUserMenu,
         'Pip-Boy mode': {
           value: !!NV,
-          format: (v) => (v ? 'New Vegas' : 'Fallout 3'),
+          //format: (v) => (v && !cmode ? 'New Vegas' : 'Fallout 3'),
+          format: (v) => (cmode ? "Disallowed in companion mode." : v ? 'New Vegas' : 'Fallout 3'),
           onchange: (v) => {
+            if (cmode) return;
             ((NV = v),
               writeSetting('nv', v),
               settings.theme || setRGB(void 0),
@@ -281,7 +283,7 @@
         'PERKS'
       ];
     if (!hasPreSyncBackup(mode)) return !1;
-    if (typeof cmode !== 'undefined' && cmode) return !1;
+    if (cmode) return !1;
     try {
       ensureDir(dstDir);
       typeof Pip !== 'undefined' && Pip.inv && delete Pip.inv;
@@ -346,7 +348,7 @@
         'Restore pre-sync data': function () {
           const mode = NV ? 'NV' : 'F3';
           (menu && menu.remove(),
-            typeof cmode !== 'undefined' && cmode
+            cmode
               ? (menu = showMenu({
                   '': { title: 'Cannot Restore', back: showUserMenu },
                   'Not allowed while in companion mode.': () => {}

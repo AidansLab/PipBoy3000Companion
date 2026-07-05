@@ -95,8 +95,8 @@
         NV &&
           h
             .setColor(0)
-            .fillRect(277, 228, 278, 230)
-            .fillRect(277, 235, 278, 237)
+            .fillRect(264, 228, 265, 230)
+            .fillRect(264, 235, 265, 237)
             .setColor(3));
       let effectStr = '';
       if (item.ef && item.ef.length) {

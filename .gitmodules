@@ -2,3 +2,6 @@
 path = GamePlugin/xNVSE
 url = https://github.com/xNVSE/NVSE.git
 branch = master
+[submodule "GamePlugin/xFOSE"]
+	path = GamePlugin/xFOSE
+	url = https://github.com/AtomicTEM/xFOSE.git

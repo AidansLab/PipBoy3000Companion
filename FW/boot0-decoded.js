@@ -53,6 +53,22 @@
   // the array on every additemhealthpercent / removeitem / setformstacks call.
   const cats = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
 
+  // DAT catalogs are static game data, so read each category's id list from
+  // flash once and reuse it instead of reopening the DataFile on every
+  // add/remove/setformstacks call — the repeated flash reads were the main
+  // cost of bulk pickups/drops.
+  const _catIdsCache = {};
+  function getCatIds(v) {
+    let ids = _catIdsCache[v];
+    if (!ids) {
+      const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/${v}.DAT`);
+      ids = db.ids;
+      db.close();
+      _catIdsCache[v] = ids;
+    }
+    return ids;
+  }
+
   // Normalizer for skill name matching in syncskills — hoisted so it isn't
   // re-created on every syncskills call.
   const nm = function (s) {
@@ -165,35 +181,56 @@
     }
   };
 
-  // Stock InvFile.add() clips every stack to 999; companion sync allows 9999 (stock ADDITEM UI).
-  const INV_MAX_CNT = 9999;
   const CAPS_FORM_ID = 15;
   if (typeof InvFile !== 'undefined' && !InvFile._companionMaxCntPatched) {
     InvFile._companionMaxCntPatched = !0;
+    // Grows the buffer for multi-condition stacks (stock sizes it for one row
+    // per id) and sorts by idOrder, then by cnd descending within an id, to
+    // match in-game ordering (highest condition first).
     InvFile.prototype.add = function (dat) {
       if (!('id' in dat)) throw new Error('Cannot add item without an ID');
-      const newBuf = new ArrayBuffer(this.buf.byteLength + 8);
-      E.mapInPlace(this.buf, newBuf);
-      this.buf = newBuf;
+      if ((this.count + 1) * 8 > this.buf.byteLength) {
+        const newBuf = new ArrayBuffer(this.buf.byteLength + 8);
+        E.mapInPlace(this.buf, newBuf);
+        this.buf = newBuf;
+      }
+      const newCnd = dat.cnd || 100;
+      let insertAt = this.count;
+      if (this.idOrder) {
+        const ids = new Uint32Array(this.buf),
+          cnds = new Uint8Array(this.buf),
+          targetRank = this.idOrder.indexOf(dat.id);
+        for (let o = 0; o < this.count; o++) {
+          const rank = this.idOrder.indexOf(ids[2 * o]);
+          if (rank > targetRank || (rank === targetRank && cnds[8 * o + 6] < newCnd)) {
+            insertAt = o;
+            break;
+          }
+        }
+      }
+      new Float64Array(this.buf).set(
+        new Float64Array(this.buf, 8 * insertAt),
+        insertAt + 1
+      );
       this.count++;
-      this.set(this.count - 1, {
+      this.set(insertAt, {
         id: dat.id,
-        cnt: E.clip(dat.cnt, 1, INV_MAX_CNT),
-        cnd: dat.cnd || 100,
+        cnt: E.clip(dat.cnt, 1, 9999),
+        cnd: newCnd,
         fl: dat.fl || 0,
       });
-      this._requiresSort = !0;
+      this._requiresSync = !0;
     };
+    // set() (unlike add()) doesn't clip cnt, so a direct inv.set after cnt+=n
+    // (additemhealthpercent's existing-stack branch) could write past 9999.
+    const INV_MAX_CNT = 9999;
     const _invSet = InvFile.prototype.set;
     InvFile.prototype.set = function (i, dat) {
       if (dat && 'cnt' in dat) dat.cnt = E.clip(dat.cnt, 1, INV_MAX_CNT);
       return _invSet.call(this, i, dat);
     };
-    // clearinv() rewrites the .INV files from scratch while an inventory menu may
-    // still hold a now-stale InvFile in its closure. When that menu is later torn
-    // down (changeMenu during full sync) its remove() calls inv.sync(), which
-    // would write the stale pre-clear data back over the freshly synced items.
-    // Flagging the orphaned instance and skipping its sync prevents that clobber.
+    // Skip sync() on InvFile instances clearinv() has invalidated, so a menu
+    // torn down after a clear doesn't write its stale pre-clear data back.
     const _invSync = InvFile.prototype.sync;
     InvFile.prototype.sync = function () {
       if (this._invalidated) return;
@@ -233,13 +270,13 @@
     for (let ci = 0; ci < scanCats.length; ci++) {
       const v = scanCats[ci];
       try {
-        const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/${v}.DAT`),
-          i = db.ids.indexOf(id);
-        if ((db.close(), i < 0)) continue;
+        const dbIds = getCatIds(v),
+          i = dbIds.indexOf(id);
+        if (i < 0) continue;
         const onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === v;
         const inv = onMenu
           ? Pip.inv
-          : new InvFile(`INV/${NV ? 'NV' : 'F3'}/${v}.INV`, { idOrder: db.ids });
+          : new InvFile(`INV/${NV ? 'NV' : 'F3'}/${v}.INV`, { idOrder: dbIds });
         const inx = findInvIdCnd(inv, id, wantCnd);
         if (inx >= 0) {
           let it = inv.get(inx);
@@ -264,13 +301,13 @@
     for (let ci = 0; ci < scanCats.length; ci++) {
       const v = scanCats[ci];
       try {
-        const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/${v}.DAT`),
-          i = db.ids.indexOf(id);
-        if ((db.close(), i < 0)) continue;
+        const dbIds = getCatIds(v),
+          i = dbIds.indexOf(id);
+        if (i < 0) continue;
         const onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === v;
         const inv = onMenu
           ? Pip.inv
-          : new InvFile(`INV/${NV ? 'NV' : 'F3'}/${v}.INV`, { idOrder: db.ids });
+          : new InvFile(`INV/${NV ? 'NV' : 'F3'}/${v}.INV`, { idOrder: dbIds });
         const inx = cnd === undefined ? inv.indexOf(id) : findInvIdCnd(inv, id, cnd);
         if (inx >= 0) {
           let it = inv.get(inx);
@@ -293,13 +330,13 @@
     for (let ci = 0; ci < cats.length; ci++) {
       const v = cats[ci];
       try {
-        const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/${v}.DAT`),
-          i = db.ids.indexOf(id);
-        if ((db.close(), i < 0)) continue;
+        const dbIds = getCatIds(v),
+          i = dbIds.indexOf(id);
+        if (i < 0) continue;
         const onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === v;
         const inv = onMenu
           ? Pip.inv
-          : new InvFile(`INV/${NV ? 'NV' : 'F3'}/${v}.INV`, { idOrder: db.ids });
+          : new InvFile(`INV/${NV ? 'NV' : 'F3'}/${v}.INV`, { idOrder: dbIds });
         const inx = inv.indexOf(id);
         if (inx >= 0) {
           let it = inv.get(inx);
@@ -323,10 +360,8 @@
     for (let ci = 0; ci < cats.length; ci++) {
       const v = cats[ci];
       try {
-        const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/${v}.DAT`);
-        // Cache ids before close so they survive the DataFile being released.
-        const dbIds = db.ids, i = dbIds.indexOf(id);
-        db.close();
+        const dbIds = getCatIds(v),
+          i = dbIds.indexOf(id);
         if (i < 0) continue;
         const onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === v;
         const inv = onMenu
@@ -339,12 +374,6 @@
         (stacks || []).forEach(function (s) {
           if (s && s.cnt > 0) inv.add({ id: id, cnt: s.cnt, cnd: s.cnd || 100 });
         });
-        // Re-sort inline so the rebuilt entry sits in the correct DAT-order position.
-        // inv.add() always appends, so without a sort the item drifts to the bottom.
-        // Sorting here costs nothing extra (dbIds is already in memory, DAT already
-        // closed). For off-menu we also persist the sorted order via sync(), which
-        // sortandrefreshinv never did — keeping the file consistent for future opens.
-        if (inv._requiresSort) inv.sort(dbIds);
         if (onMenu) {
           Pip.emit('scroller', 'count', inv.count);
           if (v === 'MISC' && id === CAPS_FORM_ID && Pip.MODE === 1 && Pip.renderHeader)
@@ -668,16 +697,11 @@
   };
 
   Player.prototype.sortandrefreshinv = function (cats) {
-    var m = NV ? 'NV' : 'F3';
     cats.forEach(function (v) {
       try {
-        var d = new DataFile('DATA/' + m + '/' + v + '.DAT');
-        var i = (typeof Pip !== 'undefined' && Pip.inv && Pip.CURRENT && Pip.CURRENT.id === v) ? Pip.inv : new InvFile('INV/' + m + '/' + v + '.INV', { idOrder: d.ids });
-        if (i._requiresSort) i.sort(d.ids);
         if (typeof Pip !== 'undefined' && Pip.CURRENT && Pip.CURRENT.id === v) {
           Pip.emit('scroller', 'refresh');
         }
-        d.close();
       } catch (e) {}
     });
   };

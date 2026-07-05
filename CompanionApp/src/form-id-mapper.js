@@ -24,14 +24,14 @@ const DATA_DIR = join(__dirname, '..', 'data');
 // null = use the game's mod index as-is (FalloutNV / TribalPack share 0x00).
 const FNV_PIPBOY_PLUGIN_HIGH_BYTE = {
   'falloutnv.esm': null,
-  'tribalpack.esm': null,
-  'mercenarypack.esm': 0x01,
-  'classicpack.esm': 0x02,
-  'caravanpack.esm': 0x03,
-  'deadmoney.esm': 0x04,
-  'honesthearts.esm': 0x05,
-  'oldworldblues.esm': 0x06,
-  'lonesomeroad.esm': 0x07,
+  'tribalpack.esm': 0x01,
+  'mercenarypack.esm': 0x02,
+  'classicpack.esm': 0x03,
+  'caravanpack.esm': 0x04,
+  'deadmoney.esm': 0x05,
+  'honesthearts.esm': 0x06,
+  'oldworldblues.esm': 0x07,
+  'lonesomeroad.esm': 0x08,
   'gunrunnersarsenal.esm': 0x09,
 };
 
