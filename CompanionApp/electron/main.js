@@ -125,6 +125,16 @@ app.on('window-all-closed', async () => {
 
 ipcMain.handle('get-status', () => companion?.getStatus() ?? null);
 
+ipcMain.handle('get-version', () => {
+  try {
+    const pkgPath = path.join(__dirname, '..', 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    return pkg.version || 'unknown';
+  } catch {
+    return 'unknown';
+  }
+});
+
 ipcMain.handle('set-torch-sync', (_event, enabled) => {
   if (!companion) {
     throw new Error('App not ready');

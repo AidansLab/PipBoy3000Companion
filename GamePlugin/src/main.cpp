@@ -65,8 +65,10 @@
 #define PIPBOY_VERBOSE_LOG 1
 #endif
 
-// How often to snapshot player state (in milliseconds)
-#define SNAPSHOT_INTERVAL_MS 250
+// How often to snapshot player state (in milliseconds). Lower = less delay
+// before the game notices e.g. a dropped item, at the cost of more frequent
+// inventory scans.
+#define SNAPSHOT_INTERVAL_MS 100
 
 // How often the pipe thread checks whether the snapshot changed (in
 // milliseconds). Snapshots are only written to the pipe when they differ from
@@ -699,8 +701,7 @@ static int ComputePipRepTier(int fame, int infamy, int goodThr, int badThr,
 }
 
 // Reading reputation costs 13 factions × 5 NVSE script-expression evaluations,
-// far too heavy to repeat on every 250ms snapshot for a value that changes
-// rarely. Re-evaluate at most every FACTION_REFRESH_INTERVAL_MS and reuse the
+// far too heavy to repeat on every snapshot for a value that changes rarely. Re-evaluate at most every FACTION_REFRESH_INTERVAL_MS and reuse the
 // cached results in between; the cache is invalidated on save load / new game
 // so a different character never shows stale rep. Snapshot diffing is
 // unaffected — cached values keep unchanged snapshots byte-identical.

@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('pipboyApi', {
   getStatus: () => ipcRenderer.invoke('get-status'),
+  getVersion: () => ipcRenderer.invoke('get-version'),
   flashFirmware: () => ipcRenderer.invoke('flash-firmware'),
   setTorchSync: (enabled) => ipcRenderer.invoke('set-torch-sync', enabled),
   onLog: (callback) => {

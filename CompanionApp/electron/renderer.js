@@ -5,6 +5,7 @@ const pipStatus = document.getElementById('pipStatus');
 const gameStatus = document.getElementById('gameStatus');
 const modeStatus = document.getElementById('modeStatus');
 const torchSyncToggle = document.getElementById('torchSyncToggle');
+const versionBadge = document.getElementById('versionBadge');
 
 const TORCH_SYNC_PREF_KEY = 'torchSyncEnabled';
 
@@ -123,6 +124,13 @@ torchSyncToggle.addEventListener('change', async () => {
 
 window.pipboyApi.onLog(appendLog);
 window.pipboyApi.onStatus(renderStatus);
+
+// Load and display version
+window.pipboyApi.getVersion().then((version) => {
+  versionBadge.textContent = `v${version}`;
+}).catch(() => {
+  versionBadge.textContent = 'unknown';
+});
 
 // Apply the saved preference on startup, pushing it to the sync engine so the
 // engine's default matches what the UI shows.

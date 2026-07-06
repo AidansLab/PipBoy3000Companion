@@ -1,0 +1,260 @@
+[6:35:54 PM] Sending 8 update(s)...
+[6:35:54 PM] player.setav('wg', 164, !1)
+[6:35:54 PM] player.renderheader(!0);
+[6:35:54 PM] player.removeitemsbulk('WEAPONS',[[1033013,1,100],[150997068,1,60]])
+[6:35:54 PM] player.setav('equippedWeap', 0, !0, !0);player.setav('equippedWeapCnd', 100, !1);player.setav('equippedWeapWhole', 0, !1);player.refreshequip()
+[6:35:54 PM] player.removedam(1033013,100)
+[6:35:54 PM] player.removedam(150997068,60)
+[6:35:54 PM] player.refreshweapondam()
+[6:35:54 PM] player.renderheader(!0);
+[6:35:54 PM] 8 command(s) sent
+[6:35:54 PM] Writing to INV/NV/NV_DAM.INV                      usage: 4818
+[6:35:54 PM] free: 1482
+[6:35:54 PM] Writing to INV/NV/NV_DAM.INV                      usage: 4816
+[6:35:54 PM] free: 1484
+[6:35:54 PM] Form ID 0x00109a0a → 0x109a0a
+[6:35:54 PM] Form ID 0x001735e5 → 0x1735e5
+[6:35:54 PM] Form ID 0x00004328 → 0x4328
+[6:35:54 PM] Form ID 0x00004330 → 0x4330
+[6:35:54 PM] Form ID 0x00004335 → 0x4335
+[6:35:54 PM] Form ID 0x00004335 → 0x4335
+[6:35:54 PM] Form ID 0x000b2943 → 0xb2943
+[6:35:54 PM] Form ID 0x0011e46f → 0x11e46f
+[6:35:54 PM] Form ID 0x0014d2ac → 0x14d2ac
+[6:35:54 PM] Form ID 0x001735d4 → 0x1735d4
+[6:35:54 PM] Form ID 0x001735e3 → 0x1735e3
+[6:35:54 PM] Form ID 0x001735e4 → 0x1735e4
+[6:35:54 PM] Form ID 0x0300bd09 → 0x500bd09
+[6:35:54 PM] Form ID 0x03010589 → 0x5010589
+[6:35:54 PM] Form ID 0x0500bcb5 → 0x600bcb5
+[6:35:54 PM] Form ID 0x00109a0a → 0x109a0a
+[6:35:54 PM] Form ID 0x001735e5 → 0x1735e5
+[6:35:54 PM] Sending 8 update(s)...
+[6:35:54 PM] player.setav('wg', 161, !1)
+[6:35:54 PM] player.renderheader(!0);
+[6:35:54 PM] player.removeitemsbulk('WEAPONS',[[1088010,1,100],[1521125,1,100]])
+[6:35:54 PM] player.setav('equippedWeap', 0, !0, !0);player.setav('equippedWeapCnd', 100, !1);player.setav('equippedWeapWhole', 0, !1);player.refreshequip()
+[6:35:54 PM] player.removedam(1088010,100)
+[6:35:54 PM] player.removedam(1521125,100)
+[6:35:54 PM] player.refreshweapondam()
+[6:35:54 PM] player.renderheader(!0);
+[6:35:54 PM] 8 command(s) sent
+[6:35:55 PM] Form ID 0x0300bd09 → 0x500bd09
+[6:35:55 PM] Form ID 0x03010589 → 0x5010589
+[6:35:55 PM] Form ID 0x00004328 → 0x4328
+[6:35:55 PM] Form ID 0x00004330 → 0x4330
+[6:35:55 PM] Form ID 0x00004335 → 0x4335
+[6:35:55 PM] Form ID 0x00004335 → 0x4335
+[6:35:55 PM] Form ID 0x000b2943 → 0xb2943
+[6:35:55 PM] Form ID 0x0011e46f → 0x11e46f
+[6:35:55 PM] Form ID 0x0014d2ac → 0x14d2ac
+[6:35:55 PM] Form ID 0x001735d4 → 0x1735d4
+[6:35:55 PM] Form ID 0x001735e3 → 0x1735e3
+[6:35:55 PM] Form ID 0x001735e4 → 0x1735e4
+[6:35:55 PM] Form ID 0x0500bcb5 → 0x600bcb5
+[6:35:55 PM] Form ID 0x0300bd09 → 0x500bd09
+[6:35:55 PM] Form ID 0x03010589 → 0x5010589
+[6:35:55 PM] Sending 9 update(s)...
+[6:35:55 PM] player.setav('wg', 158, !1)
+[6:35:55 PM] player.renderheader(!0);
+[6:35:55 PM] player.removeitemsbulk('WEAPONS',[[17190,1,100],[83934473,1,100],[83953033,1,100]])
+[6:35:55 PM] player.setav('equippedWeap', 0, !0, !0);player.setav('equippedWeapCnd', 100, !1);player.setav('equippedWeapWhole', 0, !1);player.refreshequip()
+[6:35:55 PM] player.removedam(17190,100)
+[6:35:55 PM] player.removedam(83934473,100)
+[6:35:55 PM] player.removedam(83953033,100)
+[6:35:55 PM] player.refreshweapondam()
+[6:35:55 PM] player.renderheader(!0);
+[6:35:55 PM] 9 command(s) sent
+[6:35:55 PM] Writing to INV/NV/NV_DAM.INV                      usage: 4979
+[6:35:55 PM] free: 1321
+[6:35:55 PM] Writing to INV/NV/NV_DAM.INV                      usage: 4977
+[6:35:55 PM] free: 1323
+[6:35:55 PM] Writing to INV/NV/NV_DAM.INV                      us
+[6:35:55 PM] age: 5130  free: 1170
+[6:35:55 PM] Writing to INV/NV/NV_DAM.INV                      usage: 4562
+[6:35:55 PM] free: 1738
+[6:35:55 PM] Writing to INV/NV/NV_DAM.INV                      usage: 4560
+[6:35:55 PM] free: 1740
+[6:35:56 PM] Form ID 0x00004330 → 0x4330
+[6:35:56 PM] Form ID 0x00004328 → 0x4328
+[6:35:56 PM] Form ID 0x00004335 → 0x4335
+[6:35:56 PM] Form ID 0x00004335 → 0x4335
+[6:35:56 PM] Form ID 0x000b2943 → 0xb2943
+[6:35:56 PM] Form ID 0x0011e46f → 0x11e46f
+[6:35:56 PM] Form ID 0x0014d2ac → 0x14d2ac
+[6:35:56 PM] Form ID 0x001735d4 → 0x1735d4
+[6:35:56 PM] Form ID 0x001735e3 → 0x1735e3
+[6:35:56 PM] Form ID 0x001735e4 → 0x1735e4
+[6:35:56 PM] Form ID 0x0500bcb5 → 0x600bcb5
+[6:35:56 PM] Form ID 0x00004330 → 0x4330
+[6:35:56 PM] Sending 7 update(s)...
+[6:35:56 PM] player.setav('wg', 134, !1)
+[6:35:56 PM] player.renderheader(!0);
+[6:35:56 PM] player.removeitemsbulk('WEAPONS',[[17200,48,100]])
+[6:35:56 PM] player.setav('equippedWeap', 0, !0, !0);player.setav('equippedWeapCnd', 100, !1);player.setav('equippedWeapWhole', 0, !1);player.refreshequip()
+[6:35:56 PM] player.removedam(17200,100)
+[6:35:56 PM] player.refreshweapondam()
+[6:35:56 PM] player.renderheader(!0);
+[6:35:56 PM] 7 command(s) sent
+[6:35:56 PM] Form ID 0x00004335 → 0x4335
+[6:35:56 PM] Form ID 0x00004335 → 0x4335
+[6:35:56 PM] Form ID 0x00004328 → 0x4328
+[6:35:56 PM] Form ID 0x00004335 → 0x4335
+[6:35:56 PM] Form ID 0x000b2943 → 0xb2943
+[6:35:56 PM] Form ID 0x0011e46f → 0x11e46f
+[6:35:56 PM] Form ID 0x0014d2ac → 0x14d2ac
+[6:35:56 PM] Form ID 0x001735d4 → 0x1735d4
+[6:35:56 PM] Form ID 0x001735e3 → 0x1735e3
+[6:35:56 PM] Form ID 0x001735e4 → 0x1735e4
+[6:35:56 PM] Form ID 0x0500bcb5 → 0x600bcb5
+[6:35:56 PM] Form ID 0x00004335 → 0x4335
+[6:35:56 PM] Sending 7 update(s)...
+[6:35:56 PM] player.setav('wg', 131, !1)
+[6:35:56 PM] player.renderheader(!0);
+[6:35:56 PM] player.setformstacks(17205,[{cnt:2,cnd:100}])
+[6:35:56 PM] player.setav('equippedWeap', 0, !0, !0);player.setav('equippedWeapCnd', 100, !1);player.setav('equippedWeapWhole', 0, !1);player.refreshequip()
+[6:35:56 PM] player.removedam(17205,30)
+[6:35:56 PM] player.refreshweapondam()
+[6:35:56 PM] player.renderheader(!0);
+[6:35:56 PM] 7 command(s) sent
+[6:35:57 PM] Writing to INV/NV/NV_DAM.INV                      usage: 4564
+[6:35:57 PM] free: 1736
+[6:35:57 PM] Form ID 0x00004335 → 0x4335
+[6:35:57 PM] Form ID 0x00004328 → 0x4328
+[6:35:57 PM] Form ID 0x00004335 → 0x4335
+[6:35:57 PM] Form ID 0x000b2943 → 0xb2943
+[6:35:57 PM] Form ID 0x0011e46f → 0x11e46f
+[6:35:57 PM] Form ID 0x0014d2ac → 0x14d2ac
+[6:35:57 PM] Form ID 0x001735d4 → 0x1735d4
+[6:35:57 PM] Form ID 0x001735e3 → 0x1735e3
+[6:35:57 PM] Form ID 0x001735e4 → 0x1735e4
+[6:35:57 PM] Form ID 0x0500bcb5 → 0x600bcb5
+[6:35:57 PM] Sending 5 update(s)...
+[6:35:57 PM] player.setav('wg', 128, !1)
+[6:35:57 PM] player.renderheader(!0);
+[6:35:57 PM] player.removeitemsbulk('WEAPONS',[[17205,1,100]])
+[6:35:57 PM] player.setav('equippedWeap', 0, !0, !0);player.setav('equippedWeapCnd', 100, !1);player.setav('equippedWeapWhole', 0, !1);player.refreshequip()
+[6:35:57 PM] player.renderheader(!0);
+[6:35:57 PM] 5 command(s) sent
+[6:35:57 PM] Writing to INV/NV/NV_DA
+[6:35:57 PM] M.INV                      usage: 4590  free: 1710
+[6:35:57 PM] Form ID 0x00004335 → 0x4335
+[6:35:57 PM] Form ID 0x001735e4 → 0x1735e4
+[6:35:57 PM] Form ID 0x00004328 → 0x4328
+[6:35:57 PM] Form ID 0x000b2943 → 0xb2943
+[6:35:57 PM] Form ID 0x0011e46f → 0x11e46f
+[6:35:57 PM] Form ID 0x0014d2ac → 0x14d2ac
+[6:35:57 PM] Form ID 0x001735d4 → 0x1735d4
+[6:35:57 PM] Form ID 0x001735e3 → 0x1735e3
+[6:35:57 PM] Form ID 0x0500bcb5 → 0x600bcb5
+[6:35:57 PM] Form ID 0x00004335 → 0x4335
+[6:35:57 PM] Form ID 0x001735e4 → 0x1735e4
+[6:35:57 PM] Sending 9 update(s)...
+[6:35:57 PM] player.setav('wg', 118, !1)
+[6:35:57 PM] player.renderheader(!0);
+[6:35:57 PM] player.removeitemsbulk('WEAPONS',[[17205,1,100],[17222,1,100],[1521124,1,100]])
+[6:35:57 PM] player.setav('equippedWeap', 0, !0, !0);player.setav('equippedWeapCnd', 100, !1);player.setav('equippedWeapWhole', 0, !1);player.refreshequip()
+[6:35:57 PM] player.removedam(17205,100)
+[6:35:57 PM] player.removedam(17222,100)
+[6:35:57 PM] player.removedam(1521124,100)
+[6:35:57 PM] player.refreshweapondam()
+[6:35:57 PM] player.renderheader(!0);
+[6:35:57 PM] 9 command(s) sent
+[6:35:58 PM] Form ID 0x000b2943 → 0xb2943
+[6:35:58 PM] Form ID 0x00004328 → 0x4328
+[6:35:58 PM] Form ID 0x0011e46f → 0x11e46f
+[6:35:58 PM] Form ID 0x0014d2ac → 0x14d2ac
+[6:35:58 PM] Form ID 0x001735d4 → 0x1735d4
+[6:35:58 PM] Form ID 0x001735e3 → 0x1735e3
+[6:35:58 PM] Form ID 0x0500bcb5 → 0x600bcb5
+[6:35:58 PM] Form ID 0x000b2943 → 0xb2943
+[6:35:58 PM] Sending 8 update(s)...
+[6:35:59 PM] player.setav('wg', 108, !1)
+[6:35:59 PM] player.renderheader(!0);
+[6:35:59 PM] player.removeitemsbulk('WEAPONS',[[731459,1,100],[268438238,1,100]])
+[6:35:59 PM] player.setav('equippedWeap', 0, !0, !0);player.setav('equippedWeapCnd', 100, !1);player.setav('equippedWeapWhole', 0, !1);player.refreshequip()
+[6:35:59 PM] player.removedam(731459,100)
+[6:35:59 PM] player.removedam(268438238,100)
+[6:35:59 PM] player.refreshweapondam()
+[6:35:59 PM] player.renderheader(!0);
+[6:35:59 PM] 8 command(s) sent
+[6:35:59 PM] Form ID 0x0011e46f → 0x11e46f
+[6:35:59 PM] Form ID 0x001735e3 → 0x1735e3
+[6:35:59 PM] Form ID 0x00004328 → 0x4328
+[6:35:59 PM] Form ID 0x0014d2ac → 0x14d2ac
+[6:35:59 PM] Form ID 0x001735d4 → 0x1735d4
+[6:35:59 PM] Form ID 0x0500bcb5 → 0x600bcb5
+[6:35:59 PM] Form ID 0x0011e46f → 0x11e46f
+[6:35:59 PM] Form ID 0x001735e3 → 0x1735e3
+[6:35:59 PM] Sending 8 update(s)...
+[6:35:59 PM] Writing to INV/NV/NV_DAM.INV                      usage: 4553
+[6:35:59 PM] free: 1747
+[6:35:59 PM] Writing to INV/NV/NV_DAM.INV                      usage: 4551
+[6:35:59 PM] free: 1749
+[6:35:59 PM] Writing to INV/NV/NV_DAM.INV                      usage: 4549
+[6:35:59 PM] free: 1751
+[6:35:59 PM] player.setav('wg', 102, !1)
+[6:35:59 PM] player.renderheader(!0);
+[6:35:59 PM] player.removeitemsbulk('WEAPONS',[[1172591,1,100],[1521123,1,100]])
+[6:35:59 PM] player.setav('equippedWeap', 0, !0, !0);player.setav('equippedWeapCnd', 100, !1);player.setav('equippedWeapWhole', 0, !1);player.refreshequip()
+[6:35:59 PM] player.removedam(1172591,100)
+[6:35:59 PM] player.removedam(1521123,100)
+[6:35:59 PM] player.refreshweapondam()
+[6:35:59 PM] player.renderheader(!0);
+[6:35:59 PM] 8 command(s) sent
+[6:35:59 PM] Form ID 0x0014d2ac → 0x14d2ac
+[6:35:59 PM] Form ID 0x00004328 → 0x4328
+[6:35:59 PM] Form ID 0x001735d4 → 0x1735d4
+[6:35:59 PM] Form ID 0x0500bcb5 → 0x600bcb5
+[6:35:59 PM] Form ID 0x0014d2ac → 0x14d2ac
+[6:35:59 PM] Sending 7 update(s)...
+[6:35:59 PM] Writing to INV/NV/NV_DAM.INV                      usage: 4576
+[6:35:59 PM] free: 1724
+[6:35:59 PM] player.setav('wg', 97, !1)
+[6:35:59 PM] player.renderheader(!0);
+[6:35:59 PM] player.removeitemsbulk('WEAPONS',[[1364652,10,100]])
+[6:35:59 PM] player.setav('equippedWeap', 0, !0, !0);player.setav('equippedWeapCnd', 100, !1);player.setav('equippedWeapWhole', 0, !1);player.refreshequip()
+[6:35:59 PM] player.removedam(1364652,100)
+[6:35:59 PM] player.refreshweapondam()
+[6:35:59 PM] player.renderheader(!0);
+[6:35:59 PM] 7 command(s) sent
+[6:35:59 PM] Writing to INV/NV/NV_DAM.INV                      usage: 4574
+[6:35:59 PM] free: 1726
+[6:35:59 PM] Form ID 0x00004328 → 0x4328
+[6:35:59 PM] Form ID 0x0500bcb5 → 0x600bcb5
+[6:35:59 PM] Form ID 0x001735d4 → 0x1735d4
+[6:35:59 PM] Form ID 0x00004328 → 0x4328
+[6:35:59 PM] Form ID 0x0500bcb5 → 0x600bcb5
+[6:35:59 PM] Sending 8 update(s)...
+[6:36:00 PM] player.setav('wg', 91, !1)
+[6:36:00 PM] player.renderheader(!0);
+[6:36:00 PM] player.removeitemsbulk('WEAPONS',[[17192,1,100],[100711605,1,100]])
+[6:36:00 PM] player.setav('equippedWeap', 0, !0, !0);player.setav('equippedWeapCnd', 100, !1);player.setav('equippedWeapWhole', 0, !1);player.refreshequip()
+[6:36:00 PM] player.removedam(17192,100)
+[6:36:00 PM] player.removedam(100711605,100)
+[6:36:00 PM] player.refreshweapondam()
+[6:36:00 PM] player.renderheader(!0);
+[6:36:00 PM] 8 command(s) sent
+[6:36:00 PM] Writing to INV/NV/NV_DAM.INV                      usage: 4602
+[6:36:00 PM] free: 1698
+[6:36:00 PM] Writing to INV/NV/NV_DAM.INV                      usage: 4600
+[6:36:00 PM] free: 1700
+[6:36:00 PM] Writing to INV/NV/NV_DAM.INV                      usage: 4628
+[6:36:00 PM] free: 1672
+[6:36:00 PM] Form ID 0x001735d4 → 0x1735d4
+[6:36:00 PM] Form ID 0x001735d4 → 0x1735d4
+[6:36:00 PM] Sending 7 update(s)...
+[6:36:00 PM] player.setav('wg', 88, !1)
+[6:36:00 PM] player.renderheader(!0);
+[6:36:00 PM] player.removeitemsbulk('WEAPONS',[[1521108,1,97]])
+[6:36:00 PM] player.setav('equippedWeap', 0, !0, !0);player.setav('equippedWeapCnd', 100, !1);player.setav('equippedWeapWhole', 0, !1);player.refreshequip()
+[6:36:00 PM] player.removedam(1521108,97)
+[6:36:00 PM] player.refreshweapondam()
+[6:36:00 PM] player.renderheader(!0);
+[6:36:00 PM] 7 command(s) sent
+[6:36:00 PM] Writing to INV/NV/NV_DAM.INV                      usage: 4656
+[6:36:00 PM] free: 1644
+[6:36:00 PM] Writing to INV/NV/NV_DAM.INV                      usage: 4654
+[6:36:00 PM] free: 1646
+[6:36:00 PM] Writing to INV/NV/NV_DAM.INV                      usage: 4682
+[6:36:00 PM] free: 1618

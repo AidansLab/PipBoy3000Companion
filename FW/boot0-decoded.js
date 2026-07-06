@@ -181,6 +181,30 @@
     }
   };
 
+  // Stock getId() does two full ids.indexOf() scans (existence check, then
+  // seek offset) per call, plus a flash seek+read+JSON.parse. Menu scrollers
+  // call it synchronously for every row that scrolls into view for the first
+  // time, so on a DAT with hundreds of entries this was a visible stutter.
+  // A first attempt at fixing this cached a full id->index map per DataFile
+  // instance — that OOM-crashed a live device on WEAPONS.DAT (hundreds of
+  // entries, and the device has very little free heap to begin with). Do the
+  // safe version instead: one indexOf() scan reused for both the existence
+  // check and the seek offset, with no extra persistent allocation at all.
+  if (typeof DataFile !== 'undefined' && !DataFile.prototype._companionIdIndexPatched) {
+    DataFile.prototype._companionIdIndexPatched = !0;
+    DataFile.prototype.getId = function (id) {
+      const idx = this.ids.indexOf(id);
+      if (idx < 0) return { txt: '== MISSING ==' };
+      this.file.seek(this.end + idx * this.len);
+      const raw = this.file.read(this.len);
+      try {
+        return JSON.parse(raw);
+      } catch (e) {
+        return (debug('failed to parse data', e, raw), { txt: '== ERROR ==', desc: e });
+      }
+    };
+  }
+
   const CAPS_FORM_ID = 15;
   if (typeof InvFile !== 'undefined' && !InvFile._companionMaxCntPatched) {
     InvFile._companionMaxCntPatched = !0;
@@ -326,6 +350,74 @@
     return !1;
   };
 
+  // Batched forms of additemhealthpercent/removeitem: apply every (id,cnt,cnd)
+  // entry against one already-open InvFile and flash-write once at the end,
+  // instead of once per entry. The companion always knows the category for a
+  // batch (it grouped the entries by it), so unlike the single-item versions
+  // there is no all-category fallback scan here. Used for full syncs and
+  // multi-item pickups/drops, where N individual writes to the same category
+  // file were the dominant cost of a sync.
+  Player.prototype.additemsbulk = function (cat, entries) {
+    if (!entries || !entries.length) return;
+    try {
+      const dbIds = getCatIds(cat),
+        onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === cat,
+        inv = onMenu
+          ? Pip.inv
+          : new InvFile(`INV/${NV ? 'NV' : 'F3'}/${cat}.INV`, { idOrder: dbIds });
+      let capsChanged = !1;
+      for (let n = 0; n < entries.length; n++) {
+        const e = entries[n],
+          id = e[0],
+          cnt = e[1];
+        if (cnt <= 0 || dbIds.indexOf(id) < 0) continue;
+        const wantCnd = e[2] || 100,
+          inx = findInvIdCnd(inv, id, wantCnd);
+        if (inx >= 0) {
+          let it = inv.get(inx);
+          ((it.cnt += cnt), inv.set(inx, it));
+        } else inv.add({ id: id, cnt: cnt, cnd: wantCnd });
+        if (id === CAPS_FORM_ID) capsChanged = !0;
+      }
+      if (onMenu) {
+        Pip.emit('scroller', 'refresh');
+        if (capsChanged && cat === 'MISC' && Pip.MODE === 1 && Pip.renderHeader)
+          Pip.renderHeader();
+      } else inv.sync();
+    } catch (e) {}
+  };
+
+  Player.prototype.removeitemsbulk = function (cat, entries) {
+    if (!entries || !entries.length) return;
+    try {
+      const dbIds = getCatIds(cat),
+        onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === cat,
+        inv = onMenu
+          ? Pip.inv
+          : new InvFile(`INV/${NV ? 'NV' : 'F3'}/${cat}.INV`, { idOrder: dbIds });
+      let capsChanged = !1;
+      for (let n = 0; n < entries.length; n++) {
+        const e = entries[n],
+          id = e[0],
+          qty = e[1],
+          cnd = e[2];
+        if (qty <= 0 || dbIds.indexOf(id) < 0) continue;
+        const inx = cnd === undefined ? inv.indexOf(id) : findInvIdCnd(inv, id, cnd);
+        if (inx < 0) continue;
+        let it = inv.get(inx);
+        it.cnt -= qty;
+        if (it.cnt > 0) inv.set(inx, it);
+        else inv.remove(inx);
+        if (id === CAPS_FORM_ID) capsChanged = !0;
+      }
+      if (onMenu) {
+        Pip.emit('scroller', 'refresh');
+        if (capsChanged && cat === 'MISC' && Pip.MODE === 1 && Pip.renderHeader)
+          Pip.renderHeader();
+      } else inv.sync();
+    } catch (e) {}
+  };
+
   Player.prototype.setitemcondition = function (id, cnd) {
     for (let ci = 0; ci < cats.length; ci++) {
       const v = cats[ci];
@@ -388,20 +480,7 @@
   // ── Weapon DAM (display damage) sync ──────────────────────────────────────
   // The companion computes the game's dynamic weapon damage (base × skill ×
   // condition) and mirrors it here one (formId, condition) entry at a time, in a
-  // side InvFile keyed exactly like the inventory stacks. The damage value is
-  // stored in the entry's `cnt` field. WEAPONS.JS looks it up by (id, cnd) on
-  // render and shows it instead of the static DAT damage.
-  //
-  // _damCache mirrors the InvFile in memory so that WEAPONS.JS's loadDamMap()
-  // never needs to reopen the file on a damrefresh. setdam/removedam/cleardam
-  // keep it in sync after every flash write. null means "not yet populated"
-  // (WEAPONS.JS falls through to a one-time file read on first load).
-  //
-  // Must be on `global`, not `var`, so that WEAPONS.JS (which runs outside this
-  // IIFE) can read and write the same reference. A `var` here would be scoped to
-  // the IIFE closure, making it invisible to WEAPONS.JS and causing loadDamMap to
-  // always fall back to a flash read — and worse, to create a shadowing global
-  // that setdam/removedam/cleardam never update.
+  // side InvFile keyed exactly like the inventory stacks.
   global._damCache = null;
 
   function damInvFile() {
@@ -410,10 +489,7 @@
   }
 
   // Apply one (id, cnd, dam) entry to an already-open DAM InvFile and mirror
-  // the single affected key into _damCache. Updating in place (instead of
-  // re-snapshotting the whole file after every write) keeps a batch of M
-  // updates O(M) instead of O(M×N). A null cache stays null — WEAPONS.JS
-  // does its one-time file read on first load and populates it then.
+  // the single affected key into _damCache.
   function _applyDamEntry(inv, id, cnd, dam) {
     var wantCnd = cnd || 100,
       inx = findInvIdCnd(inv, id, wantCnd);
@@ -462,6 +538,25 @@
     } catch (e) {}
   };
 
+  // Batch form: entries is [[id, cnd], ...]. One file open and one flash
+  // write for the whole batch instead of one per removed weapon stack.
+  Player.prototype.removedams = function (entries) {
+    try {
+      var inv = damInvFile();
+      for (var i = 0; i < entries.length; i++) {
+        var e = entries[i];
+        if (!e) continue;
+        var wantCnd = e[1] || 100,
+          inx = findInvIdCnd(inv, e[0], wantCnd);
+        if (inx >= 0) {
+          inv.remove(inx);
+          if (_damCache) delete _damCache[e[0] + ':' + wantCnd];
+        }
+      }
+      inv.sync();
+    } catch (e) {}
+  };
+
   Player.prototype.cleardam = function () {
     try {
       var m = NV ? 'NV' : 'F3';
@@ -478,13 +573,6 @@
     }
   };
 
-  // sapling 1.1.4 moved perks from JSON (SETTINGS/{m}_PERKS.JSON) to an
-  // InvFile (INV/{m}/PERKS.INV, cnt = rank) — same shape as the item
-  // categories above. Stock Player.prototype.addperk/removeperk (FW-decoded.js)
-  // still write the old JSON, which PERKS.JS no longer reads, so these fully
-  // replace them rather than wrapping them. Pattern mirrors
-  // additemhealthpercent/removeitem: patch the open PERKS menu's live InvFile
-  // (exposed as Pip.inv by PERKS-decoded.js) when present, else open+sync.
   Player.prototype.addperk = function (id, rank) {
     if ('number' != typeof id) throw new Error('perk should be a number');
     try {
@@ -536,6 +624,104 @@
         if (onMenu) Pip.emit('scroller', 'refresh');
         else inv.sync();
       }
+    } catch (e) {}
+  };
+
+  // Batched forms of addperk/removeperk: open PERKS.DAT and PERKS.INV once for
+  // the whole list instead of once per perk.
+  Player.prototype.addperksbulk = function (ids) {
+    if (!ids || !ids.length) return;
+    try {
+      const m = NV ? 'NV' : 'F3',
+        db = new DataFile(`DATA/${m}/PERKS.DAT`),
+        dbIds = db.ids;
+      db.close();
+      const onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === 'PERKS',
+        inv = onMenu
+          ? Pip.inv
+          : new InvFile(`INV/${m}/PERKS.INV`, { idOrder: dbIds });
+      let added = 0;
+      for (let n = 0; n < ids.length; n++) {
+        const id = ids[n];
+        if (dbIds.indexOf(id) < 0) continue;
+        const inx = inv.indexOf(id);
+        if (inx >= 0) {
+          let it = inv.get(inx);
+          it.cnt = 1;
+          inv.set(inx, it);
+        } else inv.add({ id: id, cnt: 1, cnd: 100, fl: 0 });
+        added++;
+      }
+      debug(`Added ${added} perk(s)`);
+      if (onMenu) Pip.emit('scroller', 'refresh');
+      else inv.sync();
+    } catch (e) {}
+  };
+
+  Player.prototype.removeperksbulk = function (ids) {
+    if (!ids || !ids.length) return;
+    try {
+      const m = NV ? 'NV' : 'F3',
+        db = new DataFile(`DATA/${m}/PERKS.DAT`),
+        dbIds = db.ids;
+      db.close();
+      const onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === 'PERKS',
+        inv = onMenu
+          ? Pip.inv
+          : new InvFile(`INV/${m}/PERKS.INV`, { idOrder: dbIds });
+      let changed = !1;
+      for (let n = 0; n < ids.length; n++) {
+        const id = ids[n];
+        if (dbIds.indexOf(id) < 0) continue;
+        const inx = inv.indexOf(id);
+        if (inx >= 0) {
+          (inv.remove(inx), (changed = !0));
+        }
+      }
+      if (changed) {
+        if (onMenu) Pip.emit('scroller', 'refresh');
+        else inv.sync();
+      }
+    } catch (e) {}
+  };
+
+  // Full-sync perk reconciliation: ids is the complete desired perk set.
+  // Replaces the old clearperks()+addperksbulk() pair, which truncated
+  // PERKS.INV to empty and rewrote it at full size on every single full sync
+  // (reconnect, save load) even when the perk list hadn't changed at all.
+  // Reconciling in place only touches rows that actually differ, and inv.sync()
+  // is a no-op if nothing changed — both cut how often, and how much, this
+  // file's on-flash size changes.
+  Player.prototype.setperksbulk = function (ids) {
+    try {
+      const m = NV ? 'NV' : 'F3',
+        db = new DataFile(`DATA/${m}/PERKS.DAT`),
+        dbIds = db.ids;
+      db.close();
+      const want = {};
+      for (let n = 0; n < ids.length; n++) {
+        if (dbIds.indexOf(ids[n]) >= 0) want[ids[n]] = !0;
+      }
+      const onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === 'PERKS',
+        inv = onMenu
+          ? Pip.inv
+          : new InvFile(`INV/${m}/PERKS.INV`, { idOrder: dbIds });
+      let removed = 0;
+      for (let n = inv.count - 1; n >= 0; n--) {
+        const it = inv.get(n);
+        if (!it || !want[it.id]) {
+          inv.remove(n);
+          removed++;
+        } else delete want[it.id];
+      }
+      let added = 0;
+      for (const id in want) {
+        inv.add({ id: Number(id), cnt: 1, cnd: 100, fl: 0 });
+        added++;
+      }
+      debug(`Reconciled perks: +${added} -${removed}`);
+      if (onMenu) Pip.emit('scroller', 'refresh');
+      else inv.sync();
     } catch (e) {}
   };
 
@@ -661,17 +847,6 @@
         fs.writeFileSync('INV/' + m + '/' + v + '.INV', '');
       } catch (e) {}
     });
-  };
-
-  Player.prototype.clearperks = function () {
-    if (typeof Pip !== 'undefined' && Pip.inv && Pip.CURRENT && Pip.CURRENT.id === 'PERKS') {
-      Pip.inv._invalidated = !0;
-      delete Pip.inv;
-    }
-    var fs = require('fs'), m = NV ? 'NV' : 'F3';
-    try {
-      fs.writeFileSync('INV/' + m + '/PERKS.INV', '');
-    } catch (e) {}
   };
 
   Player.prototype.equipapparel = function (ids, cnds) {

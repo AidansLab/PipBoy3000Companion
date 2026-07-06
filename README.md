@@ -43,6 +43,11 @@ Sync your **Fallout: New Vegas** and **Fallout 3** player stats and inventory to
 - Make sure your Pip-Boy is set to the same mode as the game you want to sync with by going to DATA>Settings>Pip-Boy mode and selecting New Vegas or Fallout 3.
 - Launch your game via your mod manager, nvse_loader.exe, or fose_loader.exe.
 
+## Known Issues
+- Equip/unequip sounds on Pip-Boy can sometimes be delayed slightly
+- Dropping or picking up many items at once (20+) can cause the Pip-Boy to freeze for about 2-3 seconds after the last item is picked up/dropped.
+- The Pip-Boy can sometimes take an extra 1-2 seconds to finish syncing after the app has sent all data, so please make sure the Pip-Boy screen has flashed before using it.
+
 ## Building From Source
 
 ### Prerequisites

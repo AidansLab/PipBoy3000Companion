@@ -17,8 +17,8 @@ import { EventEmitter } from 'events';
 const SYNC_FLUSH_INTERVAL_MS = 10000; // How often to call player.sync() on device
 const MAX_INVENTORY_DELTA = 50;       // If more than this many items change, do a full reset
 // Coalesce rapid game snapshots; leading edge still processes the first change immediately.
-// 500ms is a good balance — 250ms matches the game poll and can queue serial work faster.
-const SYNC_DEBOUNCE_MS = 500;
+// Matches the game plugin's SNAPSHOT_INTERVAL_MS so a second change lands right after that poll.
+const SYNC_DEBOUNCE_MS = 150;
 
 // player.setav markers for S.P.E.C.I.A.L. — refreshed softly on the SPECIAL tab.
 const SPECIAL_SETAV_MARKERS = [
@@ -66,8 +66,11 @@ const CLEAR_DAM_CMD = 'player.cleardam()';
 // serial bridge packs lines into 512-byte chunks — 24 keeps a full command
 // safely inside one chunk so it never floods the device's USB RX buffer.
 const MAX_DAM_BATCH = 24;
+// Same rationale as MAX_DAM_BATCH, for player.additemsbulk()/removeitemsbulk()
+// batches: N items changing in the same category cost the device one flash
+// write per batch instead of one per item.
+const MAX_ITEM_BATCH = 24;
 const REFRESH_WEAPON_DAM_CMD = 'player.refreshweapondam()';
-const CLEAR_PERKS_CMD = 'player.clearperks()';
 /** Refresh open WEAPONS/APPAREL scroller after remote equip; safe if .boot0 not loaded */
 const REFRESH_EQUIP_CMD = 'player.refreshequip()';
 
@@ -620,22 +623,21 @@ export class SyncEngine extends EventEmitter {
         if (skillCmd) commands.push(skillCmd);
       }
 
-      // Add all inventory items
+      // Add all inventory items, grouped per category into additemsbulk()
+      // batches so the device flash-writes each category file once instead of
+      // once per item (a full sync can add dozens of items).
       const inventory = snapshot.inventory || [];
+      const addBatches = new Map(); // cat -> [formId,count,cnd][]
       for (const item of inventory) {
         const formId = this._resolveFormId(item.formId);
         if (formId === null) continue;
         const cat = this._toPipBoyCategory(item.type);
-
-        if (this._itemHasDegradedCondition(item)) {
-          commands.push(
-            this._buildAddItemHealthPercentCommand(formId, item.count || 1, item.condition, cat)
-          );
-        } else {
-          commands.push(
-            this._buildAddItemCommand(formId, item.count || 1, cat)
-          );
-        }
+        if (!cat) continue;
+        const list = addBatches.get(cat) || addBatches.set(cat, []).get(cat);
+        list.push(this._toItemEntry(formId, item.count || 1, item.condition));
+      }
+      for (const [cat, entries] of addBatches) {
+        commands.push(...this._buildAddItemsBulkCommands(cat, entries));
       }
 
       // Reset and repopulate weapon DAM (skill/condition-adjusted display damage).
@@ -652,25 +654,32 @@ export class SyncEngine extends EventEmitter {
       // commands.push('player.calculateInvWeight()');
 
       // Equipped items — after inventory is populated
-      commands.push(...this._diffEquipped(player, {}));
+      commands.push(...this._diffEquipped(player, {}, true));
     }
 
     // Action Points — always sync on full sync
     commands.push(...this._diffAP(player, {}));
 
     // Weapon ammo — ephemeral UI state for AMMO tab dimming/selection
-    commands.push(...this._diffWeaponAmmo(player, {}));
+    commands.push(...this._diffWeaponAmmo(player, {}, true));
 
     if (!this._inventorySyncPaused) {
-      // Add all perks (clear existing first)
-      commands.push(CLEAR_PERKS_CMD);
+      // Reconcile PERKS.INV to exactly this set in one pass (setperksbulk),
+      // instead of clearing it to empty and rebuilding it from scratch. A
+      // clear+rebuild rewrites the file at a different size on every full
+      // sync even when the perk list hasn't changed at all — three separate
+      // device crashes were traced to a PERKS.INV write during exactly this
+      // clear-then-regrow sequence, so this now only touches rows that
+      // actually changed (and skips the flash write entirely if nothing did).
       const perks = snapshot.perks || [];
+      const perkFormIds = [];
       for (const perk of perks) {
         const formIdStr = typeof perk === 'string' ? perk : perk.formId;
         const formId = this._toFormIdInt(formIdStr);
         if (formId === null) continue;
-        commands.push(this._buildSafeAddPerk(formId));
+        perkFormIds.push(formId);
       }
+      commands.push(this._buildSetPerksBulkCommand(perkFormIds));
     }
 
     // Faction reputation — always sync (not gated on inventory pause)
@@ -870,6 +879,40 @@ export class SyncEngine extends EventEmitter {
     const addedIds = [...currentMap.keys()].filter(id => !previousMap.has(id));
     const removedIds = [...previousMap.keys()].filter(id => !currentMap.has(id));
 
+    // Adds/removes are grouped per category and flushed as additemsbulk/
+    // removeitemsbulk commands at the end, so N items changing in the same
+    // category cost the device one flash write instead of N (flash writes are
+    // by far the slowest device operation — this is what made full syncs and
+    // multi-item pickups visibly lag behind the commands being sent).
+    const addBatches = new Map(); // cat -> [formId,count,cnd][]
+    const removeBatches = new Map(); // cat -> [formId,qty,cnd|undefined][]
+    const queueAdd = (cat, formId, count, condition) => {
+      // No Pip-Boy category (e.g. books/keys) — the device has no file to add
+      // this to under any category, so there is nothing useful to send.
+      if (!cat) return;
+      const list = addBatches.get(cat) || addBatches.set(cat, []).get(cat);
+      list.push(this._toItemEntry(formId, count, condition));
+    };
+    const queueRemove = (cat, formId, qty, condition) => {
+      if (!cat) return;
+      const list = removeBatches.get(cat) || removeBatches.set(cat, []).get(cat);
+      list.push([
+        formId,
+        qty,
+        condition === undefined || condition === null
+          ? undefined
+          : this._normalizeItemCondition(condition),
+      ]);
+    };
+    const flushBatches = () => {
+      for (const [cat, entries] of addBatches) {
+        commands.push(...this._buildAddItemsBulkCommands(cat, entries));
+      }
+      for (const [cat, entries] of removeBatches) {
+        commands.push(...this._buildRemoveItemsBulkCommands(cat, entries));
+      }
+    };
+
     if (addedIds.length + removedIds.length > MAX_INVENTORY_DELTA) {
       // Too many changes — do a full inventory reset
       this.emit('status', 'Large inventory change detected, performing full reset');
@@ -881,16 +924,9 @@ export class SyncEngine extends EventEmitter {
         const formId = this._resolveFormId(item.formId);
         if (formId === null) continue;
         const cat = this._toPipBoyCategory(item.type);
-        if (this._itemHasDegradedCondition(item)) {
-          commands.push(
-            this._buildAddItemHealthPercentCommand(formId, item.count || 1, item.condition, cat)
-          );
-        } else {
-          commands.push(
-            this._buildAddItemCommand(formId, item.count || 1, cat)
-          );
-        }
+        queueAdd(cat, formId, item.count || 1, item.condition);
       }
+      flushBatches();
       return commands;
     }
 
@@ -955,15 +991,7 @@ export class SyncEngine extends EventEmitter {
       const cat = this._toPipBoyCategory(item.type);
       if (cat) this._lastChangedCategories.add(cat);
 
-      if (this._itemHasDegradedCondition(item)) {
-        commands.push(
-          this._buildAddItemHealthPercentCommand(formId, item.count || 1, item.condition, cat)
-        );
-      } else {
-        commands.push(
-          this._buildAddItemCommand(formId, item.count || 1, cat)
-        );
-      }
+      queueAdd(cat, formId, item.count || 1, item.condition);
     }
 
     // Stacks where only the count changed (same form + same condition). A
@@ -987,13 +1015,7 @@ export class SyncEngine extends EventEmitter {
           // 'count' on-menu and syncs off-menu, so sortandrefreshinv is redundant for
           // count-only increases on existing forms. For new forms the addedIds path
           // (above) is responsible for adding to _lastChangedCategories.
-          if (this._itemHasDegradedCondition(currentItem)) {
-            commands.push(
-              this._buildAddItemHealthPercentCommand(formId, addQty, currentItem.condition, cat)
-            );
-          } else {
-            commands.push(this._buildAddItemCommand(formId, addQty, cat));
-          }
+          queueAdd(cat, formId, addQty, currentItem.condition);
         } else if (countDelta < 0) {
           // Skip decrements the device already applied to itself (item used
           // on the Pip-Boy and mirrored into the game by us)
@@ -1009,8 +1031,7 @@ export class SyncEngine extends EventEmitter {
           // Don't add to _lastChangedCategories: removeitem already emits 'count' on-menu
           // and syncs off-menu, making sortandrefreshinv redundant here (it would open
           // the DAT + INV files, find _requiresSort = false, and do nothing useful).
-          const removeCmd = this._buildRemoveItemCommand(cat, formId, removeQty, currentItem.condition);
-          commands.push(removeCmd);
+          queueRemove(cat, formId, removeQty, currentItem.condition);
           // Only weapons and apparel can affect equip state; ammo/aid/misc removals
           // never change what is equipped, so skip the expensive authoritative resync.
           if (cat === 'WEAPONS' || cat === 'APPAREL') this._resyncEquipAfterInventory = true;
@@ -1037,12 +1058,12 @@ export class SyncEngine extends EventEmitter {
         // the on-menu display, and inv.sync() handles off-menu persistence.
         // sortandrefreshinv would open DAT+INV from flash for nothing (no sort needed
         // since only a row was removed, not reordered).
-        const removeCmd = this._buildRemoveItemCommand(cat, formId, removeQty, prevItem.condition);
-        commands.push(removeCmd);
+        queueRemove(cat, formId, removeQty, prevItem.condition);
         if (cat === 'WEAPONS' || cat === 'APPAREL') this._resyncEquipAfterInventory = true;
       }
     }
 
+    flushBatches();
     return commands;
   }
 
@@ -1081,11 +1102,13 @@ export class SyncEngine extends EventEmitter {
     // instead of one per weapon stack.
     commands.push(...this._buildSetDamBatchCommands(setEntries));
 
+    const removeEntries = [];
     for (const it of prevMap.values()) {
       const formId = this._resolveFormId(it.formId);
       if (formId === null) continue;
-      commands.push(this._buildRemoveDamCommand(formId, it.condition));
+      removeEntries.push([formId, this._normalizeItemCondition(it.condition)]);
     }
+    commands.push(...this._buildRemoveDamBatchCommands(removeEntries));
 
     if (commands.length) commands.push(REFRESH_WEAPON_DAM_CMD);
     return commands;
@@ -1250,22 +1273,26 @@ export class SyncEngine extends EventEmitter {
     const previousSet = new Set(previous.map(extractId));
 
     // Added perks
+    const addedFormIds = [];
     for (const perkId of currentSet) {
       if (!previousSet.has(perkId)) {
         const formId = this._toFormIdInt(perkId);
         if (formId === null) continue;
-        commands.push(this._buildSafeAddPerk(formId));
+        addedFormIds.push(formId);
       }
     }
+    commands.push(...this._buildAddPerksBulkCommands(addedFormIds));
 
     // Removed perks
+    const removedFormIds = [];
     for (const perkId of previousSet) {
       if (!currentSet.has(perkId)) {
         const formId = this._toFormIdInt(perkId);
         if (formId === null) continue;
-        commands.push(this._buildSafeRemovePerk(formId));
+        removedFormIds.push(formId);
       }
     }
+    commands.push(...this._buildRemovePerksBulkCommands(removedFormIds));
 
     return commands;
   }
@@ -1368,7 +1395,11 @@ export class SyncEngine extends EventEmitter {
    * Generate equip/unequip commands from game → Pip-Boy equipped state.
    * Apparel slots are resolved on-device via APPAREL.DAT (item.es).
    */
-  _diffEquipped(player, prevPlayer) {
+  // force=true always emits both commands regardless of the diff — used for
+  // full syncs, where prevPlayer is {} and "equipped nothing" would otherwise
+  // look identical to "no change from an unknown prior device state" and get
+  // skipped, leaving a stale equip from before the sync stuck on the device.
+  _diffEquipped(player, prevPlayer, force = false) {
     const commands = [];
 
     const currentWeapon = this._toFormIdInt(player.equippedweap) ?? 0;
@@ -1378,6 +1409,7 @@ export class SyncEngine extends EventEmitter {
     const currentWeapWhole = player.equippedweapwhole ? 1 : 0;
     const previousWeapWhole = prevPlayer.equippedweapwhole ? 1 : 0;
     if (
+      force ||
       currentWeapon !== previousWeapon ||
       currentWeapCnd !== previousWeapCnd ||
       currentWeapWhole !== previousWeapWhole
@@ -1390,7 +1422,7 @@ export class SyncEngine extends EventEmitter {
 
     const currentApparel = this._normalizeEquippedApparelWithCnd(player);
     const previousApparel = this._normalizeEquippedApparelWithCnd(prevPlayer);
-    if (JSON.stringify(currentApparel) !== JSON.stringify(previousApparel)) {
+    if (force || JSON.stringify(currentApparel) !== JSON.stringify(previousApparel)) {
       commands.push(this._buildEquipApparelCommand(currentApparel));
     }
 
@@ -1430,7 +1462,7 @@ export class SyncEngine extends EventEmitter {
    * Both are stored ephemerally (!1) so they never persist to PLAYER.JSON. When
    * the AMMO tab is open, re-read + re-render it so the change shows immediately.
    */
-  _diffWeaponAmmo(player, prevPlayer) {
+  _diffWeaponAmmo(player, prevPlayer, forceRefresh = false) {
     const commands = [];
     const wa = player.weaponammo || {};
     const prevWa = prevPlayer.weaponammo || {};
@@ -1442,8 +1474,8 @@ export class SyncEngine extends EventEmitter {
     const currentWeapon = this._toFormIdInt(player.equippedweap) ?? 0;
     const prevWeapon = this._toFormIdInt(prevPlayer.equippedweap) ?? 0;
     const weaponChanged = currentWeapon !== prevWeapon;
-    const force = this._needsWeaponAmmoRefresh;
-    if (force) this._needsWeaponAmmoRefresh = false;
+    const force = forceRefresh || this._needsWeaponAmmoRefresh;
+    if (this._needsWeaponAmmoRefresh) this._needsWeaponAmmoRefresh = false;
 
     if (force || weaponChanged) {
       commands.push(`player.setav('ammoActive', ${currentAmmo}, !1)`);
@@ -1498,12 +1530,37 @@ export class SyncEngine extends EventEmitter {
     return `player.equipapparel([${idList}],[${cndList}])`;
   }
 
-  _buildSafeAddPerk(formId) {
-    return `player.safeaddperk(${formId})`;
+  /**
+   * Batch forms of safeaddperk/saferemoveperk: formIds is a flat array, split
+   * into player.addperksbulk()/removeperksbulk() commands of ≤MAX_ITEM_BATCH
+   * entries each so the device opens PERKS.DAT/PERKS.INV once per batch
+   * instead of once per perk.
+   */
+  _buildAddPerksBulkCommands(formIds) {
+    const commands = [];
+    for (let i = 0; i < formIds.length; i += MAX_ITEM_BATCH) {
+      const slice = formIds.slice(i, i + MAX_ITEM_BATCH);
+      commands.push(`player.addperksbulk([${slice.join(',')}])`);
+    }
+    return commands;
   }
 
-  _buildSafeRemovePerk(formId) {
-    return `player.saferemoveperk(${formId})`;
+  _buildRemovePerksBulkCommands(formIds) {
+    const commands = [];
+    for (let i = 0; i < formIds.length; i += MAX_ITEM_BATCH) {
+      const slice = formIds.slice(i, i + MAX_ITEM_BATCH);
+      commands.push(`player.removeperksbulk([${slice.join(',')}])`);
+    }
+    return commands;
+  }
+
+  /**
+   * Full-sync perk reconciliation: formIds is the complete desired perk set.
+   * Unlike the add/remove batches above, this must arrive as one call (the
+   * device diffs it against PERKS.INV's current contents), so it isn't split.
+   */
+  _buildSetPerksBulkCommand(formIds) {
+    return `player.setperksbulk([${formIds.join(',')}])`;
   }
 
   _normalizeItemCondition(condition) {
@@ -1513,10 +1570,6 @@ export class SyncEngine extends EventEmitter {
     // Game plugin may send 0.0–1.0; Pip-Boy InvFile uses 0–100 (uint8).
     if (n > 0 && n <= 1) return Math.round(n * 100);
     return Math.round(Math.min(100, Math.max(0, n)));
-  }
-
-  _itemHasDegradedCondition(item) {
-    return this._normalizeItemCondition(item?.condition) !== 100;
   }
 
   _itemConditionChanged(currentItem, prevItem) {
@@ -1531,31 +1584,42 @@ export class SyncEngine extends EventEmitter {
     return `player.setitemcondition(${formId},${cnd})`;
   }
 
-  _buildAddItemHealthPercentCommand(formId, count, condition, cat) {
-    const cnt = count || 1;
-    const cnd = this._normalizeItemCondition(condition);
-    // Optional category hint lets the firmware open a single DataFile instead of
-    // scanning all five categories for the form ID.
-    const hint = cat ? `,'${cat}'` : '';
-    return `player.additemhealthpercent(${formId},${cnt},${cnd}${hint})`;
+  _toItemEntry(formId, count, condition) {
+    return [formId, count, this._normalizeItemCondition(condition)];
   }
 
-  _buildAddItemCommand(formId, count, cat) {
-    return this._buildAddItemHealthPercentCommand(formId, count, 100, cat);
-  }
-
-  _buildRemoveItemCommand(cat, formId, removeQty, condition) {
-    const hint = cat ? `,'${cat}'` : '';
-    if (condition === undefined || condition === null) {
-      // No condition: pass `undefined` as a placeholder so the category hint
-      // lands in the 4th argument slot (firmware treats undefined cnd as
-      // "match by id only").
-      return cat
-        ? `player.removeitem(${formId},${removeQty},undefined,'${cat}')`
-        : `player.removeitem(${formId},${removeQty})`;
+  /**
+   * Batch form of additemhealthpercent: entries are [formId,count,cnd] triples
+   * for a single category, split into player.additemsbulk() commands of
+   * ≤MAX_ITEM_BATCH entries each so the device opens and flash-writes the
+   * category file once per batch rather than once per item.
+   */
+  _buildAddItemsBulkCommands(cat, entries) {
+    const commands = [];
+    for (let i = 0; i < entries.length; i += MAX_ITEM_BATCH) {
+      const slice = entries.slice(i, i + MAX_ITEM_BATCH);
+      commands.push(
+        `player.additemsbulk('${cat}',[${slice.map((e) => `[${e[0]},${e[1]},${e[2]}]`).join(',')}])`
+      );
     }
-    const cnd = this._normalizeItemCondition(condition);
-    return `player.removeitem(${formId},${removeQty},${cnd}${hint})`;
+    return commands;
+  }
+
+  /**
+   * Batch form of removeitem: entries are [formId,qty,cnd] triples (cnd may be
+   * `undefined` to match by id only) for a single category.
+   */
+  _buildRemoveItemsBulkCommands(cat, entries) {
+    const commands = [];
+    for (let i = 0; i < entries.length; i += MAX_ITEM_BATCH) {
+      const slice = entries.slice(i, i + MAX_ITEM_BATCH);
+      commands.push(
+        `player.removeitemsbulk('${cat}',[${slice
+          .map((e) => `[${e[0]},${e[1]},${e[2] === undefined ? 'undefined' : e[2]}]`)
+          .join(',')}])`
+      );
+    }
+    return commands;
   }
 
   /**
@@ -1596,9 +1660,19 @@ export class SyncEngine extends EventEmitter {
     return commands;
   }
 
-  _buildRemoveDamCommand(formId, condition) {
-    const cnd = this._normalizeItemCondition(condition);
-    return `player.removedam(${formId},${cnd})`;
+  /**
+   * Batch form of removedam: entries are [formId,cnd] pairs, split into
+   * player.removedams() commands of ≤MAX_DAM_BATCH entries each.
+   */
+  _buildRemoveDamBatchCommands(entries) {
+    const commands = [];
+    for (let i = 0; i < entries.length; i += MAX_DAM_BATCH) {
+      const slice = entries.slice(i, i + MAX_DAM_BATCH);
+      commands.push(
+        `player.removedams([${slice.map((e) => `[${e[0]},${e[1]}]`).join(',')}])`
+      );
+    }
+    return commands;
   }
 
   /**

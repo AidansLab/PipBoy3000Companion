@@ -11,11 +11,18 @@
  */
 
 import { createInterface } from 'readline';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import { SerialBridge } from './serial-bridge.js';
 import { SyncEngine } from './sync-engine.js';
 import { PipeClient } from './pipe-client.js';
 import { FormIdMapper, formatGameFormId } from './form-id-mapper.js';
 import { PRESYNC_RESTORE_HINT, COMPANION_PATCH_REQUIRED_MSG } from './app-core.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const pkg = JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf8'));
 
 // ─── ANSI Color Helpers ────────────────────────────────────────────────────────
 const C = {
@@ -91,7 +98,7 @@ function printBanner() {
   ║   ██║     ██║██║           ██████╔╝╚██████╔╝   ██║                    ║
   ║   ╚═╝     ╚═╝╚═╝           ╚═════╝  ╚═════╝    ╚═╝                    ║
   ║                                                                       ║
-  ║   ${C.bold}3000 — LIVE SYNC COMPANION${C.pipGreen}                                          ║
+  ║   ${C.bold}3000 — LIVE SYNC COMPANION v${pkg.version}${C.pipGreen}                                    ║
   ║   ${C.dim}Fallout 3 & New Vegas Edition${C.pipGreen}                                       ║
   ║                                                                       ║
   ╚═══════════════════════════════════════════════════════════════════════╝${C.reset}
