@@ -17,12 +17,6 @@
   if (Pip._companionBoot0) return;
   Pip._companionBoot0 = !0;
 
-  // Make `cmode` an accessor so that ANY path which clears it repaints the open
-  // menu. The stock firmware clears cmode itself on USB unplug (checkChargeStatus)
-  // and the companion clears it over serial on disconnect — without this, a menu
-  // like AMMO keeps its companion-only styling (dimmed rows / equip squares)
-  // cached until the next tab switch, because nothing invalidates the scroller's
-  // row cache. Repainting on the true→false transition fixes that everywhere.
   (function () {
     let _cmode = !!global.cmode;
     try {
@@ -49,14 +43,13 @@
     } catch (e) {}
   })();
 
-  // Shared across all inventory methods — hoisted here to avoid re-allocating
-  // the array on every additemhealthpercent / removeitem / setformstacks call.
+  // Shared across all inventory methods - hoisted here to avoid re-allocating
+  // the array on every additemhealthpercent/removeitem/setformstacks call.
   const cats = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
 
   // DAT catalogs are static game data, so read each category's id list from
   // flash once and reuse it instead of reopening the DataFile on every
-  // add/remove/setformstacks call — the repeated flash reads were the main
-  // cost of bulk pickups/drops.
+  // add/remove/setformstacks call.
   const _catIdsCache = {};
   function getCatIds(v) {
     let ids = _catIdsCache[v];
@@ -69,6 +62,36 @@
     return ids;
   }
 
+  function refreshInvMenu(inv) {
+    if (inv.count === 0 && Pip.changeMenu) Pip.changeMenu();
+    else Pip.emit('scroller', 'refresh');
+  }
+
+  // Long-press-to-drop in cmode (AID/AMMO/APPAREL/MISC/WEAPONS onLongClick).
+  // Mirrors the in-game Pip-Boy's own drop behavior: a stack of 5 or fewer
+  // drops one at a time per press (same as the quantity prompt it'd show for
+  // a small stack); a stack larger than 5 drops in full in one press.
+  // Hung off Pip (not a bare top-level function) so the menu scripts — each
+  // eval'd in their own separate scope, not nested inside this closure — can
+  // reach it, the same way they already reach Pip.launchApp.
+  Pip.companionDropItem = function (category, inv, index, it) {
+    if (!it) return;
+    const dropCount = it.cnt > 5 ? it.cnt : 1;
+    Pip.playSound('TAB');
+    console.log(`PIPSYNC:DROP:${category}:${Pip.formatId(it.id)}:${dropCount}`);
+    if (it.cnt > dropCount) {
+      it.cnt -= dropCount;
+      inv.set(index, it);
+    } else {
+      inv.remove(index);
+    }
+    // Stock's scroller dispatcher only auto-renders after onClick, not
+    // onLongClick (see the "e.onLongClick && i && e.onLongClick(...)" branch
+    // in FW.JS with no following render call) — without this the row's count
+    // stays stale on screen despite the InvFile already being updated.
+    refreshInvMenu(inv);
+  };
+
   // Normalizer for skill name matching in syncskills — hoisted so it isn't
   // re-created on every syncskills call.
   const nm = function (s) {
@@ -76,26 +99,21 @@
   };
 
   // Launches a holotape/app (MISC.JS's item.exec entries). Deliberately kept
-  // here, at boot0's own top level, instead of inline in MISC.js's onClick:
-  // Pip.loadMenu (stock's normal menu-switch path) evals the next script from
-  // its OWN tiny closure, with no link back to whatever menu was previously
-  // open — that's why switching menus normally doesn't retain the old menu's
-  // memory. MISC.js's onClick, by contrast, is itself a closure nested inside
-  // MISC's big IIFE (db/inv/imgs/apps/scroller). Doing Pip.remove()+eval()
-  // directly inside that nested closure keeps the *entire* MISC working set
-  // reachable for as long as that closure is still executing — including
-  // while eval() parses the holotape's own script, which is the single
-  // largest allocation in the whole flow. Calling this top-level helper
-  // instead means the pending setTimeout only ever closes over `execPath` (a
-  // plain string), so MISC's closure is free to be collected before the
-  // holotape's parse runs rather than competing with it for memory.
+  // here, at boot0's own top level, instead of inline in MISC.js's onClick.
   Pip.launchApp = function (execPath) {
     debug(`Launch Holotape ${execPath}`);
     setTimeout(function () {
-      Pip.remove();
-      process.memory(!0);
-      Pip.CURRENT = eval(fs.readFileSync(execPath))();
-      debug(`Holotape ${execPath} loaded`);
+      // Route through this top-level helper rather than calling it 
+      // from MISC's onClick like stock does: a timer callback created 
+      // inside the menu's onClick closes over the whole menu working set 
+      // (db/inv/imgs/apps/scroller) and keeps it reachable while the 
+      // holotape parses, which is the OOM this helper exists to avoid. 
+      // Here the callback closes over only execPath. Fallback keeps 
+      // holotapes working on pre-1.1.5 stock.
+      if (typeof Pip.loadHolotape === 'function') {
+        Pip.loadHolotape(execPath);
+        return;
+      }
     }, 10);
   };
 
@@ -143,9 +161,7 @@
       const hp = this.getav('hp');
       if (void 0 !== hp) p.hp = E.clip(hp, 0, p.maxHP) / p.maxHP;
       // Carry weight is copied straight from the game (see sync-engine
-      // _diffWeight). The game counts every carried item — including modded
-      // items the Pip-Boy has no weight data for — so prefer it over the
-      // locally summed inventory weight whenever the companion is connected.
+      // _diffWeight).
       const wg = this.getav('wg');
       if (void 0 !== wg) p.wg = wg;
       const maxWg = this.getav('maxwg');
@@ -163,10 +179,15 @@
     const key = av.toLowerCase();
     if (persist) {
       delete this.ephemeral[key];
+      const prev = this.player[key];
+      let changed;
       if (key === 'equippedapparel' && v && typeof v.length === 'number') {
         v = [v[0] || 0, v[1] || 0, v[2] || 0, v[3] || 0];
+        changed = !prev || prev[0] !== v[0] || prev[1] !== v[1] || prev[2] !== v[2] || prev[3] !== v[3];
+      } else {
+        changed = prev !== v;
       }
-      this.modified = this.player[key] !== v;
+      if (changed) this.modified = !0;
       this.player[key] = v;
     } else {
       this.ephemeral[key] = v;
@@ -181,15 +202,6 @@
     }
   };
 
-  // Stock getId() does two full ids.indexOf() scans (existence check, then
-  // seek offset) per call, plus a flash seek+read+JSON.parse. Menu scrollers
-  // call it synchronously for every row that scrolls into view for the first
-  // time, so on a DAT with hundreds of entries this was a visible stutter.
-  // A first attempt at fixing this cached a full id->index map per DataFile
-  // instance — that OOM-crashed a live device on WEAPONS.DAT (hundreds of
-  // entries, and the device has very little free heap to begin with). Do the
-  // safe version instead: one indexOf() scan reused for both the existence
-  // check and the seek offset, with no extra persistent allocation at all.
   if (typeof DataFile !== 'undefined' && !DataFile.prototype._companionIdIndexPatched) {
     DataFile.prototype._companionIdIndexPatched = !0;
     DataFile.prototype.getId = function (id) {
@@ -253,13 +265,6 @@
       if (dat && 'cnt' in dat) dat.cnt = E.clip(dat.cnt, 1, INV_MAX_CNT);
       return _invSet.call(this, i, dat);
     };
-    // Skip sync() on InvFile instances clearinv() has invalidated, so a menu
-    // torn down after a clear doesn't write its stale pre-clear data back.
-    const _invSync = InvFile.prototype.sync;
-    InvFile.prototype.sync = function () {
-      if (this._invalidated) return;
-      return _invSync.apply(this, arguments);
-    };
   }
 
   // Items of the same form but different condition are distinct stacks, so adds
@@ -270,7 +275,7 @@
     const want = cnd || 100;
     if (!inv.buf || !inv.count) return -1;
     // Scan the raw 8-byte rows directly (id = first u32, cnd = byte 6) instead
-    // of inv.get(i), which allocates an object + Uint8Array per row — that GC
+    // of inv.get(i), which allocates an object + Uint8Array per row - that GC
     // churn adds up during sync bursts over large inventories.
     const u32 = new Uint32Array(inv.buf);
     for (let i = 0; i < inv.count; i++) {
@@ -286,10 +291,6 @@
   Player.prototype.additemhealthpercent = function (id, cnt, cnd, cat) {
     if (cnt <= 0) return;
     const wantCnd = cnd || 100;
-    // A form ID belongs to exactly one category, so stop opening DataFiles as
-    // soon as we find the match (saves up to 4 file opens per added item). When
-    // the companion knows the category it passes it as a hint, so we open just
-    // that one DataFile; otherwise fall back to scanning all five.
     const scanCats = cat ? [cat] : cats;
     for (let ci = 0; ci < scanCats.length; ci++) {
       const v = scanCats[ci];
@@ -320,7 +321,7 @@
   Player.prototype.removeitem = function (id, qty, cnd, cat) {
     if (qty <= 0) return;
     // cat is an optional single-category hint from the companion (see
-    // additemhealthpercent); without it we scan all five categories.
+    // additemhealthpercent). Without it we scan all five categories.
     const scanCats = cat ? [cat] : cats;
     for (let ci = 0; ci < scanCats.length; ci++) {
       const v = scanCats[ci];
@@ -339,7 +340,7 @@
           if (it.cnt > 0) inv.set(inx, it);
           else inv.remove(inx);
           if (onMenu) {
-            Pip.emit('scroller', 'refresh');
+            refreshInvMenu(inv);
             if (v === 'MISC' && id === CAPS_FORM_ID && Pip.MODE === 1 && Pip.renderHeader)
               Pip.renderHeader();
           } else inv.sync();
@@ -350,13 +351,7 @@
     return !1;
   };
 
-  // Batched forms of additemhealthpercent/removeitem: apply every (id,cnt,cnd)
-  // entry against one already-open InvFile and flash-write once at the end,
-  // instead of once per entry. The companion always knows the category for a
-  // batch (it grouped the entries by it), so unlike the single-item versions
-  // there is no all-category fallback scan here. Used for full syncs and
-  // multi-item pickups/drops, where N individual writes to the same category
-  // file were the dominant cost of a sync.
+  // Batched forms of additemhealthpercent/removeitem.
   Player.prototype.additemsbulk = function (cat, entries) {
     if (!entries || !entries.length) return;
     try {
@@ -395,6 +390,8 @@
         inv = onMenu
           ? Pip.inv
           : new InvFile(`INV/${NV ? 'NV' : 'F3'}/${cat}.INV`, { idOrder: dbIds });
+      const savedOnLoaded = inv.onLoaded;
+      if (onMenu) inv.onLoaded = void 0;
       let capsChanged = !1;
       for (let n = 0; n < entries.length; n++) {
         const e = entries[n],
@@ -410,11 +407,86 @@
         else inv.remove(inx);
         if (id === CAPS_FORM_ID) capsChanged = !0;
       }
+      if (onMenu) inv.onLoaded = savedOnLoaded;
       if (onMenu) {
-        Pip.emit('scroller', 'refresh');
+        refreshInvMenu(inv);
         if (capsChanged && cat === 'MISC' && Pip.MODE === 1 && Pip.renderHeader)
           Pip.renderHeader();
       } else inv.sync();
+    } catch (e) {}
+  };
+
+  // Full-sync inventory reconciliation for one category, mark-and-sweep style
+  // (same idea as setperksbulk).
+  let _itemsReconcile = null;
+
+  Player.prototype.setitemsbulk_begin = function (cat) {
+    try {
+      const dbIds = getCatIds(cat),
+        onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === cat,
+        inv = onMenu
+          ? Pip.inv
+          : new InvFile(`INV/${NV ? 'NV' : 'F3'}/${cat}.INV`, { idOrder: dbIds });
+      const savedOnLoaded = inv.onLoaded;
+      if (onMenu) inv.onLoaded = void 0;
+      _itemsReconcile = {
+        cat: cat,
+        inv: inv,
+        dbIds: dbIds,
+        onMenu: onMenu,
+        savedOnLoaded: savedOnLoaded,
+        capsChanged: !1,
+      };
+    } catch (e) {
+      _itemsReconcile = null;
+    }
+  };
+
+  Player.prototype.setitemsbulk_chunk = function (cat, entries) {
+    const st = _itemsReconcile;
+    if (!st || st.cat !== cat || !entries || !entries.length) return;
+    try {
+      for (let n = 0; n < entries.length; n++) {
+        const e = entries[n],
+          id = e[0],
+          cnt = e[1];
+        if (cnt <= 0 || st.dbIds.indexOf(id) < 0) continue;
+        const wantCnd = e[2] || 100,
+          inx = findInvIdCnd(st.inv, id, wantCnd);
+        if (inx >= 0) {
+          let it = st.inv.get(inx);
+          it.cnt = cnt;
+          it.fl = 1;
+          st.inv.set(inx, it);
+        } else st.inv.add({ id: id, cnt: cnt, cnd: wantCnd, fl: 1 });
+        if (id === CAPS_FORM_ID) st.capsChanged = !0;
+      }
+    } catch (e) {}
+  };
+
+  Player.prototype.setitemsbulk_end = function (cat) {
+    const st = _itemsReconcile;
+    if (!st || st.cat !== cat) return;
+    _itemsReconcile = null;
+    try {
+      let removed = 0;
+      for (let n = st.inv.count - 1; n >= 0; n--) {
+        const it = st.inv.get(n);
+        if (!it || !it.fl) {
+          st.inv.remove(n);
+          removed++;
+        } else {
+          it.fl = 0;
+          st.inv.set(n, it);
+        }
+      }
+      if (st.onMenu) st.inv.onLoaded = st.savedOnLoaded;
+      debug(`Reconciled ${cat}: ${st.inv.count} kept, ${removed} removed`);
+      if (st.onMenu) {
+        refreshInvMenu(st.inv);
+        if (st.capsChanged && cat === 'MISC' && Pip.MODE === 1 && Pip.renderHeader)
+          Pip.renderHeader();
+      } else st.inv.sync();
     } catch (e) {}
   };
 
@@ -459,10 +531,15 @@
         const inv = onMenu
           ? Pip.inv
           : new InvFile(`INV/${NV ? 'NV' : 'F3'}/${v}.INV`, { idOrder: dbIds });
+        // Suppress per-row onLoaded renders while removing this id's old rows —
+        // see removeitemsbulk for why.
+        const savedOnLoaded = inv.onLoaded;
+        if (onMenu) inv.onLoaded = void 0;
         for (let n = inv.count - 1; n >= 0; n--) {
           const it = inv.get(n);
           if (it && it.id === id) inv.remove(n);
         }
+        if (onMenu) inv.onLoaded = savedOnLoaded;
         (stacks || []).forEach(function (s) {
           if (s && s.cnt > 0) inv.add({ id: id, cnt: s.cnt, cnd: s.cnd || 100 });
         });
@@ -512,7 +589,7 @@
   };
 
   // Batch form: entries is [[id, cnd, dam], ...]. One file open and one flash
-  // write for the whole batch — a skill change touching every carried weapon
+  // write for the whole batch e.g a skill change touching every carried weapon
   // costs one sync() instead of one per weapon.
   Player.prototype.setdams = function (entries) {
     try {
@@ -557,16 +634,66 @@
     } catch (e) {}
   };
 
-  Player.prototype.cleardam = function () {
+  // Full-sync DAM reconciliation, same mark-and-sweep pattern as
+  // setitemsbulk_begin/chunk/end above - replaces the old cleardam()+setdams()
+  // pair, which truncated *_DAM.INV and rewrote it at full size on every full
+  // sync even when no carried weapon's damage had actually changed.
+  let _damReconcile = null;
+
+  Player.prototype.setdamsbulk_begin = function () {
     try {
-      var m = NV ? 'NV' : 'F3';
-      require('fs').writeFileSync('INV/' + m + '/' + m + '_DAM.INV', '');
-      _damCache = {};
+      _damReconcile = { inv: damInvFile() };
+    } catch (e) {
+      _damReconcile = null;
+    }
+  };
+
+  Player.prototype.setdamsbulk_chunk = function (entries) {
+    const st = _damReconcile;
+    if (!st || !entries || !entries.length) return;
+    try {
+      for (let i = 0; i < entries.length; i++) {
+        const e = entries[i];
+        if (!e) continue;
+        const wantCnd = e[1] || 100,
+          inx = findInvIdCnd(st.inv, e[0], wantCnd);
+        if (inx >= 0) {
+          let it = st.inv.get(inx);
+          it.cnt = e[2];
+          it.fl = 1;
+          st.inv.set(inx, it);
+        } else st.inv.add({ id: e[0], cnt: e[2], cnd: wantCnd, fl: 1 });
+      }
+    } catch (e) {}
+  };
+
+  Player.prototype.setdamsbulk_end = function () {
+    const st = _damReconcile;
+    if (!st) return;
+    _damReconcile = null;
+    try {
+      for (let n = st.inv.count - 1; n >= 0; n--) {
+        const it = st.inv.get(n);
+        if (!it || !it.fl) {
+          st.inv.remove(n);
+        } else {
+          it.fl = 0;
+          st.inv.set(n, it);
+        }
+      }
+      st.inv.sync();
+      if (_damCache) {
+        _damCache = {};
+        for (let n = 0; n < st.inv.count; n++) {
+          const it = st.inv.get(n);
+          _damCache[it.id + ':' + (it.cnd || 100)] = it.cnt;
+        }
+      }
     } catch (e) {}
   };
 
   // Nudge the open WEAPONS menu to re-read the DAM file after a batch of
-  // setdam/removedam writes (e.g. a skill change with no inventory delta).
+  // setdam/removedam writes (e.g. a skill change with no inventory change).
   Player.prototype.refreshweapondam = function () {
     if (typeof Pip !== 'undefined' && Pip.CURRENT && Pip.CURRENT.id === 'WEAPONS' && Pip.emit) {
       Pip.emit('scroller', 'damrefresh');
@@ -577,14 +704,10 @@
     if ('number' != typeof id) throw new Error('perk should be a number');
     try {
       const m = NV ? 'NV' : 'F3',
-        db = new DataFile(`DATA/${m}/PERKS.DAT`),
-        i = db.ids.indexOf(id);
-      if (i < 0) {
-        db.close();
-        return;
-      }
-      const perkDef = db.getId(id),
-        ids = db.ids;
+        dbIds = getCatIds('PERKS');
+      if (dbIds.indexOf(id) < 0) return;
+      const db = new DataFile(`DATA/${m}/PERKS.DAT`),
+        perkDef = db.getId(id);
       db.close();
       const wantRank = E.clip(
         rank === undefined ? 1 : Math.round(rank),
@@ -594,7 +717,7 @@
       const onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === 'PERKS';
       const inv = onMenu
         ? Pip.inv
-        : new InvFile(`INV/${m}/PERKS.INV`, { idOrder: ids });
+        : new InvFile(`INV/${m}/PERKS.INV`, { idOrder: dbIds });
       const inx = inv.indexOf(id);
       if (inx >= 0) {
         let it = inv.get(inx);
@@ -611,9 +734,7 @@
     if ('number' != typeof id) throw new Error('perk should be a number');
     try {
       const m = NV ? 'NV' : 'F3',
-        db = new DataFile(`DATA/${m}/PERKS.DAT`),
-        ids = db.ids;
-      db.close();
+        ids = getCatIds('PERKS');
       const onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === 'PERKS';
       const inv = onMenu
         ? Pip.inv
@@ -627,15 +748,12 @@
     } catch (e) {}
   };
 
-  // Batched forms of addperk/removeperk: open PERKS.DAT and PERKS.INV once for
-  // the whole list instead of once per perk.
+  // Batched forms of addperk/removeperk.
   Player.prototype.addperksbulk = function (ids) {
     if (!ids || !ids.length) return;
     try {
       const m = NV ? 'NV' : 'F3',
-        db = new DataFile(`DATA/${m}/PERKS.DAT`),
-        dbIds = db.ids;
-      db.close();
+        dbIds = getCatIds('PERKS');
       const onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === 'PERKS',
         inv = onMenu
           ? Pip.inv
@@ -662,9 +780,7 @@
     if (!ids || !ids.length) return;
     try {
       const m = NV ? 'NV' : 'F3',
-        db = new DataFile(`DATA/${m}/PERKS.DAT`),
-        dbIds = db.ids;
-      db.close();
+        dbIds = getCatIds('PERKS');
       const onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === 'PERKS',
         inv = onMenu
           ? Pip.inv
@@ -686,18 +802,10 @@
   };
 
   // Full-sync perk reconciliation: ids is the complete desired perk set.
-  // Replaces the old clearperks()+addperksbulk() pair, which truncated
-  // PERKS.INV to empty and rewrote it at full size on every single full sync
-  // (reconnect, save load) even when the perk list hadn't changed at all.
-  // Reconciling in place only touches rows that actually differ, and inv.sync()
-  // is a no-op if nothing changed — both cut how often, and how much, this
-  // file's on-flash size changes.
   Player.prototype.setperksbulk = function (ids) {
     try {
       const m = NV ? 'NV' : 'F3',
-        db = new DataFile(`DATA/${m}/PERKS.DAT`),
-        dbIds = db.ids;
-      db.close();
+        dbIds = getCatIds('PERKS');
       const want = {};
       for (let n = 0; n < ids.length; n++) {
         if (dbIds.indexOf(ids[n]) >= 0) want[ids[n]] = !0;
@@ -706,6 +814,8 @@
         inv = onMenu
           ? Pip.inv
           : new InvFile(`INV/${m}/PERKS.INV`, { idOrder: dbIds });
+      const savedOnLoaded = inv.onLoaded;
+      if (onMenu) inv.onLoaded = void 0;
       let removed = 0;
       for (let n = inv.count - 1; n >= 0; n--) {
         const it = inv.get(n);
@@ -714,6 +824,7 @@
           removed++;
         } else delete want[it.id];
       }
+      if (onMenu) inv.onLoaded = savedOnLoaded;
       let added = 0;
       for (const id in want) {
         inv.add({ id: Number(id), cnt: 1, cnd: 100, fl: 0 });
@@ -727,17 +838,13 @@
 
   Player.prototype.safeaddperk = function (p) {
     try {
-      const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/PERKS.DAT`);
-      if (db.ids.indexOf(p) >= 0) this.addperk(p);
-      db.close();
+      if (getCatIds('PERKS').indexOf(p) >= 0) this.addperk(p);
     } catch (e) {}
   };
 
   Player.prototype.saferemoveperk = function (p) {
     try {
-      const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/PERKS.DAT`);
-      if (db.ids.indexOf(p) >= 0) this.removeperk(p);
-      db.close();
+      if (getCatIds('PERKS').indexOf(p) >= 0) this.removeperk(p);
     } catch (e) {}
   };
 
@@ -748,27 +855,37 @@
     }
   };
 
-  // sapling 1.1.4 moved skills from JSON (SETTINGS/{m}_SKILLS.JSON) to an
-  // InvFile (INV/{m}/SKILLS.INV, cnt = level) — same Pip.inv live-patch
-  // pattern as addperk/removeperk above.
+  // Normalized skill name -> formId, built once from SKILLS.DAT and reused.
+  let _skillNameMap = null;
+  function getSkillNameMap() {
+    if (_skillNameMap) return _skillNameMap;
+    const m = NV ? 'NV' : 'F3',
+      ids = getCatIds('SKILLS'),
+      db = new DataFile(`DATA/${m}/SKILLS.DAT`),
+      map = {};
+    for (let i = 0; i < ids.length; i++) {
+      map[nm(db.getId(ids[i]).txt)] = ids[i];
+    }
+    db.close();
+    _skillNameMap = map;
+    return map;
+  }
+
   Player.prototype.syncskills = function (g) {
     try {
       var m = NV ? 'NV' : 'F3',
-        db = new DataFile('DATA/' + m + '/SKILLS.DAT'),
+        nameMap = getSkillNameMap(),
         onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === 'SKILLS',
         inv = onMenu
           ? Pip.inv
-          : new InvFile('INV/' + m + '/SKILLS.INV', { idOrder: db.ids }),
+          : new InvFile('INV/' + m + '/SKILLS.INV', { idOrder: getCatIds('SKILLS') }),
         chg = !1,
         gn = {},
-        i, id, k, lvl, dt, inx, it;
-      // Normalize the incoming skill names once — nm() is a regex pass, so
-      // doing it per (DAT skill × game key) pair cost ~N×M regex runs.
+        id, k, lvl, dt, inx, it;
       for (k in g) gn[nm(k)] = g[k];
-      for (i = 0; i < db.ids.length; i++) {
-        id = db.ids[i];
-        dt = nm(db.getId(id).txt);
+      for (dt in nameMap) {
         if (!gn.hasOwnProperty(dt)) continue;
+        id = nameMap[dt];
         lvl = E.clip(Math.round(gn[dt]), 1, 100);
         inx = inv.indexOf(id);
         if (inx >= 0) {
@@ -779,7 +896,6 @@
         } else inv.add({ id: id, cnt: lvl, cnd: 100, fl: 0 });
         chg = !0;
       }
-      db.close();
       if (chg) {
         if (onMenu) Pip.emit('scroller', 'refresh');
         else inv.sync();
@@ -789,6 +905,9 @@
     }
   };
 
+  // Last-written JSON strings, so a snapshot that didn't actually change
+  // faction data (common on repeated full syncs) skips both flash writes.
+  let _lastRepJson = null, _lastVisJson = null;
   Player.prototype.syncfactions = function (d, visListChanged) {
     try {
       var rep = {}, vis = [], i, f, t;
@@ -799,10 +918,20 @@
         rep[f.name] = t;
         vis.push(f.name);
       }
-      var fs = require('fs');
-      fs.writeFileSync('SETTINGS/REP.JSON', JSON.stringify(rep));
-      fs.writeFileSync('SETTINGS/REP_VISIBLE.JSON', JSON.stringify(vis));
-      if (typeof Pip !== 'undefined' && Pip.CURRENT && Pip.CURRENT.id === 'GENERAL') {
+      var repJson = JSON.stringify(rep),
+        visJson = JSON.stringify(vis),
+        repChanged = repJson !== _lastRepJson,
+        visChanged = visJson !== _lastVisJson,
+        fs = require('fs');
+      if (repChanged) {
+        fs.writeFileSync('SETTINGS/REP.JSON', repJson);
+        _lastRepJson = repJson;
+      }
+      if (visChanged) {
+        fs.writeFileSync('SETTINGS/REP_VISIBLE.JSON', visJson);
+        _lastVisJson = visJson;
+      }
+      if ((repChanged || visChanged) && typeof Pip !== 'undefined' && Pip.CURRENT && Pip.CURRENT.id === 'GENERAL') {
         if (visListChanged && Pip.changeMenu) Pip.changeMenu();
         else if (Pip.emit) Pip.emit('factions');
       }
@@ -826,27 +955,9 @@
   Player.prototype.fullsyncrefresh = function () {
     if (typeof Pip !== 'undefined' && Pip.CURRENT) {
       if (Pip.CURRENT.id === 'SPECIAL' && Pip.emit) Pip.emit('special');
-      // SKILLS and PERKS are now Pip.inv-backed like the item categories, so a
-      // full sync (which can touch many rows at once) just reloads the menu —
-      // same as WEAPONS/APPAREL/etc below rather than a bespoke soft event.
       else if (Pip.MODE === 0 && Pip.CURRENT.id !== 'GENERAL' && Pip.changeMenu) Pip.changeMenu();
       else if (['WEAPONS', 'APPAREL', 'AID', 'MISC', 'AMMO'].indexOf(Pip.CURRENT.id) >= 0 && Pip.changeMenu) Pip.changeMenu();
     }
-  };
-
-  Player.prototype.clearinv = function () {
-    if (typeof Pip !== 'undefined' && Pip.inv) {
-      // Mark the open menu's InvFile as stale so its later remove()/sync() can't
-      // write pre-clear data back over the items we're about to re-add.
-      Pip.inv._invalidated = !0;
-      delete Pip.inv;
-    }
-    var fs = require('fs'), m = NV ? 'NV' : 'F3';
-    cats.forEach(function (v) {
-      try {
-        fs.writeFileSync('INV/' + m + '/' + v + '.INV', '');
-      } catch (e) {}
-    });
   };
 
   Player.prototype.equipapparel = function (ids, cnds) {
@@ -862,12 +973,26 @@
           activeCnd[it.es] = cnds && cnds[idx] != null ? cnds[idx] : 100;
         }
       });
-      db.close();
       this.setav('equippedApparel', active, !0);
-      // Per-slot equipped condition lets APPAREL.JS flag only the worn condition
-      // row when several conditions of one apparel form are carried at once.
       this.setav('equippedApparelCnd', activeCnd, !1);
+      // DT/DR must be computed here, not left to APPAREL.JS's onClick/
+      // updateDtDr: those only run while the APPAREL menu is the one
+      // currently open, but this function is what every game-driven sync
+      // (initial full sync AND every later equip change) calls regardless of
+      // which menu — or none — is on screen. Left to the menu alone, DT/DR
+      // stayed stuck at 0 after the first sync until the player happened to
+      // equip/unequip something from the Pip-Boy itself.
+      var total = 0;
+      for (var i = 0; i < active.length; i++) {
+        if (!active[i]) continue;
+        var stat = db.getId(active[i]);
+        stat = NV ? stat && stat.dt : stat && stat.dr;
+        stat && (total += stat);
+      }
+      db.close();
+      this.setav(NV ? 'dt' : 'dr', total);
       this.refreshequip();
+      Pip.renderHeader && Pip.renderHeader();
     } catch (e) {}
   };
 
@@ -900,7 +1025,6 @@
   // keeps the device's real scroller untouched (only its text colour changes).
   const DIM_SENTINEL = '\x01';
   const _createScroller = Pip.createScroller;
-  // Patch returned scrollers so sync handlers can flush stale row caches.
   Pip.createScroller = function (options) {
     if (options && typeof options.getItem === 'function') {
       const _getItem = options.getItem;
@@ -1005,9 +1129,16 @@
         const _header = m.header;
         m.header = function () {
           const rows = _header.call(this);
-          if (cmode) {
+          // XP is NOT gated on cmode: once the game has pushed a real XP it
+          // persists in PLAYER.JSON, and the stock header otherwise replaces
+          // it with a decorative date-based fake (xpNext * dayOfMonth/32 —
+          // see stock FW's STATS header), which would make the value visibly
+          // "revert" the moment the companion disconnects. AP stays
+          // cmode-gated: it's ephemeral game state, meaningless offline.
+          const hasXp = player.getav('xp') !== undefined;
+          if (cmode || hasXp) {
             const USER = player.getinfo();
-            if (USER.ap !== undefined) {
+            if (cmode && USER.ap !== undefined) {
               for (let ri = 0; ri < rows.length; ri++) {
                 if (rows[ri][0] === 'AP') {
                   rows[ri][1] = `${USER.ap}/${USER.maxAP}`;
@@ -1015,9 +1146,7 @@
                 }
               }
             }
-            // XP is pushed from the game on first sync, save-load, and level-up
-            // only (see sync-engine). Until then keep stock FW placeholder display.
-            if (USER.xp !== undefined) {
+            if (hasXp) {
               for (let ri = 0; ri < rows.length; ri++) {
                 if (rows[ri][0] === 'XP') {
                   rows[ri][1] = USER.xpNext
@@ -1062,11 +1191,8 @@
     }, 50);
   }
 
-  // In companion mode (cmode), long-press ITEMS toggles the torch LED only — never
-  // the full-screen TORCH overlay (torchMode Screen / LED+Screen). User-initiated
-  // toggles (no explicit on/off arg) emit PIPSYNC:TORCH so the game flashlight
-  // mirrors the device. Sync-driven setTorch(on) passes an explicit arg and does
-  // not emit PIPSYNC (avoids game↔device feedback loops).
+  // In companion mode (cmode), long-press ITEMS toggles the torch LED only, never
+  // the full-screen TORCH overlay (torchMode Screen / LED+Screen).
   if (typeof Pip.setTorch === 'function') {
     const _setTorch = Pip.setTorch;
     Pip.setTorch = function (on) {

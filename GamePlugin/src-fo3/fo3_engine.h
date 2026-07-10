@@ -1,17 +1,18 @@
 /**
- * fo3_engine.h — Fallout 3 engine glue for the Pip-Boy sync plugin (xFOSE).
+ * fo3_engine.h — Fallout 3 engine glue for the Pip-Boy sync plugin (FOSE).
  *
  * The xNVSE plugin leans on two NVSE conveniences that FOSE does not provide:
- *   1. Script::RunScriptLine2 — compile-and-run a script line (xFOSE declares
+ *   1. Script::RunScriptLine2 — compile-and-run a script line (FOSE declares
  *      a console RunScriptLine interface but never registers it: the block in
  *      PluginManager.cpp is `#if 0 // not yet supported`).
- *   2. kMessage_MainGameLoop — a per-frame main-thread callback.
+ *   2. kMessage_MainGameLoop — a per-frame main-thread callback. FOSE has no
+ *      plugin-facing messaging interface at all (see main.cpp's g_gameLoaded).
  *
- * Replacements, built only from data published in the xFOSE SDK:
+ * Replacements, built only from data published in the FOSE SDK:
  *
  *   Script lines → direct dispatch into the game's OWN command handlers. The
  *   vanilla console and script command tables are static CommandInfo arrays at
- *   addresses published per-version in xFOSE's CommandTable.cpp (for 1.7:
+ *   addresses published per-version in FOSE's CommandTable.cpp (for 1.7:
  *   console 0x00F52B70..0x00F54B50, script 0x00F54B78..0x00F5A438). Commands
  *   are located BY NAME at runtime — no per-command address guessing — and
  *   invoked with a hand-built argument buffer in the engine's compiled-arg
@@ -45,6 +46,7 @@
 #include <windows.h>
 #include <cstring>
 #include <cstdio>
+#include <utility>
 
 #include "fose/GameAPI.h"
 #include "fose/GameData.h"
@@ -65,7 +67,7 @@
 #endif
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// VANILLA COMMAND TABLES (addresses from xFOSE CommandTable.cpp, runtime 1.7)
+// VANILLA COMMAND TABLES (addresses from FOSE's CommandTable.cpp, runtime 1.7)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 static CommandInfo *const kConsoleCommandsBegin = (CommandInfo *)0x00F52B70;
@@ -231,6 +233,54 @@ static bool EvalGameCommand(CommandInfo *info, TESObjectREFR *thisObj,
   if (outResult)
     *outResult = result;
   return ok;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NATIVE ENGINE CALLS (direct address, thiscall — bypasses the CallGameCommand
+// simulation above entirely). CallGameCommand's hand-built compiled-argument
+// buffer reliably dispatches zero-argument commands but fails 100% of the time
+// on any command invoked with an argument (int, float, or form ref alike —
+// confirmed via device logs across ToggleFlyCam, SetUFOCamSpeedMult, EquipItem,
+// UnequipItem), and FOSE has no RunScriptLine-equivalent to fall back on
+// (PluginManager.cpp registers it behind `#if 0 // not yet supported`, in the
+// official SDK, not just xFOSE). Real engine addresses called directly, the
+// way a native C++ method call would, don't go through that argument-buffer
+// path at all, so they sidestep the bug.
+//
+// kAddr_ActorEquipItemAlt is reverse-engineered data from Command Extender, a
+// long-shipped, widely-used FO3 plugin — not a guess. Confirmed targeting the
+// same exact build this project does: Command Extender's own
+// g_menuVisibility constant (0x011793DB) matches FOSE's FALLOUT_VERSION_1_7
+// address exactly, and its loader hashes explicitly name "1.7.0.3" variants.
+// kAddr_ActorUnequipItem comes from xNVSE GameObjects.cpp's FOSE
+// cross-references on s_Actor_EquipItem/s_Actor_UnequipItem (see main.cpp).
+//
+// Diagnostic caveat: a `true` return from CallGameCommand means only that the
+// handler ran — vanilla Cmd_*_Execute handlers return true even when their
+// internal ExtractArgs fails (verified in Command Extender's sources), so an
+// argument-form dispatch can log "ok" while silently doing nothing. Only the
+// zero-argument dispatch class is trusted; everything needing arguments goes
+// through direct native-address calls.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Invokes _addr as if it were a member function of *_this with the MSVC
+// thiscall convention (this in ECX), for an arbitrary address we only know by
+// its numeric value. Standard technique for calling reverse-engineered native
+// engine functions.
+template <typename T_Ret = void, typename... Args>
+__forceinline T_Ret ThisCall(UInt32 _addr, void *_this, Args... args) {
+  class T {};
+  union {
+    UInt32 addr;
+    T_Ret (T::*func)(Args...);
+  } u = {_addr};
+  return ((T *)_this->*u.func)(std::forward<Args>(args)...);
+}
+
+// Same idea as ThisCall, for free functions with no `this` (plain __cdecl).
+template <typename T_Ret = void, typename... Args>
+__forceinline T_Ret CdeclCall(UInt32 _addr, Args... args) {
+  return ((T_Ret(__cdecl *)(Args...))_addr)(std::forward<Args>(args)...);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

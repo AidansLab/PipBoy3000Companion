@@ -1,16 +1,17 @@
 /**
- * main.cpp — xFOSE Plugin for Fallout 3 Pip-Boy 3000 Sync
+ * main.cpp — FOSE Plugin for Fallout 3 Pip-Boy 3000 Sync
  *
  * Fallout 3 port of the xNVSE plugin (GamePlugin/src/main.cpp). Hooks into
- * Fallout 3 via xFOSE, reads the player's stats and inventory, and writes
- * JSON snapshots to a Windows Named Pipe for the companion app to consume.
- * Behavior mirrors the New Vegas plugin except where Fallout 3 itself
- * differs (no faction reputation — the device shows karma; no ammo
+ * Fallout 3 via the official FOSE, reads the player's stats and inventory,
+ * and writes JSON snapshots to a Windows Named Pipe for the companion app to
+ * consume. Behavior mirrors the New Vegas plugin except where Fallout 3
+ * itself differs (no faction reputation — the device shows karma; no ammo
  * variants; Small Guns / Big Guns instead of Guns / Survival).
  *
  * BUILD REQUIREMENTS:
  * - Visual Studio 2019 or 2022 with C++ Desktop Development workload
- * - xFOSE SDK: https://github.com/AtomicTEM/xFOSE (bundled as a submodule)
+ * - Official FOSE SDK: https://fose.silverlock.org — not on GitHub; download
+ *   and extract to GamePlugin/FOSE (see CMakeLists.txt FOSE_ROOT)
  * - Target platform: x86 (32-bit) — Fallout 3 is 32-bit
  * - Target runtime: Fallout 3 1.7.0.3 (Steam/GOG)
  *
@@ -135,6 +136,14 @@ static std::atomic<bool> g_running(true);
 static std::mutex g_snapshotMutex;
 static std::string g_latestSnapshot;
 static std::thread g_pipeThread;
+// Driven by two independent mechanisms: FOSE's real messaging interface
+// (kInterface_Messaging — genuinely wired up as of FOSE 1.3b2, unlike the
+// older FOSE this project originally targeted, where QueryInterface for it
+// returned NULL) via MessageHandler below, AND a live per-tick check in
+// OnMainGameLoop (PlayerCharacter::GetSingleton()/parentCell) as a fallback
+// in case the installed runtime doesn't provide messaging. Both update the
+// same state, harmlessly, whichever fires — this is intentionally redundant
+// rather than trusting either alone.
 static bool g_gameLoaded = false;
 static DWORD g_lastSnapshotTime = 0;
 static std::atomic<bool> g_saveLoadPending(false);
@@ -155,15 +164,17 @@ static std::vector<std::string> g_commandQueue;
 
 // Vanilla command handlers, located by name at load (see fo3_engine.h).
 // Anything NULL here is logged loudly at load and its feature degrades with a
-// log line instead of crashing.
-static CommandInfo *g_cmdEquipItem = NULL;
-static CommandInfo *g_cmdUnequipItem = NULL;
+// log line instead of crashing. EquipItem/UnequipItem used to be here too,
+// but dispatching them through CallGameCommand failed 100% of the time —
+// equip/unequip now goes through direct native-address calls instead; see the
+// NATIVE EQUIP/UNEQUIP comment block for why. TFC (ToggleFlyCam) is gone for
+// the same reason and doesn't need a command lookup at all anymore — the
+// world freeze now goes through SetGlobalTimeMultiplier, a direct native call
+// (see its comment block).
 static CommandInfo *g_cmdCIOS = NULL;
 static CommandInfo *g_cmdDispel = NULL;
 static CommandInfo *g_cmdIsSpellTarget = NULL;
 static CommandInfo *g_cmdHasPerk = NULL;
-static CommandInfo *g_cmdToggleFlyCam = NULL;
-static CommandInfo *g_cmdSetUFOCamSpeedMult = NULL;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // VERBOSE LOGGING
@@ -405,7 +416,7 @@ static bool IsThrownWeapon(TESForm *form);
 // post-multiply bonus for melee (MeleeDamage AV) and unarmed
 // ((Unarmed/20)+0.5). Identical formula to the NV plugin.
 //
-// FO3 CAVEAT: xFOSE's SDK does not map BGSProjectile→explosion or
+// FO3 CAVEAT: FOSE's SDK does not map BGSProjectile→explosion or
 // BGSExplosion→damage for Fallout 3, so the explosion-damage probe the NV
 // plugin uses for grenades/launchers is unavailable. Weapons whose WEAP
 // record carries no direct damage (thrown explosives) return 0 here, the
@@ -1090,48 +1101,249 @@ std::string BuildPlayerSnapshot() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // PIP-BOY UI REFRESH
 // The NV plugin repaints the open in-game Pip-Boy after device-initiated
-// equips via FNV-only menu addresses. No published FO3 equivalents exist, so
-// this is a logged no-op: the FO3 Pip-Boy repaints itself on tab switch.
+// equips via FNV-only menu addresses; those don't apply to FO3. This uses
+// Command Extender's RefreshItemListBox (0x61B500, the same address its own
+// "RefreshItemsList" script command calls) — rebuilds the item list so an
+// equip/unequip shows immediately instead of waiting for a tab switch.
+// Called unconditionally rather than gated on IsMenuVisible(kMenuType_
+// Inventory): that reads the same g_MenuVisibilityArray already found to
+// misreport (see the ApplySyncLock note on kMenuType_Loading), so gating on
+// it here could just as easily suppress the refresh entirely.
+//
+// NOTE: this does not address the HP/stats display lagging behind after
+// using an aid item — no FO3 address for a stats-menu-equivalent refresh
+// (NV's ThisStdCall(0x7DF230, statsMenu, 4)) has been found yet.
 // ═══════════════════════════════════════════════════════════════════════════════
 
+static const UInt32 kAddr_RefreshItemListBox = 0x61B500;
+
 static void RefreshPipBoyUI() {
-  static bool loggedOnce = false;
-  if (!loggedOnce && IsPipBoyTabMenuOpen()) {
-    loggedOnce = true;
-    PipBoyLog("UI", "in-place Pip-Boy menu refresh not available on FO3 — "
-                    "open menus repaint on tab switch");
-  }
+  CdeclCall<void>(kAddr_RefreshItemListBox);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TIME FREEZE (SetGlobalTimeMultiplier)
+// Slows game time to a near-standstill instead of the TFC/isFlycam+freezeTime
+// combo tried earlier. Command Extender's decoding.h shows this is a DIRECT
+// native call — ThisCall(0x86C220, (int*)0x1090BA0, mult, instant) — not a
+// console-command dispatch at all, so it never touches CallGameCommand's
+// broken argument-passing path in the first place (unlike TFC, which needed
+// its "1" argument for the actual freeze and had no zero-argument
+// equivalent). It also never sets isFlycam, so the player's own camera stays
+// put instead of detaching into free-cam during sync.
+//
+// kAddr_SetGlobalTimeMultiplier / kGlobalTimeMultiplierThis are both from
+// Command Extender's decoding.h (same trusted source as
+// kAddr_ActorEquipItemAlt). That function is declared but never actually
+// called anywhere in Command Extender's own source tree, so the `instant`
+// bool's effect when false is unconfirmed — passed true here for an abrupt
+// change rather than an eased ramp, matching the lock/unlock instant we want.
+//
+// kFrozenTimeMultiplier is small enough to be visually indistinguishable from
+// a full pause over a sync's ~1-2s duration, while staying well clear of
+// exactly 0.0 in case anything downstream divides by the multiplier.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+static const UInt32 kAddr_SetGlobalTimeMultiplier = 0x86C220;
+static void *const kGlobalTimeMultiplierThis = (void *)0x1090BA0;
+static const float kFrozenTimeMultiplier = 0.00001f;
+static const float kNormalTimeMultiplier = 1.0f;
+
+static void SetGlobalTimeMultiplier(float mult) {
+  ThisCall<void>(kAddr_SetGlobalTimeMultiplier, kGlobalTimeMultiplierThis, mult,
+                 true);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // INITIAL-SYNC LOCK
 // While the companion app runs the initial sync it sends SYNC_LOCK; we
-// disable the player's controls, freeze the world, and show a HUD message
-// until SYNC_UNLOCK (or disconnect). Must run on the main game thread.
+// disable the player's controls, freeze the world, and show a centered
+// overlay until SYNC_UNLOCK (or disconnect). Must run on the main game
+// thread.
 //
 // vs the NV plugin:
 //  - Controls: direct disabledControlFlags writes (SDK-documented), restoring
 //    only the bits we set — the same don't-clobber-other-mods guarantee
 //    DisablePlayerControlsAltEx gave on NV. Covers Look too, so no separate
 //    vanilla camera command is needed.
-//  - World freeze: the same TFC 1 / SetUFOCamSpeedMult 0 trick, dispatched
-//    through the vanilla console command handlers.
-//  - Overlay: FO3 addresses for HUD tile XML injection are not published, so
-//    the centered overlay box is replaced by a periodic QueueUIMessage HUD
-//    notification for now.
+//  - World freeze: SetGlobalTimeMultiplier down to near-zero and back — see
+//    its comment block above for why this replaced TFC/isFlycam+freezeTime.
+//  - Overlay: the same centered XML overlay box as NV, injected on
+//    InterfaceManager::menuRoot via Tile::ReadXML. The FO3 address
+//    (kAddr_TileReadXML below) comes from Command Extender's decoding.h
+//    (kAddr_ReadXML), where it backs the shipped InjectUIComponent script
+//    command — which does exactly this: write XML to a temp file, call
+//    ReadXML on a parent tile. Every SDK piece the overlay needs is already
+//    compiled into this plugin: InterfaceManager::GetSingleton()/menuRoot
+//    (GameInterface.cpp 1.7 table — the same table whose QueueUIMessage
+//    address is proven to work on this runtime), Tile::GetChild (pure SDK
+//    code walking childList), Tile::Destroy (SDK-declared vtable slot 0),
+//    and kTile_SetFloatAddr (GameTiles.h 1.7 — byte-identical to Command
+//    Extender's kAddr_TileSetFloat, two independent sources agreeing).
+//    The XML itself is verified against vanilla FO3 assets: hud_main_menu.xml
+//    (Fallout - Misc.bsa) uses &hudmain;/&true;/&center; entities, and
+//    textures\interface\shared\solid.dds ships in Fallout - Textures.bsa.
 // ═══════════════════════════════════════════════════════════════════════════════
+
+// Tile::ReadXML — thiscall, parses a UI XML file and attaches the resulting
+// tile tree under `this`. Source: Command Extender decoding.h kAddr_ReadXML.
+static const UInt32 kAddr_TileReadXML = 0xBF37B0;
+static const char *kSyncWaitTempXmlFile = "pipboy_sync_temp.xml";
+
+// Inject on menuRoot so screen-relative coordinates are correct. Same XML as
+// the NV plugin's overlay, verbatim — all traits, entities and the solid.dds
+// background texture are confirmed present in vanilla FO3 (see block comment
+// above). Text with &center; anchors on x — set x to parent/2.
+static const char kSyncWaitOverlayXml[] =
+    "<rect name=\"PipBoySyncWait\">"
+    "<visible> &true; </visible>"
+    "<depth> 2500 </depth>"
+    "<locus> &true; </locus>"
+    // Center on screen
+    "<x><copy src=\"screen\" trait=\"width\"/>"
+    "<sub src=\"me\" trait=\"width\"/><div>2</div></x>"
+    "<y><copy src=\"screen\" trait=\"height\"/>"
+    "<sub src=\"me\" trait=\"height\"/><div>2</div></y>"
+    "<width> 500 </width>"
+    "<height> 180 </height>"
+    "<target> 0 </target>"
+    // Background: inset 10px on each side from parent edges
+    "<image name=\"sync_background\">"
+    "<filename> Interface\\Shared\\solid.dds </filename>"
+    "<red> 20 </red>"
+    "<green> 20 </green>"
+    "<blue> 20 </blue>"
+    "<alpha> 210 </alpha>"
+    "<x> 10 </x>"
+    "<y> 10 </y>"
+    "<width><copy src=\"parent\" trait=\"width\"/><sub>20</sub></width>"
+    "<height><copy src=\"parent\" trait=\"height\"/><sub>20</sub></height>"
+    "<depth> 1 </depth>"
+    "</image>"
+    // Border top: x=10, y=10, spans full inner width
+    "<image name=\"sync_border_top\">"
+    "<filename> Interface\\Shared\\solid.dds </filename>"
+    "<systemcolor> &hudmain; </systemcolor>"
+    "<x> 10 </x>"
+    "<y> 10 </y>"
+    "<width><copy src=\"parent\" trait=\"width\"/><sub>20</sub></width>"
+    "<height> 2 </height>"
+    "<depth> 2 </depth>"
+    "</image>"
+    // Border bottom: y = parent.height - 12 (10px inset + 2px border)
+    "<image name=\"sync_border_bottom\">"
+    "<filename> Interface\\Shared\\solid.dds </filename>"
+    "<systemcolor> &hudmain; </systemcolor>"
+    "<x> 10 </x>"
+    "<y><copy src=\"parent\" trait=\"height\"/><sub>12</sub></y>"
+    "<width><copy src=\"parent\" trait=\"width\"/><sub>20</sub></width>"
+    "<height> 2 </height>"
+    "<depth> 2 </depth>"
+    "</image>"
+    // Border left: x=10, y=10, full inner height
+    "<image name=\"sync_border_left\">"
+    "<filename> Interface\\Shared\\solid.dds </filename>"
+    "<systemcolor> &hudmain; </systemcolor>"
+    "<x> 10 </x>"
+    "<y> 10 </y>"
+    "<width> 2 </width>"
+    "<height><copy src=\"parent\" trait=\"height\"/><sub>20</sub></height>"
+    "<depth> 2 </depth>"
+    "</image>"
+    // Border right: x = parent.width - 12 (10px inset + 2px border)
+    "<image name=\"sync_border_right\">"
+    "<filename> Interface\\Shared\\solid.dds </filename>"
+    "<systemcolor> &hudmain; </systemcolor>"
+    "<x><copy src=\"parent\" trait=\"width\"/><sub>12</sub></x>"
+    "<y> 10 </y>"
+    "<width> 2 </width>"
+    "<height><copy src=\"parent\" trait=\"height\"/><sub>20</sub></height>"
+    "<depth> 2 </depth>"
+    "</image>"
+    // Title: x=center, y=height*2/9 (~40px for h=180, scales with height)
+    "<text name=\"sync_title\">"
+    "<string> Pip-Boy Sync </string>"
+    "<x><copy src=\"parent\" trait=\"width\"/><div>2</div></x>"
+    "<y><copy src=\"parent\" trait=\"height\"/><mul>2</mul><div>9</div></y>"
+    "<font> 1 </font>"
+    "<justify> &center; </justify>"
+    "<systemcolor> &hudmain; </systemcolor>"
+    "<width><copy src=\"parent\" trait=\"width\"/></width>"
+    "<depth> 3 </depth>"
+    "</text>"
+    // Body: x=center, y=height/2 (=90px for h=180, scales with height)
+    "<text name=\"sync_body\">"
+    "<string> Please wait while your Pip-Boy syncs with the companion app. "
+    "</string>"
+    "<x><copy src=\"parent\" trait=\"width\"/><div>2</div></x>"
+    "<y><copy src=\"parent\" trait=\"height\"/><div>2</div></y>"
+    "<font> 2 </font>"
+    "<justify> &center; </justify>"
+    "<systemcolor> &hudmain; </systemcolor>"
+    "<width><copy src=\"parent\" trait=\"width\"/></width>"
+    "<wrapwidth><copy src=\"parent\" trait=\"width\"/><sub>40</sub></wrapwidth>"
+    "<depth> 3 </depth>"
+    "</text>"
+    "</rect>";
 
 static bool g_syncControlsDisabled = false;
 static bool g_syncWorldFrozen = false;
 // Pump ticks to wait after a save/load before applying a lock (defensive,
 // mirrors the NV plugin's HUD-ready delay).
 static UInt32 g_syncLockReadyDelay = 0;
-// Pump ticks until the "please wait" HUD message is re-queued.
-static UInt32 g_syncOverlayRequeue = 0;
+static bool g_syncOverlayInjected = false;
 
-static void ShowSyncWaitMessage() {
-  QueueUIMessage("Pip-Boy Sync in progress - please wait...", 2 /* neutral */,
-                 NULL, NULL, 3.0f);
+static Tile *GetSyncOverlayParent() {
+  if (g_syncLockReadyDelay > 0)
+    return NULL;
+  InterfaceManager *im = InterfaceManager::GetSingleton();
+  return im ? im->menuRoot : NULL;
+}
+
+static Tile *InjectTileXml(Tile *parent, const char *xml) {
+  if (!parent || !xml || !*xml)
+    return NULL;
+
+  FILE *file = fopen(kSyncWaitTempXmlFile, "wb");
+  if (!file)
+    return NULL;
+  fputs(xml, file);
+  fclose(file);
+  return ThisCall<Tile *>(kAddr_TileReadXML, parent, kSyncWaitTempXmlFile);
+}
+
+static void DestroySyncOverlayTile(Tile *overlay) {
+  if (!overlay)
+    return;
+  ThisCall<void>(kTile_SetFloatAddr, overlay, (UInt32)kTileValue_visible, 0.0f,
+                 true);
+  overlay->Destroy(true);
+}
+
+static void ShowSyncWaitOverlay() {
+  if (g_syncOverlayInjected)
+    return;
+  Tile *parent = GetSyncOverlayParent();
+  if (!parent || !parent->niNode)
+    return;
+
+  InjectTileXml(parent, kSyncWaitOverlayXml);
+  if (parent->GetChild("PipBoySyncWait")) {
+    g_syncOverlayInjected = true;
+    PipBoyLog("SYNC", "Overlay injected");
+  }
+}
+
+static void CloseSyncWaitOverlay() {
+  if (InterfaceManager *im = InterfaceManager::GetSingleton()) {
+    if (im->menuRoot) {
+      if (Tile *overlay = im->menuRoot->GetChild("PipBoySyncWait"))
+        DestroySyncOverlayTile(overlay);
+    }
+  }
+  if (g_syncOverlayInjected)
+    PipBoyLog("SYNC", "Overlay closed");
+  g_syncOverlayInjected = false;
 }
 
 static void ApplySyncLock(bool wantLock) {
@@ -1142,8 +1354,18 @@ static void ApplySyncLock(bool wantLock) {
   if (wantLock) {
     if (g_syncLockReadyDelay > 0)
       return;
-    if (InterfaceManager::IsMenuVisible(kMenuType_Loading))
-      return;
+    // NOTE: the kMenuType_Loading IsMenuVisible() check that used to guard
+    // here is gone — logged evidence (a captured [MENU] mask that stayed
+    // stuck at msg=0,pipinv=0,stats=0,map=1,container=1,barter=1,repair=1,
+    // sleep=1,levelup=1,loading=1 for an entire session, never changing) shows
+    // g_MenuVisibilityArray (GameInterface.cpp, keyed off FALLOUT_VERSION) is
+    // reading a bad address for this build: those seven menu types cannot
+    // legitimately all be "visible" at once, and a real value would change as
+    // the player moves through menus. With loading permanently misreported as
+    // true, this check was unconditionally blocking the lock forever. The
+    // short g_syncLockReadyDelay above is now the only "just loaded" guard.
+    // GetOpenMenuMask()/ShouldSkipSnapshotDuringModMenu() read the same array
+    // and likely need the same scrutiny if snapshot gating misbehaves later.
 
     if (!g_syncControlsDisabled) {
       FO3DisablePlayerControls(player);
@@ -1152,24 +1374,18 @@ static void ApplySyncLock(bool wantLock) {
       g_syncControlsDisabled = true;
     }
     if (!g_syncWorldFrozen) {
-      // Freeze NPCs/projectiles/physics too — player controls alone still
-      // let the world move around a player who can't react to it. Zero the
-      // free camera's speed FIRST so there's no window where TFC 1 is active
-      // but input can nudge the detached camera.
-      GameCommandArg speedZero = GameCommandArg::Float(0.0);
-      CallGameCommand(g_cmdSetUFOCamSpeedMult, player, &speedZero, 1);
-      GameCommandArg freezeOne = GameCommandArg::Int(1);
-      bool ok = CallGameCommand(g_cmdToggleFlyCam, player, &freezeOne, 1);
-      PipBoyLog("SYNC", "Lock ON: issued SetUFOCamSpeedMult 0 + ToggleFlyCam 1 (%s)",
-                ok ? "ok" : "FAILED");
+      // Freeze NPCs/projectiles/physics too — player controls alone still let
+      // the world move around a player who can't react to it.
+      SetGlobalTimeMultiplier(kFrozenTimeMultiplier);
+      PipBoyLog("SYNC", "Lock ON: SetGlobalTimeMultiplier(%g)",
+                kFrozenTimeMultiplier);
       g_syncWorldFrozen = true;
     }
-    if (g_syncOverlayRequeue == 0) {
-      ShowSyncWaitMessage();
-      // Re-queue every ~2.5s (message duration 3s) so it stays visible for
-      // the whole lock.
-      g_syncOverlayRequeue = 2500 / PUMP_INTERVAL_MS;
-    }
+    // ApplySyncLock runs every pump tick while the lock is requested, so if
+    // the HUD wasn't ready yet this retries until the overlay lands — same
+    // reconcile-until-injected behavior as the NV plugin's per-frame loop.
+    if (!g_syncOverlayInjected)
+      ShowSyncWaitOverlay();
   } else {
     const bool wasLocked = g_syncControlsDisabled;
     if (g_syncControlsDisabled) {
@@ -1178,22 +1394,32 @@ static void ApplySyncLock(bool wantLock) {
       g_syncControlsDisabled = false;
     }
     if (g_syncWorldFrozen) {
-      // Bare toggle exits freeze-cam; then restore the default cam speed.
-      bool ok = CallGameCommand(g_cmdToggleFlyCam, player, NULL, 0);
-      GameCommandArg speedOne = GameCommandArg::Float(1.0);
-      CallGameCommand(g_cmdSetUFOCamSpeedMult, player, &speedOne, 1);
-      PipBoyLog("SYNC", "Lock OFF: issued ToggleFlyCam + SetUFOCamSpeedMult 1 (%s)",
-                ok ? "ok" : "FAILED");
+      SetGlobalTimeMultiplier(kNormalTimeMultiplier);
+      PipBoyLog("SYNC", "Lock OFF: SetGlobalTimeMultiplier(%g)",
+                kNormalTimeMultiplier);
       g_syncWorldFrozen = false;
     }
-    g_syncOverlayRequeue = 0;
+    if (g_syncOverlayInjected)
+      CloseSyncWaitOverlay();
     (void)wasLocked;
   }
 }
 
 static void ResetSyncLockState(bool reenableControls) {
-  g_syncLockReadyDelay = 90;
-  g_syncOverlayRequeue = 0;
+  // 90 was carried over from the NV plugin's g_syncHudReadyDelay, whose ticks
+  // are NVSE's per-rendered-frame kMessage_MainGameLoop (~16ms @ 60fps, so
+  // ~1.5s total). This plugin's pump is a fixed PUMP_INTERVAL_MS WM_TIMER
+  // instead, so the same tick count was a real 4.5s — long enough that a fast
+  // full sync's SYNC_LOCK/SYNC_UNLOCK round-trip (companion-observed: ~800ms)
+  // completed entirely inside the window and never actually applied the lock.
+  // (ApplySyncLock also used to gate on IsMenuVisible(kMenuType_Loading) as a
+  // more precise "still on the loading screen" check — removed, see the note
+  // in ApplySyncLock. This delay is now the only "just loaded" guard.)
+  g_syncLockReadyDelay = 300 / PUMP_INTERVAL_MS;
+  // Flag only — no tile teardown here. This runs on save/load/exit where the
+  // UI is being rebuilt and the old menuRoot children are already gone;
+  // touching them would be a stale pointer walk. Mirrors the NV plugin.
+  g_syncOverlayInjected = false;
   if (reenableControls && g_syncControlsDisabled) {
     if (PlayerCharacter *player = PlayerCharacter::GetSingleton())
       FO3EnablePlayerControls(player);
@@ -1204,11 +1430,7 @@ static void ResetSyncLockState(bool reenableControls) {
   // mid-lock (e.g. companion crashed during sync) must not leave the world
   // permanently frozen.
   if (reenableControls && g_syncWorldFrozen) {
-    if (PlayerCharacter *player = PlayerCharacter::GetSingleton()) {
-      CallGameCommand(g_cmdToggleFlyCam, player, NULL, 0);
-      GameCommandArg speedOne = GameCommandArg::Float(1.0);
-      CallGameCommand(g_cmdSetUFOCamSpeedMult, player, &speedOne, 1);
-    }
+    SetGlobalTimeMultiplier(kNormalTimeMultiplier);
     PipBoyLog("SYNC", "ResetSyncLockState: world unfrozen");
     g_syncWorldFrozen = false;
   }
@@ -1261,58 +1483,305 @@ static bool IsThrownWeapon(TESForm *form) {
   return wt >= 10 && wt <= 12;
 }
 
-// True when the player carries an instance of `baseForm` whose condition
-// matches `wantCnd` (used to decide whether a condition-targeted equip
-// request is at least plausible; see the EQUIP caveat below).
-static bool HasStackWithCondition(PlayerCharacter *player, TESForm *baseForm,
-                                  int wantCnd) {
-  if (!player || !baseForm)
-    return false;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NATIVE EQUIP/UNEQUIP (bypasses CallGameCommand's EquipItem/UnequipItem
+// script-command dispatch, which fails 100% of the time — see fo3_engine.h's
+// "NATIVE ENGINE CALLS" section for why). Calls Actor::EquipItem /
+// Actor::UnequipItem directly at their real engine addresses, exactly the way
+// the NV plugin calls player->EquipItem()/UnequipItem() as native C++ methods
+// (same 6-arg thiscall shape, xNVSE GameObjects.cpp).
+//
+// Address provenance — both cross-referenced, not guessed:
+//  - 0x7198E0 EquipItem: Command Extender's kAddr_EquipItem (proven working
+//    in-game by this plugin already), and xNVSE GameObjects.cpp's own note on
+//    s_Actor_EquipItem 0x88C650: "would be: 007198E0 for FOSE".
+//  - 0x7133E0 UnequipItem: the same xNVSE line for s_Actor_UnequipItem
+//    0x88C790: "would be: 007133E0 for FOSE, next sub after EquipItem".
+//
+// NOTE: 0x7198E0 is NOT a toggle. The earlier "EquipItemAlt toggles worn
+// items" assumption came from script-command docs; Command Extender's own
+// EquipItemAlt wrapper (decoding.h) only ever equips. Calling it on a worn
+// item is a no-op — which is exactly why UNEQUIP "did nothing" while it was
+// routed through this address.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+static const UInt32 kAddr_ActorEquipItemAlt = 0x7198E0;
+static const UInt32 kAddr_ActorUnequipItem = 0x7133E0;
+
+// TESObjectREFR::Update3D's player-only branch (Command Extender's
+// GameObjects.cpp: `if (this == *g_thePlayer) ThisCall(kUpdateAppearanceAddr,
+// this);`), kUpdateAppearanceAddr = 0x729880 for FALLOUT_VERSION_1_7 (the
+// same version-guarded header that supplies kTESObjectREFR_IsOffLimitsToPlayerAddr,
+// which matches our own FOSE SDK copy exactly). Our native equip/unequip
+// calls above skip the full vanilla equip pipeline the in-game Pip-Boy uses,
+// which is what actually rebuilds the player's worn-item 3D appearance —
+// without this, the model only catches up when the in-game Pip-Boy is closed
+// and reopened (whatever menu transition forces the rebuild as a side effect).
+static const UInt32 kAddr_UpdatePlayerAppearance = 0x729880;
+static void RefreshPlayerAppearance(Actor *actor) {
+  ThisCall<void>(kAddr_UpdatePlayerAppearance, actor);
+}
+
+// Extra height (game units) added to each device-dropped item's spawn
+// position. RemoveItem returns the newly created world reference before its
+// 3D/havok is loaded (loading is queued), so fixing posZ right then means the
+// model and physics spawn at the corrected height and the item free-falls the
+// last bit naturally — this is the fix the NV plugin needed for the same
+// RemoveItem-based drop path, where the engine's own placement measured out
+// at up to ~26 units below the player's feet on slopes/stairs, clipping items
+// into the ground. NV additionally clamps this to GROUND height via
+// TES::GetTerrainHeight, but that address is NV-specific (from JIP LN NVSE's
+// SDK) and has no confirmed FO3 1.7.0.3 equivalent yet, so this is a flat
+// offset above wherever the engine placed the item, not ground-relative. If
+// items still clip on slopes here, that's the next thing to source.
+static const float kDropZOffset = 50.0f;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TESObjectREFR::RemoveItem — vtable dispatch, not a raw address
+//
+// Our official FOSE SDK declares TESObjectREFR/MobileObject/Actor with NONE
+// of their own virtuals (data-layout only), so this class adds back exactly
+// the slots between TESObjectREFR's start and RemoveItem — nothing past it,
+// since Actor/PlayerCharacter's further virtuals are appended AFTER
+// RemoveItem's slot in any real object and don't need modeling to call this
+// safely.
+//
+// RemoveItem's vtable slot (0x5F / 95) is confirmed from THREE independent
+// sources, not guessed:
+//  1. Command Extender's own GameObjects.h (a real, long-shipped FO3 plugin)
+//     declares placeholders Unk_4E..Unk_5E then RemoveItem at Unk_5F.
+//  2. The arithmetic closes exactly: BaseFormComponent (4 virtuals) + TESForm
+//     (74 virtuals) = 78 = 0x4E — precisely where Command Extender's own
+//     TESObjectREFR additions begin. Both counts were verified byte-for-byte
+//     identical (same virtuals, same order) between Command Extender's SDK
+//     and our own official FOSE SDK, so this isn't Command Extender-specific
+//     — it's the actual engine layout both SDKs agree on.
+//  3. xNVSE's GameObjects.cpp (a third, independently-authored codebase)
+//     annotates NV's own EquipItem address as found "4th call from the end
+//     of TESObjectREFR::RemoveItem (func5F)" — the same "5F" slot, named
+//     independently of Command Extender.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+struct FO3ObjectWithRemoveItem : public TESObjectREFR {
+  virtual void Unk_4E(void);
+  virtual void Unk_4F(void);
+  virtual void Unk_50(void);
+  virtual void Unk_51(void);
+  virtual bool Unk_52(void);
+  virtual void Unk_53(void);
+  virtual void Unk_54(void);
+  virtual void Unk_55(void);
+  virtual void Unk_56(void);
+  virtual bool Unk_57(void);
+  virtual void Unk_58(void);
+  virtual void Unk_59(void);
+  virtual void Unk_5A(void);
+  virtual void Unk_5B(void);
+  virtual void Unk_5C(void);
+  virtual void Unk_5D(void);
+  virtual void Unk_5E(void);
+  virtual TESObjectREFR *RemoveItem(TESForm *toRemove, BaseExtraList *extraList,
+                                     UInt32 quantity, bool keepOwner, bool drop,
+                                     TESObjectREFR *destRef, UInt32 unk6,
+                                     UInt32 unk7, bool unk8, bool unk9);
+};
+
+// Finds this form's container entry (holds count + per-condition extra data).
+static ExtraContainerChanges::EntryData *
+FindContainerEntryForItem(PlayerCharacter *player, TESForm *form) {
+  if (!player || !form)
+    return NULL;
   ExtraContainerChanges *cc =
       (ExtraContainerChanges *)player->extraDataList.GetByType(
           kExtraData_ContainerChanges);
   if (!cc || !cc->data || !cc->data->objList)
-    return false;
-
+    return NULL;
   for (tList<ExtraContainerChanges::EntryData>::Iterator it =
            cc->data->objList->Begin();
        !it.End(); ++it) {
     ExtraContainerChanges::EntryData *entry = it.Get();
-    if (!entry || !entry->type || entry->type->refID != baseForm->refID)
-      continue;
-    if (entry->countDelta <= 0)
-      return false;
-    int remaining = entry->countDelta;
-    if (entry->extendData) {
-      for (tList<ExtraDataList>::Iterator eit = entry->extendData->Begin();
-           !eit.End(); ++eit) {
-        ExtraDataList *xdl = eit.Get();
-        if (!xdl)
-          continue;
-        int subCount = 1;
-        ExtraCount *xc = (ExtraCount *)xdl->GetByType(kExtraData_Count);
-        if (xc && xc->count > 0)
-          subCount = xc->count;
-        remaining -= subCount;
-        if (GetInventoryItemConditionPct(baseForm, xdl) == wantCnd)
-          return true;
-      }
-    }
-    // Remaining items carry no extra data → pristine, full condition.
-    return wantCnd >= 100 && remaining > 0;
+    if (entry && entry->type && entry->type->refID == form->refID)
+      return entry;
+  }
+  return NULL;
+}
+
+static bool IsFormCurrentlyWorn(PlayerCharacter *player, TESForm *form) {
+  ExtraContainerChanges::EntryData *entry =
+      FindContainerEntryForItem(player, form);
+  if (!entry || !entry->extendData)
+    return false;
+  for (tList<ExtraDataList>::Iterator eit = entry->extendData->Begin();
+       !eit.End(); ++eit) {
+    ExtraDataList *xdl = eit.Get();
+    if (xdl && (xdl->GetByType(kExtraData_Worn) ||
+                xdl->GetByType(kExtraData_WornLeft)))
+      return true;
   }
   return false;
 }
 
-static bool RunEquipCommand(PlayerCharacter *player, TESForm *form,
-                            bool equip) {
-  CommandInfo *cmd = equip ? g_cmdEquipItem : g_cmdUnequipItem;
-  // EquipItem/UnequipItem take (item, [NoUnequip/NoEquip flag],
-  // [hideMessage flag]). Suppress the corner message like the NV plugin's
-  // silent path; CallGameCommand clamps to the command's declared params.
-  GameCommandArg args[3] = {GameCommandArg::Form(form), GameCommandArg::Int(0),
-                            GameCommandArg::Int(1)};
-  return CallGameCommand(cmd, player, args, 3);
+// Total owned count of a form: base-container count plus the
+// container-changes delta. GetItemCountForEquip (used for EQUIP/USE) only
+// sums positive container-changes deltas, which is fine for "does the player
+// carry one to equip" but not for "how many can drop" — items granted by the
+// base NPC record have countDelta 0 (or negative after partial drops), with
+// the real count living in the base container list. Port of JIP LN NVSE's
+// GetFormCount (used by its DropAlt, the same reference this whole DROP
+// branch is based on).
+static SInt32 GetTotalFormCount(PlayerCharacter *player, TESForm *form) {
+  if (!player || !form || !player->baseForm)
+    return 0;
+  TESActorBase *actorBase = (TESActorBase *)player->baseForm;
+  SInt32 total = 0;
+  for (tList<TESContainer::FormCount>::Iterator it =
+           actorBase->container.formCountList.Begin();
+       !it.End(); ++it) {
+    TESContainer::FormCount *fc = it.Get();
+    if (fc && fc->form == form)
+      total += fc->count;
+  }
+  ExtraContainerChanges::EntryData *entry = FindContainerEntryForItem(player, form);
+  if (entry) {
+    bool hasLeveledItem = false;
+    if (entry->extendData) {
+      for (tList<ExtraDataList>::Iterator eit = entry->extendData->Begin();
+           !eit.End(); ++eit) {
+        ExtraDataList *xdl = eit.Get();
+        if (xdl && xdl->GetByType(kExtraData_LeveledItem)) {
+          hasLeveledItem = true;
+          break;
+        }
+      }
+    }
+    if (total != 0) {
+      // Leveled-item entries leave the base count untouched (JIP parity).
+      if (!hasLeveledItem) {
+        total += entry->countDelta;
+        if (total < 0)
+          total = 0;
+      }
+    } else {
+      total = entry->countDelta;
+      if (total < 0)
+        total = 0;
+    }
+  }
+  return total;
+}
+
+// How many units EquipItemAlt should equip: 1 for anything worn as a single
+// item (armor/book/aid), the whole stack for ammo and thrown weapons (which
+// ready their entire count), 1 for other weapons. Unrecognized form types
+// return 0 so the caller can bail rather than guess.
+static SInt32 DetermineNativeEquipCount(ExtraContainerChanges::EntryData *entry) {
+  TESForm *form = entry->type;
+  UInt8 formType = form->typeID;
+  if (formType == kFormType_Armor || formType == kFormType_Book ||
+      formType == kFormType_AlchemyItem)
+    return 1;
+  if (formType == kFormType_Ammo)
+    return entry->countDelta;
+  if (formType == kFormType_Weapon)
+    return IsThrownWeapon(form) ? entry->countDelta : 1;
+  return 0;
+}
+
+// Locate the specific carried instance of `baseForm` whose condition matches
+// `wantCnd` — straight port of the NV plugin's FindStackByCondition (the
+// container structures are identical). Key semantics the old FO3 matcher was
+// missing, and the reason condition-targeted equips grabbed the wrong row:
+// pristine, full-condition items carry NO ExtraDataList node at all, so a
+// 100% request resolves to NULL-with-found=true (engine equips a bare item)
+// rather than falling back to whatever damaged/worn node is listed first.
+// Non-worn matches are preferred; a worn match is only a fallback. `found` is
+// false only when no instance of that condition exists.
+static ExtraDataList *FindStackByCondition(PlayerCharacter *player,
+                                           TESForm *baseForm, int wantCnd,
+                                           bool *found) {
+  *found = false;
+  ExtraContainerChanges::EntryData *entry =
+      FindContainerEntryForItem(player, baseForm);
+  if (!entry || entry->countDelta <= 0)
+    return NULL;
+
+  int remaining = entry->countDelta;
+  ExtraDataList *wornMatch = NULL;
+  if (entry->extendData) {
+    for (tList<ExtraDataList>::Iterator eit = entry->extendData->Begin();
+         !eit.End(); ++eit) {
+      ExtraDataList *xdl = eit.Get();
+      if (!xdl)
+        continue;
+      int subCount = 1;
+      ExtraCount *xc = (ExtraCount *)xdl->GetByType(kExtraData_Count);
+      if (xc && xc->count > 0)
+        subCount = xc->count;
+      remaining -= subCount;
+      if (GetInventoryItemConditionPct(baseForm, xdl) == wantCnd) {
+        // Prefer a non-worn instance; remember a worn match as a fallback.
+        if (!xdl->GetByType(kExtraData_Worn)) {
+          *found = true;
+          return xdl;
+        }
+        wornMatch = xdl;
+      }
+    }
+  }
+  if (wornMatch) {
+    *found = true;
+    return wornMatch;
+  }
+  // Remaining items carry no extra data → pristine, full condition.
+  if (wantCnd >= 100 && remaining > 0) {
+    *found = true;
+    return NULL;
+  }
+  return NULL;
+}
+
+// Untargeted equip — mirrors Command Extender's EquipItemAlt wrapper exactly:
+// count derived from form type (whole stack for ammo/thrown, else 1), xData =
+// the first extend node when one exists.
+static bool NativeEquipDefault(Actor *actor,
+                               ExtraContainerChanges::EntryData *entry) {
+  if (!actor || !entry || !entry->type)
+    return false;
+  SInt32 count = DetermineNativeEquipCount(entry);
+  if (count <= 0)
+    return false;
+  ExtraDataList *xData = NULL;
+  if (entry->extendData) {
+    tList<ExtraDataList>::Iterator eit = entry->extendData->Begin();
+    if (!eit.End())
+      xData = eit.Get();
+  }
+  ThisCall<void>(kAddr_ActorEquipItemAlt, actor, entry->type, count, xData,
+                 (UInt32)1, (UInt32)0, (UInt32)1);
+  return true;
+}
+
+// Condition-targeted equip — count 1, exact instance. Mirrors NV's
+// player->EquipItem(form, 1, xdl, 1, false, 1).
+static bool NativeEquipInstance(Actor *actor, TESForm *form,
+                                ExtraDataList *xData) {
+  if (!actor || !form)
+    return false;
+  ThisCall<void>(kAddr_ActorEquipItemAlt, actor, form, (SInt32)1, xData,
+                 (UInt32)1, (UInt32)0, (UInt32)1);
+  return true;
+}
+
+// Mirrors NV's player->UnequipItem(form, 1, NULL, 1, false, 1) — xData NULL
+// lets the engine resolve the worn instance itself (only one instance of a
+// form can ever be worn), same as the proven NV call.
+static bool NativeUnequip(Actor *actor, TESForm *form) {
+  if (!actor || !form)
+    return false;
+  ThisCall<void>(kAddr_ActorUnequipItem, actor, form, (UInt32)1, (void *)NULL,
+                 (UInt32)1, (UInt32)0, (UInt32)1);
+  return true;
 }
 
 static void ExecutePipBoyCommand(const std::string &line) {
@@ -1355,6 +1824,7 @@ static void ExecutePipBoyCommand(const std::string &line) {
   if (!player || !form)
     return;
 
+  bool dispatchOk = true;
   if (verb == "USE" || verb == "EQUIP") {
     int countToEquip = GetItemCountForEquip(player, formId);
     if (countToEquip <= 0) {
@@ -1375,34 +1845,153 @@ static void ExecutePipBoyCommand(const std::string &line) {
       g_lastEquipCnd = wantCnd;
       g_lastEquipTime = now;
     }
-    // FO3 CAVEAT: the vanilla EquipItem command cannot target a specific
-    // ExtraDataList, so when several instances of one form differ by
-    // condition the engine equips its default pick (highest condition)
-    // rather than the exact row selected on the device. The NV plugin used
-    // a native engine call for this; no published FO3 equivalent exists.
-    if (verb == "EQUIP" && countToEquip > 1 && wantCnd >= 0 &&
-        HasStackWithCondition(player, form, wantCnd)) {
-      static bool cndTargetLogged = false;
-      if (!cndTargetLogged) {
-        cndTargetLogged = true;
-        PipBoyLog("CMD-IN",
-                  "EQUIP condition-targeting not available on FO3 — engine "
-                  "equips its default instance of the form");
+    // Branch shape mirrors the NV plugin's ExecutePipBoyCommand exactly.
+    // Skip only when the requested instance is ALREADY the worn one (same
+    // form AND same condition, or no condition given) — an EQUIP that names a
+    // different condition instance of the worn form must go through so the
+    // engine swaps instances.
+    if (verb == "EQUIP" && IsFormCurrentlyWorn(player, form) &&
+        (wantCnd < 0 || GetWornConditionPct(player, form) == wantCnd)) {
+      dispatchOk = true;
+    } else if (verb == "EQUIP" && countToEquip > 1 && !IsThrownWeapon(form) &&
+               wantCnd >= 0) {
+      // Several instances of one form differ by condition. Equip the exact
+      // instance the user picked on the Pip-Boy instead of the engine's
+      // default (highest-condition) match.
+      bool found = false;
+      ExtraDataList *xdl = FindStackByCondition(player, form, wantCnd, &found);
+      dispatchOk =
+          NativeEquipInstance((Actor *)player, form, found ? xdl : NULL);
+      PipBoyLog("CMD-IN", "EQUIP %08X targeted cnd=%d (%s)", formId, wantCnd,
+                found ? (xdl ? "matched stack" : "pristine") : "no match");
+    } else {
+      // USE, thrown weapons, and untargeted equips: Command Extender's own
+      // EquipItemAlt shape (count from form type, first extend node).
+      ExtraContainerChanges::EntryData *entry =
+          FindContainerEntryForItem(player, form);
+      dispatchOk = NativeEquipDefault((Actor *)player, entry);
+      if (!dispatchOk)
+        PipBoyLog("CMD-IN", "%s %08X — native equip failed (entry=%p)",
+                  verb.c_str(), formId, (void *)entry);
+    }
+  } else if (verb == "UNEQUIP") {
+    // Real Actor::UnequipItem (0x7133E0) — not the equip toggle-trick that
+    // silently no-opped before. Worn check stays: unequipping an unworn item
+    // is meaningless and skipping it avoids poking the engine for nothing.
+    if (!IsFormCurrentlyWorn(player, form)) {
+      PipBoyLog("CMD-IN", "UNEQUIP %08X rejected — item not currently worn",
+                formId);
+      dispatchOk = false;
+    } else {
+      dispatchOk = NativeUnequip((Actor *)player, form);
+      if (!dispatchOk)
+        PipBoyLog("CMD-IN", "UNEQUIP %08X — native unequip failed", formId);
+    }
+  } else if (verb == "DROP") {
+    // Native port of JIP LN NVSE's DropAlt (functions_jip/jip_fn_inventory.h,
+    // Cmd_DropAlt_Execute), the same reference the NV plugin's DROP branch is
+    // based on — see FO3ObjectWithRemoveItem above for why RemoveItem is
+    // callable here via ordinary vtable dispatch despite the official FOSE
+    // SDK not declaring it. wantCnd doubles as the drop count (same
+    // "second space-separated token" parse used for EQUIP's condition) — the
+    // device already decided 1 vs. the whole stack (Pip.companionDropItem in
+    // boot0) and sent that count.
+    int dropCount = wantCnd > 0 ? wantCnd : 1;
+    SInt32 total = GetTotalFormCount(player, form);
+    if (total < 1) {
+      PipBoyLog("CMD-IN", "DROP rejected — item %08X not in player inventory",
+                formId);
+    } else {
+      if (dropCount < total)
+        total = dropCount;
+
+      const bool stacked = (form->typeID == kFormType_Weapon)
+                               ? IsThrownWeapon(form)
+                               : (form->typeID != kFormType_Armor);
+      TESScriptableForm *scriptable =
+          DYNAMIC_CAST(form, TESForm, TESScriptableForm);
+      const bool hasScript = scriptable && scriptable->script;
+      FO3ObjectWithRemoveItem *playerRefr = (FO3ObjectWithRemoveItem *)player;
+
+      // RemoveItem returns the world reference it just created for the
+      // dropped item (declared on the vtable itself; JIP discards it). Its
+      // 3D model + havok body are QUEUED, not yet loaded, at that moment —
+      // raising posZ here moves where they'll spawn. NV needed this because
+      // the engine's own drop placement sometimes spawned the item's
+      // collision already overlapping the player's, and physics resolved
+      // that by ejecting it across the cell hard enough to look like it had
+      // vanished. Same RemoveItem-based placement here, so proactively
+      // applying the same fix rather than waiting for the same bug report.
+      std::set<UInt32> raisedRefs;
+      auto raiseDropRef = [&raisedRefs](TESObjectREFR *dropped) {
+        if (dropped && raisedRefs.insert(dropped->refID).second)
+          dropped->posZ += kDropZOffset;
+      };
+
+      ExtraContainerChanges::EntryData *entry =
+          FindContainerEntryForItem(player, form);
+      if (entry && entry->extendData) {
+        // Per-instance extra data (condition, script state, worn history…)
+        // must ride along with the dropped reference — always re-read the
+        // FIRST node: each RemoveItem consumes it and the list shifts up.
+        while (total > 0 && entry->extendData) {
+          // FOSE's tList<>::Begin() returns Iterator BY VALUE (const-qualified),
+          // so it must be captured in a named variable before calling the
+          // non-const Get() on it — chaining .Begin().Get() directly fails to
+          // compile (binds a non-const method to a const temporary).
+          tList<ExtraDataList>::Iterator eit = entry->extendData->Begin();
+          ExtraDataList *xData = eit.Get();
+          if (!xData)
+            break;
+          int subCount = 1;
+          ExtraCount *xCount = (ExtraCount *)xData->GetByType(kExtraData_Count);
+          if (xCount && xCount->count > 1) {
+            subCount = xCount->count;
+            if (hasScript && xData->GetByType(kExtraData_Script)) {
+              // Scripted stack: strip the count and drop a single instance —
+              // dropping a scripted stack whole is a known vanish case.
+              // FOSE's BaseExtraList has no RemoveByType convenience (unlike
+              // xNVSE's SDK) — Remove() takes the BSExtraData pointer itself.
+              xData->Remove(xCount);
+              subCount = 1;
+            } else if (subCount > total) {
+              subCount = total;
+            }
+          }
+          total -= subCount;
+          if (stacked) {
+            raiseDropRef(playerRefr->RemoveItem(form, xData, subCount, true,
+                                                true, NULL, 0, 0, true, false));
+          } else {
+            while (subCount-- > 0)
+              raiseDropRef(playerRefr->RemoveItem(form, xData, 1, true, true,
+                                                  NULL, 0, 0, true, false));
+          }
+        }
+      }
+      // Remainder with no per-instance data (pristine units, or
+      // base-container items with no container-changes entry at all).
+      while (total > 0) {
+        int subCount = (total < 0x7FFF) ? total : 0x7FFF;
+        raiseDropRef(playerRefr->RemoveItem(form, NULL, subCount, true, true,
+                                            NULL, 0, 0, true, false));
+        total -= subCount;
       }
     }
-    // Thrown weapons equip as a whole stack natively through the command
-    // path in FO3, so no per-count handling is needed here.
-    if (!RunEquipCommand(player, form, true))
-      PipBoyLog("CMD-IN", "%s %08X — EquipItem dispatch failed", verb.c_str(),
-                formId);
-  } else if (verb == "UNEQUIP") {
-    if (!RunEquipCommand(player, form, false))
-      PipBoyLog("CMD-IN", "UNEQUIP %08X — UnequipItem dispatch failed",
-                formId);
   }
 
+  // Native equip/unequip above bypass the full vanilla pipeline that rebuilds
+  // the player's worn-item 3D appearance (see RefreshPlayerAppearance) — kick
+  // it explicitly so the in-game model updates immediately instead of only on
+  // the next Pip-Boy open/close.
+  if (dispatchOk && (verb == "EQUIP" || verb == "UNEQUIP"))
+    RefreshPlayerAppearance((Actor *)player);
+
   RefreshPipBoyUI();
-  PipBoyLog("CMD-OK", "%s -> form %08X", verb.c_str(), formId);
+  // Was unconditionally logged "CMD-OK" even when the dispatch above failed —
+  // fixed to reflect what actually happened.
+  PipBoyLog(dispatchOk ? "CMD-OK" : "CMD-FAIL", "%s -> form %08X",
+            verb.c_str(), formId);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1412,17 +2001,40 @@ static void ExecutePipBoyCommand(const std::string &line) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 static void OnMainGameLoop() {
+  // g_gameLoaded has no messaging interface to rely on at all (see the
+  // g_gameLoaded declaration) — this is its sole source of truth.
+  // PlayerCharacter::GetSingleton() is NOT a reliable proxy for "a save is
+  // loaded" by itself: the engine hands back a valid-but-default player
+  // object at the main menu, before any save is picked (level 1, no
+  // inventory, placeholder name — confirmed from a captured snapshot). The
+  // additional parentCell check (TESObjectREFR, GameObjects.h) is non-NULL
+  // only once the player is actually placed in a loaded cell, which the main
+  // menu's template object never is.
+  {
+    PlayerCharacter *livePlayer = PlayerCharacter::GetSingleton();
+    bool nowLoaded = (livePlayer != NULL && livePlayer->parentCell != NULL);
+    if (nowLoaded && !g_gameLoaded) {
+      PipBoyLog("MSG", "game loaded (live-detected)");
+      g_gameLoaded = true;
+      g_saveLoadPending = true;
+      g_pipBoyLightSearched = false;
+      ResetSyncLockState(true);
+      std::lock_guard<std::mutex> lock(g_snapshotMutex);
+      g_latestSnapshot.clear();
+    } else if (!nowLoaded && g_gameLoaded) {
+      PipBoyLog("MSG", "game unloaded (live-detected)");
+      g_gameLoaded = false;
+      g_syncLockRequested = false;
+      g_mainMenuPending = true;
+      ResetSyncLockState(true);
+    }
+  }
   if (!g_gameLoaded)
     return;
 
   LogMenuMaskIfChanged();
   if (g_syncLockReadyDelay > 0)
     g_syncLockReadyDelay--;
-  if (g_syncOverlayRequeue > 0) {
-    g_syncOverlayRequeue--;
-    if (g_syncOverlayRequeue == 0 && g_syncLockRequested.load())
-      ShowSyncWaitMessage();
-  }
 
   // Track Pip-Boy chrome sessions and reconcile the torch when the in-game
   // Pip-Boy closes (mirrors the NV plugin's spell-only/manager reconcile).
@@ -1659,8 +2271,40 @@ void PipeServerThread() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// COMMAND LOOKUP AT LOAD
+// Every game command is located by name in the vanilla tables. A missing
+// command disables its feature with a loud log — never a crash.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+static void LookupGameCommands() {
+  struct {
+    CommandInfo **slot;
+    const char *name;
+    bool console;
+  } wanted[] = {
+      {&g_cmdCIOS, "CastImmediateOnSelf", false},
+      {&g_cmdDispel, "Dispel", false},
+      {&g_cmdIsSpellTarget, "IsSpellTarget", false},
+      {&g_cmdHasPerk, "HasPerk", false},
+  };
+  for (auto &w : wanted) {
+    *w.slot = w.console ? FindConsoleCommand(w.name) : FindScriptCommand(w.name);
+    if (*w.slot)
+      PipBoyLog("LOAD", "command %-22s -> opcode 0x%04X execute %p eval %p",
+                w.name, (*w.slot)->opcode, (*w.slot)->execute,
+                (*w.slot)->eval);
+    else
+      PipBoyLog("LOAD", "command %-22s NOT FOUND — dependent feature disabled",
+                w.name);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // FOSE MESSAGE HANDLER
-// Listens for game lifecycle events (load, save, new game, exit).
+// Listens for game lifecycle events (load, save, new game, exit). Real signal
+// when the installed FOSE runtime provides kInterface_Messaging (1.3b2+);
+// OnMainGameLoop's live parentCell check covers the same ground independently
+// in case it doesn't, so nothing here is load-bearing on its own.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 static void MessageHandler(FOSEMessagingInterface::Message *msg) {
@@ -1713,46 +2357,13 @@ static void MessageHandler(FOSEMessagingInterface::Message *msg) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// COMMAND LOOKUP AT LOAD
-// Every game command is located by name in the vanilla tables. A missing
-// command disables its feature with a loud log — never a crash.
-// ═══════════════════════════════════════════════════════════════════════════════
-
-static void LookupGameCommands() {
-  struct {
-    CommandInfo **slot;
-    const char *name;
-    bool console;
-  } wanted[] = {
-      {&g_cmdEquipItem, "EquipItem", false},
-      {&g_cmdUnequipItem, "UnequipItem", false},
-      {&g_cmdCIOS, "CastImmediateOnSelf", false},
-      {&g_cmdDispel, "Dispel", false},
-      {&g_cmdIsSpellTarget, "IsSpellTarget", false},
-      {&g_cmdHasPerk, "HasPerk", false},
-      {&g_cmdToggleFlyCam, "ToggleFlyCam", true},
-      {&g_cmdSetUFOCamSpeedMult, "SetUFOCamSpeedMult", true},
-  };
-  for (auto &w : wanted) {
-    *w.slot = w.console ? FindConsoleCommand(w.name) : FindScriptCommand(w.name);
-    if (*w.slot)
-      PipBoyLog("LOAD", "command %-22s -> opcode 0x%04X execute %p eval %p",
-                w.name, (*w.slot)->opcode, (*w.slot)->execute,
-                (*w.slot)->eval);
-    else
-      PipBoyLog("LOAD", "command %-22s NOT FOUND — dependent feature disabled",
-                w.name);
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// PLUGIN ENTRY POINTS (xFOSE)
+// PLUGIN ENTRY POINTS (FOSE)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 extern "C" {
 
 /**
- * Called by xFOSE to verify plugin compatibility.
+ * Called by FOSE to verify plugin compatibility.
  */
 __declspec(dllexport) bool FOSEPlugin_Query(const FOSEInterface *fose,
                                             PluginInfo *info) {
@@ -1777,7 +2388,7 @@ __declspec(dllexport) bool FOSEPlugin_Query(const FOSEInterface *fose,
 }
 
 /**
- * Called by xFOSE after successful query. Registers for messages, resolves
+ * Called by FOSE after successful query. Registers for messages, resolves
  * the vanilla command handlers, and starts the pipe server thread.
  */
 __declspec(dllexport) bool FOSEPlugin_Load(const FOSEInterface *fose) {
@@ -1788,14 +2399,17 @@ __declspec(dllexport) bool FOSEPlugin_Load(const FOSEInterface *fose) {
 
   g_pluginHandle = fose->GetPluginHandle();
 
-  // Messaging interface for lifecycle events
+  // Messaging interface for lifecycle events. NULL on older FOSE runtimes
+  // (pre-1.3b2) that don't provide kInterface_Messaging — OnMainGameLoop's
+  // live parentCell check covers g_gameLoaded independently either way, so
+  // this is a nice-to-have, not a requirement.
   g_msgIntfc =
       (FOSEMessagingInterface *)fose->QueryInterface(kInterface_Messaging);
   if (g_msgIntfc) {
     g_msgIntfc->RegisterListener(g_pluginHandle, "FOSE", MessageHandler);
   } else {
     PipBoyLog("LOAD", "messaging interface unavailable — save/load events "
-                      "will not be relayed");
+                      "will not be relayed (falling back to live detection)");
   }
 
   LookupGameCommands();

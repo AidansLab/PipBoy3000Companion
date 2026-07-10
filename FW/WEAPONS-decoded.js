@@ -121,7 +121,11 @@
         Pip.renderBlock(382, 192, 80, 'VAL', Math.round(item.val * Math.pow((item.cnd / 100), 1.5) * (item.dispCnt || 1)) || '--'),
         NV && Pip.renderBlock(382, 164, 80, 'STR', item.str || '--'),
         Pip.renderBlock(210, 220, 80, 'CND', ''),
-        h.fillRect(244, 228, 244 + ((item.cnd || 100) / 100) * 40, 237),
+        h
+          .setColor(1)
+          .fillRect(244, 228, 284, 237)
+          .setColor(3)
+          .fillRect(244, 228, 244 + ((item.cnd || 100) / 100) * 40, 237),
         NV &&
           h
             .setColor(0)
@@ -186,8 +190,12 @@
       scroller.updateItemCount(virt.length);
     },
     onLongClick: (n) => {
-      if (cmode) return;
-      const it = inv.get(vAt(n).realN);
+      const realN = vAt(n).realN,
+        it = inv.get(realN);
+      if (cmode) {
+        Pip.companionDropItem('WEAPONS', inv, realN, it);
+        return;
+      }
       (Pip.playSound('TAB'),
         setTimeout(
           () =>

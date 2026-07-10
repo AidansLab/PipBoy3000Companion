@@ -1,5 +1,10 @@
 (function (params) {
   params || (params = {});
+  // Bleak Venom (vanilla FNV) shows its own in-game Yes/No confirmation on
+  // use, which can be declined — using it from the Pip-Boy has no way to
+  // know that answer, so the device would show it consumed regardless.
+  // Blocked outright while connected; only reachable via the game's own
+  // inventory menu, where the real dialog and its answer are unambiguous.
   const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/AID.DAT`),
     inv = new InvFile(`INV/${NV ? 'NV' : 'F3'}/AID.INV`, { idOrder: db.ids }),
     imgs = E.openFile(`DATA/${NV ? 'NV' : 'F3'}/AID.IMG`, 'r'),
@@ -51,11 +56,14 @@
         }
       },
       onClick: (n) => {
-        const it = inv.get(n),
-          item = db.getId(it.id);
+        const it = inv.get(n);
+        if (!it) return;
+        const item = db.getId(it.id);
         // When connected to the game, prevent consuming items that can have no
         // effect in their current state, mirroring the game's own block logic.
         if (cmode) {
+          // Bleak Venom: in-game only — see the comment at the top of this file.
+          if (it.id === 0x001613d0) return;
           // HP-restoring items (stimpaks, food…) are blocked when HP is full.
           const curHp = player.getav('hp');
           if (curHp !== undefined) {
@@ -141,8 +149,11 @@
           Pip.renderHeader());
       },
       onLongClick: (n) => {
-        if (cmode) return;
         const it = inv.get(n);
+        if (cmode) {
+          Pip.companionDropItem('AID', inv, n, it);
+          return;
+        }
         (Pip.playSound('TAB'),
           setTimeout(
             () =>

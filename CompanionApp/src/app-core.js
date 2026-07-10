@@ -326,9 +326,12 @@ export class CompanionApp extends EventEmitter {
       if (evt.action === 'use') {
         this.syncEngine.notifyDeviceConsumed(pipeFormId);
       }
+      if (evt.action === 'drop') {
+        this.syncEngine.notifyDeviceConsumed(pipeFormId, evt.count || 1);
+      }
       // Give the device a command-free window so audio timer callbacks aren't
       // blocked by incoming serial commands while a sound is playing.
-      if (evt.action === 'equip' || evt.action === 'unequip' || evt.action === 'use') {
+      if (evt.action === 'equip' || evt.action === 'unequip' || evt.action === 'use' || evt.action === 'drop') {
         this.bridge.guardAudio();
       }
       // notifyDeviceEquipped/Unequipped are intentionally not called here:
@@ -347,6 +350,15 @@ export class CompanionApp extends EventEmitter {
           Number.isFinite(evt.condition)
         ) {
           pipeCmd += ` ${evt.condition}`;
+        }
+        // Carry how many units to drop (the device already decided 1 vs the
+        // whole stack — see Pip.companionDropItem in boot0).
+        if (
+          evt.action === 'drop' &&
+          evt.count !== undefined &&
+          Number.isFinite(evt.count)
+        ) {
+          pipeCmd += ` ${evt.count}`;
         }
         this.pipeClient.send(pipeCmd);
         if (pipeFormId.toLowerCase() !== String(evt.formId).toLowerCase()) {
@@ -410,8 +422,15 @@ export class CompanionApp extends EventEmitter {
       }
       this._emitStatus();
     });
-    this.pipeClient.on('save-load', () => {
+    this.pipeClient.on('save-load', async () => {
       this.syncEngine.handleSaveLoad();
+      // The pipe connection itself never drops for a mid-game load (only a
+      // fresh game process does that), so 'connected' never re-fires to
+      // re-enable sync — and 'main-menu' (sent when the plugin detects the
+      // player left the game world, e.g. right before this load) explicitly
+      // disables it. Without this, a mid-game load leaves sync permanently
+      // off: the next real snapshot arrives but processSnapshot() no-ops.
+      await this._tryEnableSync();
     });
     this.pipeClient.on('snapshot', (snapshot) => {
       this.syncEngine.processSnapshot(snapshot);

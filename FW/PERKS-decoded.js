@@ -56,7 +56,17 @@
         return ((item.rtxt = it ? it.cnt : '--'), item);
       },
       render: (item) => {
-        (Pip.renderBlock(255, 193, 210, '', ''),
+        (h.setFontAlign(-1, -1).setClipRect(255, 45, 460, 191),
+          imgs.seek(item.io));
+        try {
+          h.drawImage(imgs.read(item.il), 359, 124, { rotate: 0 });
+        } catch (e) {
+          debug(`Error drawing image for Perks item: ${e}`);
+        }
+        // 1.1.5: image first, text after — a tall perk image could paint
+        // over the header drawn inside the same clip region.
+        (h.setClipRect(0, 0, 480, 320),
+          Pip.renderBlock(255, 193, 210, '', ''),
           h
             .setFontAlign(-1, -1)
             .drawString(
@@ -67,15 +77,7 @@
             .clearRect(255, 45, 463, 50)
             .drawImage(icons.fadedown, 463, 47)
             .drawLine(255, 47, 462, 47)
-            .drawString('ADD/REMOVE PERKS', 255, 51, !0),
-          h.setFontAlign(-1, -1).setClipRect(255, 45, 460, 191),
-          imgs.seek(item.io));
-        try {
-          h.drawImage(imgs.read(item.il), 359, 124, { rotate: 0 });
-        } catch (e) {
-          debug(`Error drawing image for Perks item: ${e}`);
-        }
-        h.setClipRect(0, 0, 480, 320);
+            .drawString('ADD/REMOVE PERKS', 255, 51, !0));
       },
       onLongClick: (n) => {
         (inv.sync(),
@@ -126,7 +128,9 @@
   return (
     (active = buildOwnedScroller()),
     (inv.onLoaded = (i) => {
-      active && (active.updateItemCount(i.count), active.render());
+      // 1.1.5: only update the count in owned mode — the edit scroller lists
+      // the full catalog, and clamping it to inv.count hid most of the list.
+      active && (owned && active.updateItemCount(i.count), active.render());
     }),
     {
       id: 'PERKS',

@@ -1868,6 +1868,22 @@ if (
       h.flip(),
       Pip.loadMenu(e, t));
   }),
+  (Pip.loadHolotape = (src, params) => {
+    (debug(`Launch Holotape ${src}`),
+      Pip.remove(),
+      h.clear().flip(),
+      process.memory(!0));
+    try {
+      ((Pip.CURRENT = eval(fs.readFileSync(src))(params)),
+        debug(`Holotape ${src} loaded`));
+    } catch (e) {
+      (print('FAILED TO LOAD HOLOTAPE', src, e, '\n', e.stack),
+        h
+          .setFont('Monofonto14')
+          .setFontAlign(0, 0)
+          .drawString('UNABLE TO LOAD ' + src, 240, 160));
+    }
+  }),
   (Pip.currentDateTime = (e) => {
     let t = e;
     e || (t = Pip.getDateAndTime());

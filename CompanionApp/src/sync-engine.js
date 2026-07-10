@@ -39,6 +39,11 @@ const SKILLS_SOFT_REFRESH_CMD =
 // HP lives in the shared Pip-Boy header; redraw it without rebuilding pages.
 const HP_HEADER_SOFT_REFRESH_CMD = 'player.renderheader();';
 
+// AP recharges/drains continuously in real time, which without chunking means
+// a device write on almost every snapshot. Only push once AP has moved this
+// many points from the last value actually sent — see _diffAP.
+const AP_SYNC_CHUNK = 5;
+
 // Caps/Wg/HP in the ITEMS chrome — header only, no tab rebuild.
 const ITEMS_HEADER_SOFT_REFRESH_CMD = 'player.renderheader(!0);';
 
@@ -51,7 +56,6 @@ const STATS_TAB_FULL_REFRESH_CMD =
 const FULL_SYNC_UI_REFRESH_CMD = 'player.fullsyncrefresh();';
 
 const INVENTORY_CATEGORIES = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
-const CLEAR_INV_CMD = 'player.clearinv()';
 
 // Perks and Skills are InvFile-backed on the device now (INV/{m}/PERKS.INV,
 // SKILLS.INV — same shape as the item categories), so pre-sync backup/restore
@@ -59,9 +63,9 @@ const CLEAR_INV_CMD = 'player.clearinv()';
 const PRESYNC_CATEGORIES = [...INVENTORY_CATEGORIES, 'PERKS', 'SKILLS'];
 
 // Weapon DAM (skill/condition-adjusted display damage) lives in a side
-// *_DAM.INV file, mirrored via batched player.setdams() calls so the device
-// opens and flash-writes the file once per batch instead of once per entry.
-const CLEAR_DAM_CMD = 'player.cleardam()';
+// *_DAM.INV file, mirrored via batched player.setdams()/setdamsbulk_* calls so
+// the device opens and flash-writes the file once per batch instead of once
+// per entry.
 // Entries per setdams command. Each `[id,cnd,dam],` triple is ~16 chars and the
 // serial bridge packs lines into 512-byte chunks — 24 keeps a full command
 // safely inside one chunk so it never floods the device's USB RX buffer.
@@ -104,6 +108,9 @@ export class SyncEngine extends EventEmitter {
     // Device-initiated torch toggles — don't let a stale game snapshot turn the LED off.
     this._deviceTorchPending = null;
     this._resyncEquipAfterInventory = false;
+    // Last AP value actually pushed to the device — see _diffAP. Reset
+    // alongside previousState so a full resync always pushes the current AP.
+    this._lastSentAp = undefined;
     // Bumped on save load / forced resync. A snapshot that began processing
     // under an older generation must not write its (now stale) state back into
     // previousState, or it would downgrade the next post-load full sync to an
@@ -126,6 +133,7 @@ export class SyncEngine extends EventEmitter {
     }
     this.gameMode = mode;
     this.previousState = null; // Force full sync on game mode change
+    this._lastSentAp = undefined;
     this._lastMismatchWarning = null;
     this.emit('game-mode-changed', mode);
   }
@@ -135,6 +143,7 @@ export class SyncEngine extends EventEmitter {
     if (!this.gameMode) return;
     this.gameMode = null;
     this.previousState = null;
+    this._lastSentAp = undefined;
     this._lastMismatchWarning = null;
     this.emit('game-mode-changed', null);
   }
@@ -259,6 +268,7 @@ export class SyncEngine extends EventEmitter {
       const loadOrderChanged = this.mapper.setLoadOrder(snapshot.loadOrder);
       if (loadOrderChanged && this.previousState) {
         this.previousState = null;
+        this._lastSentAp = undefined;
         this.emit('status', 'Load order updated — forcing full resync');
       }
     }
@@ -438,8 +448,13 @@ export class SyncEngine extends EventEmitter {
           if (attr === 'level') {
             commands.push(`player.setlevel(${player.level})`);
             // Also push XP on level-up so the display reflects the new total.
+            // setav() only marks the player object modified — sync() is what
+            // actually flushes it to PLAYER.JSON, so without it XP sits
+            // unpersisted until some unrelated action (equip, settings edit)
+            // happens to call sync() next.
             if (player.xp !== undefined) {
               commands.push(`player.setav('xp',${player.xp},!0)`);
+              commands.push('player.sync()');
             }
           } else if (attr === 'name') {
             commands.push(`player.setav('name', ${JSON.stringify(player.name)}, !0)`);
@@ -577,9 +592,6 @@ export class SyncEngine extends EventEmitter {
     const player = snapshot.player || {};
 
     if (!this._inventorySyncPaused) {
-      // Reset inventory synchronously to avoid race conditions. Completely clear the files instead of loading the Pip-Boy's default start items.
-      commands.push(CLEAR_INV_CMD);
-
       // Set player name
       if (player.name) {
         commands.push(`player.setav('name', ${JSON.stringify(player.name)}, !0)`);
@@ -590,9 +602,12 @@ export class SyncEngine extends EventEmitter {
         commands.push(`player.setlevel(${player.level})`);
       }
 
-      // XP — pushed on first sync and save-loads (full syncs only)
+      // XP — pushed on first sync and save-loads (full syncs only). sync()
+      // flushes it to PLAYER.JSON immediately rather than leaving it
+      // unpersisted until an unrelated action happens to call sync() later.
       if (player.xp !== undefined) {
         commands.push(`player.setav('xp',${player.xp},!0)`);
+        commands.push('player.sync()');
       }
 
       // Set all scalar attributes (hp = true health pool from the game;
@@ -623,9 +638,12 @@ export class SyncEngine extends EventEmitter {
         if (skillCmd) commands.push(skillCmd);
       }
 
-      // Add all inventory items, grouped per category into additemsbulk()
-      // batches so the device flash-writes each category file once instead of
-      // once per item (a full sync can add dozens of items).
+      // Reconcile every category to exactly this snapshot's contents (device
+      // diffs in place — see setitemsbulk_begin/chunk/end), rather than
+      // clearing every category's file and readding, so a full sync only
+      // flash-writes categories whose contents actually changed. Every
+      // category runs even if empty in this snapshot — that's what removes
+      // stale rows from a category the player emptied out.
       const inventory = snapshot.inventory || [];
       const addBatches = new Map(); // cat -> [formId,count,cnd][]
       for (const item of inventory) {
@@ -636,12 +654,12 @@ export class SyncEngine extends EventEmitter {
         const list = addBatches.get(cat) || addBatches.set(cat, []).get(cat);
         list.push(this._toItemEntry(formId, item.count || 1, item.condition));
       }
-      for (const [cat, entries] of addBatches) {
-        commands.push(...this._buildAddItemsBulkCommands(cat, entries));
+      for (const cat of INVENTORY_CATEGORIES) {
+        commands.push(...this._buildSetItemsBulkCommands(cat, addBatches.get(cat) || []));
       }
 
-      // Reset and repopulate weapon DAM (skill/condition-adjusted display damage).
-      commands.push(CLEAR_DAM_CMD);
+      // Reconcile weapon DAM (skill/condition-adjusted display damage) the
+      // same way, instead of clearing *_DAM.INV and rewriting it whole.
       const damEntries = [];
       for (const item of inventory) {
         if (item.dam == null) continue;
@@ -649,7 +667,7 @@ export class SyncEngine extends EventEmitter {
         if (formId === null) continue;
         damEntries.push(this._toDamEntry(formId, item.condition, item.dam));
       }
-      commands.push(...this._buildSetDamBatchCommands(damEntries));
+      commands.push(...this._buildSetDamsBulkCommands(damEntries));
       // SYNC-DISABLED: calculateInvWeight() writes every .INV file
       // commands.push('player.calculateInvWeight()');
 
@@ -706,13 +724,15 @@ export class SyncEngine extends EventEmitter {
    * Record that an item was consumed on the Pip-Boy itself. The device has
    * already decremented its local count, so when the game snapshot echoes the
    * same decrement back, we must NOT send a removal command (it would
-   * double-decrement the device).
+   * double-decrement the device). Also used for device-initiated drops
+   * (count > 1 for a whole-stack drop).
    * @param {string|number} gameFormId
+   * @param {number} [count]
    */
-  notifyDeviceConsumed(gameFormId) {
+  notifyDeviceConsumed(gameFormId, count = 1) {
     const key = String(gameFormId).toLowerCase();
     const entry = this._deviceConsumed.get(key) || { count: 0, time: 0 };
-    entry.count++;
+    entry.count += count;
     entry.time = Date.now();
     this._deviceConsumed.set(key, entry);
   }
@@ -914,10 +934,10 @@ export class SyncEngine extends EventEmitter {
     };
 
     if (addedIds.length + removedIds.length > MAX_INVENTORY_DELTA) {
-      // Too many changes — do a full inventory reset
+      // Too many changes — reconcile every category to the current snapshot
+      // (device diffs in place) rather than clearing and readding everything.
       this.emit('status', 'Large inventory change detected, performing full reset');
       this._lastChangedCategories = new Set(['AID','AMMO','APPAREL','MISC','WEAPONS']);
-      commands.push(CLEAR_INV_CMD);
       // SYNC-DISABLED: calculateInvWeight() writes every .INV file
     // commands.push('player.calculateInvWeight()');
       for (const item of current) {
@@ -926,7 +946,9 @@ export class SyncEngine extends EventEmitter {
         const cat = this._toPipBoyCategory(item.type);
         queueAdd(cat, formId, item.count || 1, item.condition);
       }
-      flushBatches();
+      for (const cat of INVENTORY_CATEGORIES) {
+        commands.push(...this._buildSetItemsBulkCommands(cat, addBatches.get(cat) || []));
+      }
       return commands;
     }
 
@@ -1301,20 +1323,36 @@ export class SyncEngine extends EventEmitter {
    * Generate action-point commands from game → Pip-Boy.
    * Stock firmware shows maxAP/maxAP in the STATS header; boot0 overrides when
    * cmode is on. Values are ephemeral (!1) and refreshed via renderHeader.
+   *
+   * curAp is chunked against the last value actually sent (this._lastSentAp),
+   * not the raw delta since last snapshot — AP recharges/drains continuously,
+   * so an un-chunked diff would push on nearly every snapshot. Empty (0) and
+   * full (curMaxAp) always push immediately regardless of chunk size, so the
+   * display never sits visibly wrong at either end just because the last step
+   * into it was smaller than a chunk — this also sidesteps maxAP not being a
+   * multiple of AP_SYNC_CHUNK, since chunking is relative to the last-sent
+   * value rather than fixed absolute boundaries.
    */
   _diffAP(player, prevPlayer) {
     const commands = [];
     const curAp =
       player.ap !== undefined ? Math.floor(player.ap) : undefined;
-    const prevAp =
-      prevPlayer.ap !== undefined ? Math.floor(prevPlayer.ap) : undefined;
     const curMaxAp =
       player.maxAP !== undefined ? Math.round(player.maxAP) : undefined;
     const prevMaxAp =
       prevPlayer.maxAP !== undefined ? Math.round(prevPlayer.maxAP) : undefined;
 
-    if (curAp !== undefined && curAp !== prevAp) {
-      commands.push(`player.setav('ap', ${JSON.stringify(curAp)}, !1)`);
+    if (curAp !== undefined) {
+      const lastSent = this._lastSentAp;
+      const atBound = curAp === 0 || (curMaxAp !== undefined && curAp === curMaxAp);
+      const shouldSend =
+        lastSent === undefined ||
+        (atBound && lastSent !== curAp) ||
+        Math.abs(curAp - lastSent) >= AP_SYNC_CHUNK;
+      if (shouldSend) {
+        commands.push(`player.setav('ap', ${JSON.stringify(curAp)}, !1)`);
+        this._lastSentAp = curAp;
+      }
     }
     if (curMaxAp !== undefined && curMaxAp !== prevMaxAp) {
       commands.push(`player.setav('maxap', ${JSON.stringify(curMaxAp)}, !1)`);
@@ -1623,6 +1661,28 @@ export class SyncEngine extends EventEmitter {
   }
 
   /**
+   * Full-sync reconciliation for one category: entries is the complete desired
+   * contents (device diffs against what's actually on the card and only
+   * touches rows that differ — see setitemsbulk_begin/chunk/end). Unlike
+   * setperksbulk this can't arrive as one call — a category's item list can
+   * exceed what safely fits in one line-buffered command — so it's split into
+   * a begin/chunk×N/end sequence instead. Called for every category on every
+   * full sync, even with an empty entries array, since that's what clears out
+   * a category the player emptied.
+   */
+  _buildSetItemsBulkCommands(cat, entries) {
+    const commands = [`player.setitemsbulk_begin('${cat}')`];
+    for (let i = 0; i < entries.length; i += MAX_ITEM_BATCH) {
+      const slice = entries.slice(i, i + MAX_ITEM_BATCH);
+      commands.push(
+        `player.setitemsbulk_chunk('${cat}',[${slice.map((e) => `[${e[0]},${e[1]},${e[2]}]`).join(',')}])`
+      );
+    }
+    commands.push(`player.setitemsbulk_end('${cat}')`);
+    return commands;
+  }
+
+  /**
    * Authoritatively rebuild every row of `formId` on the device from the given
    * per-condition stacks. Used for condition-distribution changes so a single
    * command replaces a fragile add+remove pair (and clears any orphaned row).
@@ -1657,6 +1717,24 @@ export class SyncEngine extends EventEmitter {
         `player.setdams([${slice.map((e) => `[${e[0]},${e[1]},${e[2]}]`).join(',')}])`
       );
     }
+    return commands;
+  }
+
+  /**
+   * Full-sync DAM reconciliation: entries is the complete desired *_DAM.INV
+   * contents, split into a begin/chunk×N/end sequence (device diffs in place
+   * — see setdamsbulk_begin/chunk/end) instead of clearing the file and
+   * rewriting it whole on every full sync.
+   */
+  _buildSetDamsBulkCommands(entries) {
+    const commands = ['player.setdamsbulk_begin()'];
+    for (let i = 0; i < entries.length; i += MAX_DAM_BATCH) {
+      const slice = entries.slice(i, i + MAX_DAM_BATCH);
+      commands.push(
+        `player.setdamsbulk_chunk([${slice.map((e) => `[${e[0]},${e[1]},${e[2]}]`).join(',')}])`
+      );
+    }
+    commands.push('player.setdamsbulk_end()');
     return commands;
   }
 
@@ -1821,6 +1899,7 @@ export class SyncEngine extends EventEmitter {
     this._deviceEquipPending.clear();
     this._deviceTorchPending = null;
     this._resyncEquipAfterInventory = false;
+    this._lastSentAp = undefined;
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);
       this._debounceTimer = null;

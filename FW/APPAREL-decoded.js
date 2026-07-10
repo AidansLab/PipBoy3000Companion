@@ -91,12 +91,16 @@
         Pip.renderBlock(296, 192, 80, 'WG', item.wt || '--'),
         Pip.renderBlock(382, 192, 80, 'VAL', Math.round(item.val * Math.pow((item.cnd / 100), 1.5) * (item.dispCnt || 1)) || '--'),
         Pip.renderBlock(210, 220, 80, 'CND', ''),
-        h.fillRect(244, 228, 244 + ((item.cnd || 100) / 100) * 40, 237),
+        h
+          .setColor(1)
+          .fillRect(244, 228, 284, 237)
+          .setColor(3)
+          .fillRect(244, 228, 244 + ((item.cnd || 100) / 100) * 40, 237),
         NV &&
           h
             .setColor(0)
-            .fillRect(264, 228, 265, 230)
-            .fillRect(264, 235, 265, 237)
+            .fillRect(266, 228, 267, 230)
+            .fillRect(266, 235, 267, 237)
             .setColor(3));
       let effectStr = '';
       if (item.ef && item.ef.length) {
@@ -159,8 +163,12 @@
       updateDtDr();
     },
     onLongClick: (n) => {
-      if (cmode) return;
-      const it = inv.get(vAt(n).realN);
+      const realN = vAt(n).realN,
+        it = inv.get(realN);
+      if (cmode) {
+        Pip.companionDropItem('APPAREL', inv, realN, it);
+        return;
+      }
       (Pip.playSound('TAB'),
         setTimeout(
           () =>

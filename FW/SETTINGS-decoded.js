@@ -511,12 +511,12 @@
       (menu = showMenu({
         '': { title: 'Sound Settings', back: showMainMenu },
         'Sound effects volume': {
-          value: Math.round((settings.volume || 27) / 2.7),
-          min: 1,
-          max: 10,
+          value: Math.round((settings.volume || 27) / 1.35),
+          min: 0,
+          max: 20,
           step: 1,
           onchange: (v) => {
-            (writeSetting('volume', Math.round(2.7 * v)),
+            (writeSetting('volume', Math.round(1.35 * v)),
               Pip.setVol(settings.volume));
           }
         },

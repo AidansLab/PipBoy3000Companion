@@ -48,8 +48,13 @@
       item.exec && Pip.launchApp(item.exec);
     },
     onLongClick: (n) => {
-      if (cmode) return;
       const it = n < appn ? void 0 : inv.get(n - appn);
+      if (cmode) {
+        // App rows (holotapes) aren't inventory items — nothing to drop.
+        if (n < appn) return;
+        Pip.companionDropItem('MISC', inv, n - appn, it);
+        return;
+      }
       (Pip.playSound('TAB'),
         setTimeout(
           () =>

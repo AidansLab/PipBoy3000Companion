@@ -4,39 +4,42 @@ project(FalloutPipBoySync VERSION 1.0 LANGUAGES CXX)
 # ═══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION
 # Two independent plugin targets share this project:
-#   FalloutPipBoySync    — Fallout: New Vegas (xNVSE), from src/main.cpp
-#   FalloutPipBoySyncFO3 — Fallout 3 (xFOSE), from src-fo3/main.cpp
-# Each is built only when its SDK root is available. Both SDKs ship as git
-# submodules (GamePlugin/xNVSE, GamePlugin/xFOSE), which the path variables
-# default to — run `git submodule update --init` and no -D flags are needed.
+#   FalloutPipBoySyncNV  - Fallout: New Vegas (xNVSE), from src/main.cpp
+#   FalloutPipBoySyncFO3 - Fallout 3 (official FOSE, silverlock.org), from
+#                          src-fo3/main.cpp
+# Each is built only when its SDK root is available. xNVSE ships as a git
+# submodule (GamePlugin/xNVSE). FOSE is NOT on GitHub and is included in
+# this git repo for ease of building.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 set(XNVSE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/xNVSE" CACHE PATH
     "Path to xNVSE source root (containing nvse/ directory)")
-set(XFOSE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/xFOSE" CACHE PATH
-    "Path to xFOSE source root (containing fose/ directory)")
+set(FOSE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/FOSE" CACHE PATH
+    "Path to the official FOSE SDK root (containing fose/ and common/ directories)")
 
 # Which plugins this build tree produces. Configure separate trees per game
 # so each generated solution builds exactly one plugin:
 #   cmake -S . -B build-nv  -A Win32 -DBUILD_FO3_PLUGIN=OFF
 #   cmake -S . -B build-fo3 -A Win32 -DBUILD_NV_PLUGIN=OFF
 option(BUILD_NV_PLUGIN "Build the Fallout: New Vegas plugin (xNVSE)" ON)
-option(BUILD_FO3_PLUGIN "Build the Fallout 3 plugin (xFOSE)" ON)
+option(BUILD_FO3_PLUGIN "Build the Fallout 3 plugin (FOSE)" ON)
 
 set(HAVE_XNVSE FALSE)
-set(HAVE_XFOSE FALSE)
+set(HAVE_FOSE FALSE)
 if(BUILD_NV_PLUGIN AND XNVSE_ROOT AND EXISTS "${XNVSE_ROOT}/nvse")
     set(HAVE_XNVSE TRUE)
 endif()
-if(BUILD_FO3_PLUGIN AND XFOSE_ROOT AND EXISTS "${XFOSE_ROOT}/fose")
-    set(HAVE_XFOSE TRUE)
+if(BUILD_FO3_PLUGIN AND FOSE_ROOT AND EXISTS "${FOSE_ROOT}/fose")
+    set(HAVE_FOSE TRUE)
 endif()
 
-if(NOT HAVE_XNVSE AND NOT HAVE_XFOSE)
+if(NOT HAVE_XNVSE AND NOT HAVE_FOSE)
     message(FATAL_ERROR
         "No plugin target enabled (SDK missing or both BUILD_*_PLUGIN options OFF).\n"
-        "Fetch the bundled submodules:  git submodule update --init\n"
-        "or point at checkouts manually: cmake -DXNVSE_ROOT=<NVSE> -DXFOSE_ROOT=<xFOSE> .."
+        "xNVSE is a bundled submodule:  git submodule update --init\n"
+        "FOSE is not on GitHub - download it from https://fose.silverlock.org "
+        "and extract to GamePlugin/FOSE, or point at it manually: "
+        "cmake -DXNVSE_ROOT=<xNVSE> -DFOSE_ROOT=<FOSE> .."
     )
 endif()
 
@@ -44,7 +47,7 @@ endif()
 # COMPILER SETTINGS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Both games are 32-bit — force x86 target
+# Both games are 32-bit - force x86 target
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(WARNING "Building for 64-bit detected. Fallout 3 / New Vegas require 32-bit. "
                     "Use -A Win32 when generating with cmake.")
@@ -91,7 +94,7 @@ set(NVSE_SOURCES
 )
 
 add_library(${PROJECT_NAME} SHARED
-    src/main.cpp
+    src-nv/main.cpp
     ${NVSE_SOURCES}
 )
 
@@ -122,56 +125,36 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 # Set output name (no "lib" prefix)
 set_target_properties(${PROJECT_NAME} PROPERTIES
     PREFIX ""
-    OUTPUT_NAME "FalloutPipBoySync"
+    OUTPUT_NAME "FalloutPipBoySyncNV"
     SUFFIX ".dll"
 )
 
 endif() # HAVE_XNVSE
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# FALLOUT 3 TARGET (xFOSE)
-# Notes:
-#  - xFOSE's repository ships only common/IArchive.cpp; the shared "common"
-#    library headers (common/IPrefix.h etc.) come from the same Ian Patterson
-#    lineage as xNVSE's, so the FO3 target borrows xNVSE's common/ directory
-#    for those headers and their .cpp implementations.
-#  - The FOSE game-data sources are 2008-era C++; the FO3 target compiles as
-#    C++14 (the plugin source itself is C++11-compatible).
-#  - Output is also named FalloutPipBoySync.dll (per the documented install
-#    layout: Data\NVSE\Plugins vs Data\FOSE\Plugins), in an fo3/ subdir so
-#    the two DLLs never collide in the build tree.
+# FALLOUT 3 TARGET (official FOSE)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if(HAVE_XFOSE)
-
-# The FO3 target borrows xNVSE's common/ library headers (xFOSE does not
-# bundle them) — the xNVSE checkout must exist even when its plugin target
-# is disabled for this tree.
-if(NOT EXISTS "${XNVSE_ROOT}/common")
-    message(FATAL_ERROR
-        "The Fallout 3 target needs xNVSE's common/ library headers "
-        "(xFOSE does not bundle them). Fetch both submodules: git submodule update --init"
-    )
-endif()
+if(HAVE_FOSE)
 
 set(FOSE_SOURCES
-    "${XFOSE_ROOT}/fose/fose/GameAPI.cpp"
-    "${XFOSE_ROOT}/fose/fose/GameBSExtraData.cpp"
-    "${XFOSE_ROOT}/fose/fose/GameData.cpp"
-    "${XFOSE_ROOT}/fose/fose/GameExtraData.cpp"
-    "${XFOSE_ROOT}/fose/fose/GameForms.cpp"
-    "${XFOSE_ROOT}/fose/fose/GameInterface.cpp"
-    "${XFOSE_ROOT}/fose/fose/GameObjects.cpp"
-    "${XFOSE_ROOT}/fose/fose/GameRTTI.cpp"
-    "${XFOSE_ROOT}/fose/fose/GameSettings.cpp"
-    "${XFOSE_ROOT}/fose/fose/GameTiles.cpp"
-    "${XFOSE_ROOT}/fose/fose/GameTypes.cpp"
-    "${XFOSE_ROOT}/fose/fose/Utilities.cpp"
-    "${XFOSE_ROOT}/fose/fose_common/SafeWrite.cpp"
-    "${XNVSE_ROOT}/common/IErrors.cpp"
-    "${XNVSE_ROOT}/common/IDebugLog.cpp"
-    "${XNVSE_ROOT}/common/IDataStream.cpp"
-    "${XNVSE_ROOT}/common/IFileStream.cpp"
+    "${FOSE_ROOT}/fose/fose/GameAPI.cpp"
+    "${FOSE_ROOT}/fose/fose/GameBSExtraData.cpp"
+    "${FOSE_ROOT}/fose/fose/GameData.cpp"
+    "${FOSE_ROOT}/fose/fose/GameExtraData.cpp"
+    "${FOSE_ROOT}/fose/fose/GameForms.cpp"
+    "${FOSE_ROOT}/fose/fose/GameInterface.cpp"
+    "${FOSE_ROOT}/fose/fose/GameObjects.cpp"
+    "${FOSE_ROOT}/fose/fose/GameRTTI.cpp"
+    "${FOSE_ROOT}/fose/fose/GameSettings.cpp"
+    "${FOSE_ROOT}/fose/fose/GameTiles.cpp"
+    "${FOSE_ROOT}/fose/fose/GameTypes.cpp"
+    "${FOSE_ROOT}/fose/fose/Utilities.cpp"
+    "${FOSE_ROOT}/fose/fose_common/SafeWrite.cpp"
+    "${FOSE_ROOT}/common/IErrors.cpp"
+    "${FOSE_ROOT}/common/IDebugLog.cpp"
+    "${FOSE_ROOT}/common/IDataStream.cpp"
+    "${FOSE_ROOT}/common/IFileStream.cpp"
 )
 
 add_library(FalloutPipBoySyncFO3 SHARED
@@ -180,8 +163,8 @@ add_library(FalloutPipBoySyncFO3 SHARED
 )
 
 target_include_directories(FalloutPipBoySyncFO3 PRIVATE
-    "${XFOSE_ROOT}/fose"       # fose/*.h, fose_common/*.h
-    "${XNVSE_ROOT}"            # common/*.h (shared library headers)
+    "${FOSE_ROOT}/fose"       # fose/*.h, fose_common/*.h
+    "${FOSE_ROOT}"            # common/*.h
 )
 
 target_compile_definitions(FalloutPipBoySyncFO3 PRIVATE
@@ -205,16 +188,13 @@ target_link_libraries(FalloutPipBoySyncFO3 PRIVATE
 
 set_target_properties(FalloutPipBoySyncFO3 PROPERTIES
     PREFIX ""
-    OUTPUT_NAME "FalloutPipBoySync"
+    OUTPUT_NAME "FalloutPipBoySyncF3"
     SUFFIX ".dll"
     CXX_STANDARD 14
     CXX_STANDARD_REQUIRED ON
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/fo3"
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/fo3"
-    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/fo3"
 )
 
-endif() # HAVE_XFOSE
+endif() # HAVE_FOSE
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # INSTALL
@@ -232,7 +212,7 @@ if(HAVE_XNVSE AND FALLOUT_NV_PATH AND EXISTS "${FALLOUT_NV_PATH}")
     message(STATUS "Install target will deploy NV plugin to: ${FALLOUT_NV_PATH}/Data/NVSE/Plugins")
 endif()
 
-if(HAVE_XFOSE AND FALLOUT_3_PATH AND EXISTS "${FALLOUT_3_PATH}")
+if(HAVE_FOSE AND FALLOUT_3_PATH AND EXISTS "${FALLOUT_3_PATH}")
     install(TARGETS FalloutPipBoySyncFO3
         RUNTIME DESTINATION "${FALLOUT_3_PATH}/Data/FOSE/Plugins"
         LIBRARY DESTINATION "${FALLOUT_3_PATH}/Data/FOSE/Plugins"

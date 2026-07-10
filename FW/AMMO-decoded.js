@@ -65,8 +65,11 @@
         console.log('PIPSYNC:EQUIP:AMMO:' + Pip.formatId(it.id)));
     },
     onLongClick: (n) => {
-      if (isCmode()) return;
       const it = inv.get(n);
+      if (isCmode()) {
+        Pip.companionDropItem('AMMO', inv, n, it);
+        return;
+      }
       (Pip.playSound('TAB'),
         setTimeout(
           () =>

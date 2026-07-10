@@ -166,27 +166,52 @@ static const char *kSyncEnableControlsCmd = "EnablePlayerControlsAltEx 125";
 // overlay itself) keep running normally — a true engine pause (e.g. the ESC
 // menu) would stop those too.
 //
-// "TFC 1" is vanilla's own "freeze frame for screenshots" mechanism: toggling
-// free camera with the "1" argument also halts the game clock immediately,
-// including actors already mid-path. Two alternatives were tried and
-// rejected first (see commit history):
-//  - "tai" (Toggle AI) only blocks NEW AI decisions — an NPC already walking
-//    a path keeps walking it to completion, unsafe for a player-safety lock.
-//  - SetGameSpeed scales animation/physics/projectile timing but does not
-//    touch AI package evaluation or in-progress movement at all.
-// TFC's cost: it hands WASD/mouse to the free camera, which is a separate
-// flight controller that reads raw input directly — it does NOT go through
-// the normal player-control-disable flags (kSyncDisableControlsCmd), so the
-// player could otherwise fly the detached camera around during the lock.
-// SetUFOCamSpeedMult 0 (script name for the "sucsm" console command) zeroes
-// the free camera's movement speed so that input has no effect while locked;
-// restored to its default of 1 on unlock. Screen-space UI (including our
-// injected sync overlay) lives on menuRoot, not the 3D scene the camera
-// renders, so it is expected to stay visible through the freeze.
-static const char *kSyncFreezeWorldCmd = "TFC 1";
-static const char *kSyncUnfreezeWorldCmd = "TFC";
-static const char *kSyncFreecamSpeedZeroCmd = "SetUFOCamSpeedMult 0";
-static const char *kSyncFreecamSpeedRestoreCmd = "SetUFOCamSpeedMult 1";
+// SetGlobalTimeMultiplier replaces the earlier "TFC 1" + "SetUFOCamSpeedMult
+// 0" combo (matching the FO3 plugin, which moved to this for a different
+// reason — TFC's argument form hit a CallGameCommand bug that doesn't apply
+// here, since NV's RunScriptLine2 executes full script lines including
+// arguments correctly). The win for NV specifically: TFC hands WASD/mouse to
+// a separate free-camera flight controller that reads raw input directly,
+// bypassing kSyncDisableControlsCmd entirely — SetUFOCamSpeedMult 0 was only
+// ever a patch over that leak. SetGlobalTimeMultiplier never detaches the
+// camera in the first place, so there's no separate input path to plug.
+//
+// Two OTHER alternatives were tried and rejected before TFC (see commit
+// history): "tai" (Toggle AI) only blocks NEW AI decisions — an NPC already
+// walking a path kept walking it to completion — and SetGameSpeed scales
+// animation/physics/projectile timing but doesn't touch AI package evaluation
+// or in-progress movement, same failure. SetGlobalTimeMultiplier avoids both:
+// it scales the actual game clock that AI package re-evaluation timers read,
+// not just the animation/physics timestep — confirmed in-game to stop NPCs
+// in place, including mid-path.
+static const char *kSyncFreezeWorldCmd = "SetGlobalTimeMultiplier 0.00001 1";
+static const char *kSyncUnfreezeWorldCmd = "SetGlobalTimeMultiplier 1 1";
+
+// Extra height (game units) added to each device-dropped item's spawn
+// position, measured from the GROUND at the item's own (x, y) — matching how
+// vanilla drops sit relative to the ground, not the player. The engine's
+// internal drop placement (inside the RemoveItem-drop path — it takes no
+// position arguments) measured out at up to ~26 units BELOW the player's
+// feet on slopes/stairs (DROP-DIAG logs), leaving items clipped into the
+// ground. RemoveItem returns the newly created world reference before its
+// 3D/havok is loaded (loading is queued), so fixing posZ right then means
+// the model and physics spawn at the corrected height and the item
+// free-falls the last bit naturally. Tune here.
+static const float kDropZOffset = 50.0f;
+
+// TES::GetTerrainHeight — exterior terrain height at (x, y). The TES
+// singleton (*(TES**)0x11DEA10) and the 0x4572E0 call both come from JIP LN
+// NVSE's SDK (nvse/GameData.h), the same long-shipped source the DropAlt
+// port below is based on. Returns false in interiors (no LAND record there —
+// "ground" is arbitrary collision geometry the engine's own placement
+// already handles), in which case the caller keeps the engine-chosen Z.
+static bool GetTerrainHeightAt(float x, float y, float *outZ) {
+  void *tes = *(void **)0x11DEA10;
+  if (!tes)
+    return false;
+  float posXY[2] = {x, y};
+  return ThisStdCall<bool>(0x4572E0, tes, posXY, outZ);
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // VERBOSE LOGGING
@@ -1857,12 +1882,9 @@ static void ResetSyncLockState(bool reenableControls) {
   // mid-lock (e.g. companion crashed during sync) must not leave the world
   // permanently frozen.
   if (reenableControls && g_syncWorldFrozen) {
-    if (PlayerCharacter *player = PlayerCharacter::GetSingleton()) {
+    if (PlayerCharacter *player = PlayerCharacter::GetSingleton())
       Script::RunScriptLine2(kSyncUnfreezeWorldCmd, player, true);
-      Script::RunScriptLine2(kSyncFreecamSpeedRestoreCmd, player, true);
-    }
-    PipBoyLog("SYNC", "ResetSyncLockState: issued %s and %s",
-              kSyncUnfreezeWorldCmd, kSyncFreecamSpeedRestoreCmd);
+    PipBoyLog("SYNC", "ResetSyncLockState: issued %s", kSyncUnfreezeWorldCmd);
     g_syncWorldFrozen = false;
   }
 }
@@ -1944,13 +1966,9 @@ static void ApplySyncLock(bool wantLock) {
     }
     if (!g_syncWorldFrozen) {
       // Freeze NPCs/projectiles/physics too — player controls alone still let
-      // the world move around a player who can't react to it. Zero the free
-      // camera's speed FIRST so there's no window where TFC 1 is active but
-      // WASD can still nudge it before the speed clamp lands.
-      Script::RunScriptLine2(kSyncFreecamSpeedZeroCmd, player, true);
+      // the world move around a player who can't react to it.
       Script::RunScriptLine2(kSyncFreezeWorldCmd, player, true);
-      PipBoyLog("SYNC", "Lock ON: issued %s and %s", kSyncFreecamSpeedZeroCmd,
-                kSyncFreezeWorldCmd);
+      PipBoyLog("SYNC", "Lock ON: issued %s", kSyncFreezeWorldCmd);
       g_syncWorldFrozen = true;
     }
     if (IsHudReadyForSyncOverlay() && !g_syncOverlayInjected)
@@ -1965,9 +1983,7 @@ static void ApplySyncLock(bool wantLock) {
     }
     if (g_syncWorldFrozen) {
       Script::RunScriptLine2(kSyncUnfreezeWorldCmd, player, true);
-      Script::RunScriptLine2(kSyncFreecamSpeedRestoreCmd, player, true);
-      PipBoyLog("SYNC", "Lock OFF: issued %s and %s", kSyncUnfreezeWorldCmd,
-                kSyncFreecamSpeedRestoreCmd);
+      PipBoyLog("SYNC", "Lock OFF: issued %s", kSyncUnfreezeWorldCmd);
       g_syncWorldFrozen = false;
     }
     if (g_syncOverlayInjected)
@@ -2000,6 +2016,49 @@ static int GetItemCountForEquip(PlayerCharacter *player, UInt32 targetFormId) {
     }
   }
   return count;
+}
+
+// Total owned count of a form: base-container count plus the
+// container-changes delta — C++ port of JIP LN NVSE's GetFormCount
+// (nvse/GameObjects.cpp asm), which its DropAlt uses. GetItemCountForEquip
+// above ignores the base container and skips negative deltas, which is fine
+// for "does the player carry one to equip" but not for "how many can drop":
+// items granted by the base NPC record have countDelta 0 (or negative after
+// partial drops) with the real count living in the base container list.
+static SInt32 GetTotalFormCount(PlayerCharacter *player, TESForm *form) {
+  if (!player || !form)
+    return 0;
+  TESContainer *container = player->GetContainer();
+  if (!container)
+    return 0;
+  SInt32 total = 0;
+  for (auto it = container->formCountList.Begin(); !it.End(); ++it) {
+    TESContainer::FormCount *fc = it.Get();
+    if (fc && fc->form == form)
+      total += fc->count;
+  }
+  ExtraContainerChanges *cc =
+      (ExtraContainerChanges *)player->extraDataList.GetByType(
+          kExtraData_ContainerChanges);
+  ExtraContainerChanges::EntryData *entry =
+      (cc && cc->data && cc->data->objList)
+          ? cc->data->objList->FindForItem(form)
+          : NULL;
+  if (entry) {
+    if (total != 0) {
+      // Leveled-item entries leave the base count untouched (JIP parity).
+      if (!entry->HasExtraLeveledItem()) {
+        total += entry->countDelta;
+        if (total < 0)
+          total = 0;
+      }
+    } else {
+      total = entry->countDelta;
+      if (total < 0)
+        total = 0;
+    }
+  }
+  return total;
 }
 
 // Thrown weapons (grenades, mines, throwing spears/knives) must equip the whole
@@ -2159,6 +2218,141 @@ static void ExecutePipBoyCommand(const std::string &line) {
   } else if (verb == "UNEQUIP") {
     if (!RunVanillaItemCommand(player, form, false))
       player->UnequipItem(form, 1, NULL, 1, false, 1);
+  } else if (verb == "DROP") {
+    // wantCnd doubles as the drop count here (same "second space-separated
+    // token" parse used for EQUIP's condition) — the device already decided
+    // 1 vs. the whole stack (Pip.companionDropItem in boot0) and sent that
+    // count.
+    //
+    // Native port of JIP LN NVSE's DropAlt (Cmd_DropAlt_Execute,
+    // functions_jip/jip_fn_inventory.h), single-form case. Vanilla Drop was
+    // making items intermittently vanish; DropAlt exists precisely to work
+    // around those engine bugs and does so by never using the vanilla Drop
+    // path at all — it calls the TESObjectREFR::RemoveItem virtual with the
+    // drop flag set, with two crucial behaviors vanilla Drop lacks:
+    //  - scripted item instances get their ExtraCount stripped and drop as
+    //    single references (a scripted stack dropped whole is a known vanish
+    //    case);
+    //  - only thrown weapons and non-armor stack into one world reference;
+    //    guns and armor drop one reference per unit.
+    // The RemoveItem virtual + argument layout come from xNVSE's own
+    // GameObjects.h/InventoryReference.cpp (the SDK itself calls it), so no
+    // raw address is involved. keepOwner=1 matches DropAlt's default (drops
+    // stay owned by the player — no accidental "stealing your own item
+    // back" flags).
+    int dropCount = wantCnd > 0 ? wantCnd : 1;
+    SInt32 total = GetTotalFormCount(player, form);
+    if (total < 1) {
+      PipBoyLog("CMD-IN", "DROP rejected — item %08X not in player inventory",
+                formId);
+      return;
+    }
+    if (dropCount < total)
+      total = dropCount;
+
+    const bool stacked = (form->typeID == kFormType_TESObjectWEAP)
+                             ? IsThrownWeapon(form)
+                             : (form->typeID != kFormType_TESObjectARMO);
+    TESScriptableForm *scriptable =
+        DYNAMIC_CAST(form, TESForm, TESScriptableForm);
+    const bool hasScript = scriptable && scriptable->script;
+
+    ExtraContainerChanges *cc =
+        (ExtraContainerChanges *)player->extraDataList.GetByType(
+            kExtraData_ContainerChanges);
+    ExtraContainerChanges::EntryData *entry =
+        (cc && cc->data && cc->data->objList)
+            ? cc->data->objList->FindForItem(form)
+            : nullptr;
+
+    // RemoveItem returns the world reference it just created for the dropped
+    // item (vtable decl in both xNVSE's and JIP's SDK; JIP simply discards
+    // it). Its 3D model + havok body are QUEUED, not yet loaded, at that
+    // moment — so fixing posZ here moves where they will spawn, with none of
+    // the drawbacks of repositioning after the fact (no 3D reload flicker, no
+    // physics loss, no teleporting into walls: X/Y stay wherever the engine's
+    // own placement chose). Height is kDropZOffset above the GROUND at the
+    // item's own (x, y) when terrain height is available and higher than the
+    // engine-chosen Z (the uphill-slope clipping case); the max() keeps
+    // engine Z when the item sits on a structure ABOVE the terrain (bridge,
+    // building floor in an exterior worldspace) — terrain height there would
+    // bury it under the floor. Each ref is raised once (the set guards
+    // against the engine handing back the same ref for consecutive units).
+    std::set<UInt32> raisedRefs;
+    auto raiseDropRef = [&raisedRefs](TESObjectREFR *dropped) {
+      if (!dropped || !raisedRefs.insert(dropped->refID).second)
+        return;
+      float groundZ;
+      if (GetTerrainHeightAt(dropped->posX, dropped->posY, &groundZ) &&
+          groundZ > dropped->posZ)
+        dropped->posZ = groundZ;
+      dropped->posZ += kDropZOffset;
+    };
+
+    if (entry && entry->extendData) {
+      // Per-instance extra data (condition, script state, worn history…)
+      // must ride along with the dropped reference — always re-read the
+      // FIRST node: each RemoveItem consumes it and the list shifts up.
+      ExtraDataList *xData;
+      while (total > 0 && entry->extendData &&
+             (xData = entry->extendData->Begin().Get())) {
+        int subCount = 1;
+        ExtraCount *xCount = (ExtraCount *)xData->GetByType(kExtraData_Count);
+        if (xCount && xCount->count > 1) {
+          subCount = xCount->count;
+          if (hasScript && xData->GetByType(kExtraData_Script)) {
+            // Scripted stack: strip the count and drop a single instance —
+            // dropping a scripted stack whole is a known vanish case.
+            xData->RemoveByType(kExtraData_Count);
+            subCount = 1;
+          } else if (subCount > total) {
+            subCount = total;
+          }
+        }
+        total -= subCount;
+        if (stacked) {
+          raiseDropRef(
+              player->RemoveItem(form, xData, subCount, 1, 1, NULL, 0, 0, 1, 0));
+        } else {
+          while (subCount-- > 0)
+            raiseDropRef(
+                player->RemoveItem(form, xData, 1, 1, 1, NULL, 0, 0, 1, 0));
+        }
+      }
+    }
+    // Remainder with no per-instance data (pristine units, or base-container
+    // items with no container-changes entry at all).
+    while (total > 0) {
+      int subCount = (total < 0x7FFF) ? total : 0x7FFF;
+      raiseDropRef(
+          player->RemoveItem(form, NULL, subCount, 1, 1, NULL, 0, 0, 1, 0));
+      total -= subCount;
+    }
+
+    // TEMP DIAGNOSTIC (remove once disappearing drops are confirmed fixed):
+    // log where each world ref of this form sits right after the drop.
+    if (player->parentCell) {
+      int matchCount = 0;
+      for (tList<TESObjectREFR>::Iterator it =
+               player->parentCell->objectList.Begin();
+           !it.End(); ++it) {
+        TESObjectREFR *ref = it.Get();
+        if (!ref || !ref->baseForm || ref->baseForm->refID != formId)
+          continue;
+        matchCount++;
+        PipBoyLog("DROP-DIAG",
+                  "match #%d refID=%08X pos=(%.1f,%.1f,%.1f) "
+                  "deltaFromPlayer=(%.1f,%.1f,%.1f) deleted=%d",
+                  matchCount, ref->refID, ref->posX, ref->posY, ref->posZ,
+                  ref->posX - player->posX, ref->posY - player->posY,
+                  ref->posZ - player->posZ, ref->IsDeleted() ? 1 : 0);
+      }
+      if (matchCount == 0)
+        PipBoyLog("DROP-DIAG",
+                  "no world reference of form %08X found in player's cell "
+                  "right after drop",
+                  formId);
+    }
   }
 
   RefreshPipBoyUI();
