@@ -43,10 +43,11 @@ Sync your **Fallout: New Vegas** and **Fallout 3** player stats and inventory to
 - Launch your game via your mod manager, or script extender loader (nvse_loader.exe/fose_loader.exe).
 
 ### General Usage
-Note: If you have factory reset or updated your Pip-Boy, you will need to click "Install Companion Menus & Boot Patch" first.
  - Set the Pip-Boy mode for the Fallout you will be playing
  - Open the companion app
  - Start the Fallout you chose
+ 
+ Note: If you have factory reset or updated your Pip-Boy, you will need to click "Install Companion Menus & Boot Patch" first.
 
 <br>
 
