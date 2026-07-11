@@ -2,8 +2,7 @@
 <h1>Pip-Boy 3000 Companion App</h1>
 
 <a href="https://www.paypal.com/donate/?hosted_button_id=YCQRQCCNQGCHY">
-  <img src="https://img.shields.io/badge/PayPal-Donate-blue?logo=paypal&logoColor=white&style=for-the-badge" alt="PayPal">
-</a>
+  <img src="https://img.shields.io/badge/PayPal-Donate-blue?logo=paypal&logoColor=white&style=for-the-badge" alt="PayPal"></a>
 <img alt="GitHub package.json version" src="https://img.shields.io/github/package-json/v/AidansLab/PipBoy3000Companion?style=for-the-badge&filename=CompanionApp/package.json">
 <img alt="GitHub commits since latest release" src="https://img.shields.io/github/commits-since/AidansLab/PipBoy3000Companion/latest?style=for-the-badge">
 <p></p>
