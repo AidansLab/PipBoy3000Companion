@@ -1,5 +1,5 @@
 <div align="center">
-<h1>Pip-Boy 3000 Companion App</h1>
+<h1>Pip-Boy 3000 Companion</h1>
 
 <a href="https://www.paypal.com/donate/?hosted_button_id=YCQRQCCNQGCHY">
   <img src="https://img.shields.io/badge/PayPal-Donate-blue?logo=paypal&logoColor=white&style=for-the-badge" alt="PayPal"></a>
@@ -7,7 +7,7 @@
 <img alt="GitHub commits since latest release" src="https://img.shields.io/github/commits-since/AidansLab/PipBoy3000Companion/latest?style=for-the-badge">
 <p></p>
 <img alt="GitHub License" src="https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-blue?style=flat-square&link=https%3A%2F%2Fgithub.com%2FAidansLab%2FPipBoy3000Companion%2Fblob%2Fmain%2FLICENSE">
-<img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/AidansLab/PipBoy3000CompanionApp?style=flat-square">
+<img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/AidansLab/PipBoy3000Companion?style=flat-square">
 <img alt="GitHub last commit" src="https://img.shields.io/github/last-commit/AidansLab/PipBoy3000Companion?flat-square">
 <img alt="GitHub forks" src="https://img.shields.io/github/forks/AidansLab/PipBoy3000Companion?style=flat-square">
 
@@ -34,9 +34,9 @@ Sync your **Fallout: New Vegas** and **Fallout 3** player stats and inventory to
 3. **Pip-Boy commands** Espruino commands are sent over USB serial to update the device
 
 ## Quick Start
-- Download the latest companion app exe from the [Releases page](https://github.com/AidansLab/PipBoy3000CompanionApp/releases)
+- Download the latest companion app exe from the [Releases page](https://github.com/AidansLab/PipBoy3000Companion/releases)
 - Install [NVSE](https://www.nexusmods.com/newvegas/mods/67883?tab=files) or [FOSE](https://www.nexusmods.com/fallout3/mods/8606?tab=description) depending on your game.
-- Install the latest plugin DLL for [Fallout New Vegas]() or [Fallout 3]() by clicking the Mod manager download if you are using a mod manager, or manually install from the [Releases page](https://github.com/AidansLab/PipBoy3000CompanionApp/releases) to your NVSE/FOSE plugins folder.
+- Install the latest plugin DLL for [Fallout New Vegas]() or [Fallout 3]() by clicking the Mod manager download if you are using a mod manager, or manually install from the [Releases page](https://github.com/AidansLab/PipBoy3000Companion/releases) to your NVSE/FOSE plugins folder.
 - Plug in your Pip-Boy 3000 with a USB C cable, make sure to use a USB cable that supports data transfer, not just charging. The one that came with your Pip-Boy works great.
 - Make sure your Pip-Boy is set to the same mode as the game you want to sync with by going to DATA>Settings>Pip-Boy mode and selecting New Vegas or Fallout 3.
 - Open the companion app and click "Install Companion Menus & Boot Patch" to install the companion firmware to your device. Wait for it to reboot and connect to the app.
