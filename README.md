@@ -4,13 +4,13 @@
 <a href="https://www.paypal.com/donate/?hosted_button_id=YCQRQCCNQGCHY">
   <img src="https://img.shields.io/badge/PayPal-Donate-blue?logo=paypal&logoColor=white&style=for-the-badge" alt="PayPal">
 </a>
-<img alt="GitHub package.json version" src="https://img.shields.io/github/package-json/v/:AidansLab/:PipBoy3000CompanionApp?style=for-the-badge&filename=CompanionApp/package.json">
-<img alt="GitHub commits since latest release" src="https://img.shields.io/github/commits-since/:AidansLab/:PipBoy3000CompanionApp/latest?style=for-the-badge">
+<img alt="GitHub package.json version" src="https://img.shields.io/github/package-json/v/AidansLab/PipBoy3000Companion?style=for-the-badge&filename=CompanionApp/package.json">
+<img alt="GitHub commits since latest release" src="https://img.shields.io/github/commits-since/AidansLab/PipBoy3000Companion/latest?style=for-the-badge">
 <p></p>
-<img alt="GitHub License" src="https://img.shields.io/github/license/:AidansLab/:PipBoy3000CompanionApp?style=flat-square">
-<img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/:AidansLab/:PipBoy3000CompanionApp?style=flat-square">
-<img alt="GitHub last commit" src="https://img.shields.io/github/last-commit/:AidansLab/:PipBoy3000CompanionApp?flat-square">
-<img alt="GitHub forks" src="https://img.shields.io/github/forks/:AidansLab/:PipBoy3000CompanionApp?style=flat-square">
+<img alt="GitHub License" src="https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-blue?style=flat-square&link=https%3A%2F%2Fgithub.com%2FAidansLab%2FPipBoy3000Companion%2Fblob%2Fmain%2FLICENSE">
+<img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/AidansLab/PipBoy3000CompanionApp?style=flat-square">
+<img alt="GitHub last commit" src="https://img.shields.io/github/last-commit/AidansLab/PipBoy3000Companion?flat-square">
+<img alt="GitHub forks" src="https://img.shields.io/github/forks/AidansLab/PipBoy3000Companion?style=flat-square">
 
 
 </div>
