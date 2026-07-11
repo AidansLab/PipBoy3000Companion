@@ -28,32 +28,33 @@
     width: 185,
     render: (item) => {
       let img;
-      if (
-        (Pip.renderBlock(296, 192, 80, 'WG', item.wt || '--'),
-        Pip.renderBlock(382, 192, 80, 'VAL', item.val || '--'),
-        item.il)
-      )
-        (imgs.seek(item.io), (img = imgs.read(item.il)));
-      else if (item.img)
-        try {
-          img = fs.readFileSync(item.img);
-        } catch {}
-      img && h.drawImage(img, 340, 114, { rotate: 0 });
+      (Pip.renderBlock(296, 192, 80, 'WG', item.wt || '--'),
+        Pip.renderBlock(382, 192, 80, 'VAL', item.val || '--'));
+      try {
+        (item.il
+          ? (imgs.seek(item.io), (img = imgs.read(item.il)))
+          : item.img && (img = fs.readFileSync(item.img)),
+          img && h.drawImage(img, 340, 114, { rotate: 0 }));
+      } catch (e) {
+        debug(`Error drawing image for Misc item: ${e}`);
+      }
     },
     onClick: (n) => {
       const item = n < appn ? apps[n] : db.getId(inv.get(n - appn).id);
-      item.exec &&
-        (debug(`Launch Holotape ${item.exec}`),
-        setTimeout(function () {
-          (Pip.remove(),
-            (Pip.CURRENT = eval(fs.readFileSync(item.exec))()),
-            debug(`Holotape ${item.exec} loaded`));
-        }, 10));
+      // Launched via boot0's Pip.launchApp (not inline here) so the pending
+      // callback doesn't keep this whole menu's closure (db/inv/imgs/apps/
+      // scroller) reachable while the holotape's own script is evaluated -
+      // see the comment on Pip.launchApp for why that matters.
+      item.exec && Pip.launchApp(item.exec);
     },
     onLongClick: (n) => {
-      if (typeof cmode !== 'undefined' && cmode) return;
-      if (n < appn) return;
-      const it = inv.get(n - appn);
+      const it = n < appn ? void 0 : inv.get(n - appn);
+      if (cmode) {
+        // App rows (holotapes) aren't inventory items - nothing to drop.
+        if (n < appn) return;
+        Pip.companionDropItem('MISC', inv, n - appn, it);
+        return;
+      }
       (Pip.playSound('TAB'),
         setTimeout(
           () =>

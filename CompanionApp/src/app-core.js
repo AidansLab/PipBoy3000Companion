@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 Aidan Lee-Calamera (aka Aidan's Lab). 
+ * All rights reserved.
+ *
+ * This source code is licensed under the Creative Commons
+ * Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0).
+ *
+ * You are free to share and adapt this code under the following conditions:
+ *  - Attribution: You must give appropriate credit and provide a link to the license.
+ *  - Non-Commercial: You may not use this material for commercial purposes.
+ *  - ShareAlike: If you alter, transform, or build upon this work, you must
+ *    distribute your contributions under the same CC BY-NC-SA 4.0 license.
+ *
+ * You may obtain a full copy of the License text in the LICENSE file in the
+ * root directory of this project repository or online at:
+ * https://creativecommons.org/licenses/by-nc-sa/4.0/
+ */
+
 /**
  * app-core.js
  *
@@ -156,7 +174,7 @@ export class CompanionApp extends EventEmitter {
       await this.bridge.awaitReconnectAfterReboot(90000);
       this.log('status', 'Pip-Boy reconnected after reboot');
     } catch (err) {
-      this.log('warn', `${err.message} — will retry setup if already connected`);
+      this.log('warn', `${err.message} - will retry setup if already connected`);
     }
 
     try {
@@ -312,7 +330,7 @@ export class CompanionApp extends EventEmitter {
         }
         if (this.pipeClient.connected) {
           this.pipeClient.send(evt.state ? 'TORCH ON' : 'TORCH OFF');
-          this.log('sync', `Pip-Boy → game: flashlight ${evt.state ? 'on' : 'off'}`);
+          this.log('sync', `Pip-Boy -> game: flashlight ${evt.state ? 'on' : 'off'}`);
         } else if (this._companionPatchInstalled) {
           this.log('warn', 'Pip-Boy flashlight toggle ignored (game not connected)');
         }
@@ -325,18 +343,46 @@ export class CompanionApp extends EventEmitter {
 
       if (evt.action === 'use') {
         this.syncEngine.notifyDeviceConsumed(pipeFormId);
-      } else if (evt.action === 'equip') {
-        this.syncEngine.notifyDeviceEquipped(pipeFormId);
-      } else if (evt.action === 'unequip') {
-        this.syncEngine.notifyDeviceUnequipped(pipeFormId);
       }
+      if (evt.action === 'drop') {
+        this.syncEngine.notifyDeviceConsumed(pipeFormId, evt.count || 1);
+      }
+      // Give the device a command-free window so audio timer callbacks aren't
+      // blocked by incoming serial commands while a sound is playing.
+      if (evt.action === 'equip' || evt.action === 'unequip' || evt.action === 'use' || evt.action === 'drop') {
+        this.bridge.guardAudio();
+      }
+      // notifyDeviceEquipped/Unequipped are intentionally not called here:
+      // the plugin always counts both worn and bagged copies of a form together,
+      // so equipping/unequipping never causes a net count change in the snapshot.
+      // Storing a pending credit would falsely suppress legitimate subsequent
+      // drops of the unequipped copy (the "remainder" after a split-stack equip).
 
       if (this.pipeClient.connected) {
-        this.pipeClient.send(`${evt.action.toUpperCase()} ${pipeFormId}`);
+        let pipeCmd = `${evt.action.toUpperCase()} ${pipeFormId}`;
+        // Carry the selected condition so the game equips the exact stack
+        // instance (otherwise the engine equips its default highest-condition one).
+        if (
+          evt.action === 'equip' &&
+          evt.condition !== undefined &&
+          Number.isFinite(evt.condition)
+        ) {
+          pipeCmd += ` ${evt.condition}`;
+        }
+        // Carry how many units to drop (the device already decided 1 vs the
+        // whole stack - see Pip.companionDropItem in boot0).
+        if (
+          evt.action === 'drop' &&
+          evt.count !== undefined &&
+          Number.isFinite(evt.count)
+        ) {
+          pipeCmd += ` ${evt.count}`;
+        }
+        this.pipeClient.send(pipeCmd);
         if (pipeFormId.toLowerCase() !== String(evt.formId).toLowerCase()) {
-          this.log('sync', `Pip-Boy → game: ${evt.action} ${evt.category} ${evt.formId} → ${pipeFormId}`);
+          this.log('sync', `Pip-Boy -> game: ${evt.action} ${evt.category} ${evt.formId} -> ${pipeFormId}`);
         } else {
-          this.log('sync', `Pip-Boy → game: ${evt.action} ${evt.category} ${pipeFormId}`);
+          this.log('sync', `Pip-Boy -> game: ${evt.action} ${evt.category} ${pipeFormId}`);
         }
       } else if (this._companionPatchInstalled) {
         this.log('warn', `Pip-Boy ${evt.action} ${evt.category} ${gameFormId} ignored (game not connected)`);
@@ -394,8 +440,15 @@ export class CompanionApp extends EventEmitter {
       }
       this._emitStatus();
     });
-    this.pipeClient.on('save-load', () => {
+    this.pipeClient.on('save-load', async () => {
       this.syncEngine.handleSaveLoad();
+      // The pipe connection itself never drops for a mid-game load (only a
+      // fresh game process does that), so 'connected' never re-fires to
+      // re-enable sync - and 'main-menu' (sent when the plugin detects the
+      // player left the game world, e.g. right before this load) explicitly
+      // disables it. Without this, a mid-game load leaves sync permanently
+      // off: the next real snapshot arrives but processSnapshot() no-ops.
+      await this._tryEnableSync();
     });
     this.pipeClient.on('snapshot', (snapshot) => {
       this.syncEngine.processSnapshot(snapshot);

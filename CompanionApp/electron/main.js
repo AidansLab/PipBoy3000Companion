@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 Aidan Lee-Calamera (aka Aidan's Lab). 
+ * All rights reserved.
+ *
+ * This source code is licensed under the Creative Commons
+ * Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0).
+ *
+ * You are free to share and adapt this code under the following conditions:
+ *  - Attribution: You must give appropriate credit and provide a link to the license.
+ *  - Non-Commercial: You may not use this material for commercial purposes.
+ *  - ShareAlike: If you alter, transform, or build upon this work, you must
+ *    distribute your contributions under the same CC BY-NC-SA 4.0 license.
+ *
+ * You may obtain a full copy of the License text in the LICENSE file in the
+ * root directory of this project repository or online at:
+ * https://creativecommons.org/licenses/by-nc-sa/4.0/
+ */
+
 import { app, BrowserWindow, ipcMain, Menu, dialog, screen } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -124,6 +142,16 @@ app.on('window-all-closed', async () => {
 });
 
 ipcMain.handle('get-status', () => companion?.getStatus() ?? null);
+
+ipcMain.handle('get-version', () => {
+  try {
+    const pkgPath = path.join(__dirname, '..', 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    return pkg.version || 'unknown';
+  } catch {
+    return 'unknown';
+  }
+});
 
 ipcMain.handle('set-torch-sync', (_event, enabled) => {
   if (!companion) {

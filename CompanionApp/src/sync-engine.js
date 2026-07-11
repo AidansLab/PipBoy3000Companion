@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 Aidan Lee-Calamera (aka Aidan's Lab). 
+ * All rights reserved.
+ *
+ * This source code is licensed under the Creative Commons
+ * Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0).
+ *
+ * You are free to share and adapt this code under the following conditions:
+ *  - Attribution: You must give appropriate credit and provide a link to the license.
+ *  - Non-Commercial: You may not use this material for commercial purposes.
+ *  - ShareAlike: If you alter, transform, or build upon this work, you must
+ *    distribute your contributions under the same CC BY-NC-SA 4.0 license.
+ *
+ * You may obtain a full copy of the License text in the LICENSE file in the
+ * root directory of this project repository or online at:
+ * https://creativecommons.org/licenses/by-nc-sa/4.0/
+ */
+
 /**
  * sync-engine.js
  * 
@@ -17,10 +35,10 @@ import { EventEmitter } from 'events';
 const SYNC_FLUSH_INTERVAL_MS = 10000; // How often to call player.sync() on device
 const MAX_INVENTORY_DELTA = 50;       // If more than this many items change, do a full reset
 // Coalesce rapid game snapshots; leading edge still processes the first change immediately.
-// 500ms is a good balance — 250ms matches the game poll and can queue serial work faster.
-const SYNC_DEBOUNCE_MS = 500;
+// Matches the game plugin's SNAPSHOT_INTERVAL_MS so a second change lands right after that poll.
+const SYNC_DEBOUNCE_MS = 150;
 
-// player.setav markers for S.P.E.C.I.A.L. — refreshed softly on the SPECIAL tab.
+// player.setav markers for S.P.E.C.I.A.L. - refreshed softly on the SPECIAL tab.
 const SPECIAL_SETAV_MARKERS = [
   "player.setav('strength'",
   "player.setav('perception'",
@@ -31,38 +49,52 @@ const SPECIAL_SETAV_MARKERS = [
   "player.setav('luck'",
 ];
 
-const SPECIAL_SOFT_REFRESH_CMD =
-  `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id==='SPECIAL'&&Pip.emit)Pip.emit('special');`;
+const SPECIAL_SOFT_REFRESH_CMD = 'player.refreshspecial();';
 
 const SKILLS_SOFT_REFRESH_CMD =
   `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id==='SKILLS'&&Pip.emit)Pip.emit('skills');`;
 
 // HP lives in the shared Pip-Boy header; redraw it without rebuilding pages.
-const HP_HEADER_SOFT_REFRESH_CMD =
-  `if(typeof Pip!=='undefined'&&Pip.renderHeader)Pip.renderHeader();`;
+const HP_HEADER_SOFT_REFRESH_CMD = 'player.renderheader();';
 
-// Caps/Wg/HP in the ITEMS chrome — header only, no tab rebuild.
-const ITEMS_HEADER_SOFT_REFRESH_CMD =
-  `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.MODE===1&&Pip.renderHeader)Pip.renderHeader();`;
+// AP recharges/drains continuously in real time, which without chunking means
+// a device write on almost every snapshot. Only push once AP has moved this
+// many points from the last value actually sent - see _diffAP.
+const AP_SYNC_CHUNK = 5;
+
+// Caps/Wg/HP in the ITEMS chrome - header only, no tab rebuild.
+const ITEMS_HEADER_SOFT_REFRESH_CMD = 'player.renderheader(!0);';
 
 /** Full menu rebuild for STATS sub-tabs except GENERAL/SPECIAL/SKILLS (soft refresh). */
 const STATS_TAB_FULL_REFRESH_CMD =
   `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.MODE===0&&Pip.changeMenu&&` +
   `Pip.CURRENT.id!=='GENERAL'&&Pip.CURRENT.id!=='SPECIAL'&&Pip.CURRENT.id!=='SKILLS')Pip.changeMenu();`;
 
-/** Used after full sync — inventory tabs still get changeMenu; STATS uses soft where possible. */
-const FULL_SYNC_UI_REFRESH_CMD =
-  `if(typeof Pip!=='undefined'&&Pip.CURRENT){` +
-  `if(Pip.CURRENT.id==='SPECIAL'&&Pip.emit)Pip.emit('special');` +
-  `else if(Pip.CURRENT.id==='SKILLS'&&Pip.emit)Pip.emit('skills');` +
-  `else if(Pip.MODE===0&&Pip.CURRENT.id!=='GENERAL'&&Pip.changeMenu)Pip.changeMenu();` +
-  `else if(['WEAPONS','APPAREL','AID','MISC','AMMO'].indexOf(Pip.CURRENT.id)>=0&&Pip.changeMenu)Pip.changeMenu();}`;
+/** Used after full sync - inventory tabs still get changeMenu; STATS uses soft where possible. */
+const FULL_SYNC_UI_REFRESH_CMD = 'player.fullsyncrefresh();';
 
 const INVENTORY_CATEGORIES = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
-const CLEAR_INV_CMD = `if(typeof Pip!=='undefined'&&Pip.inv){delete Pip.inv;}['AID','AMMO','APPAREL','MISC','WEAPONS'].forEach(function(v){require('fs').writeFileSync('INV/'+(NV?'NV':'F3')+'/'+v+'.INV','')})`;
-const CLEAR_PERKS_CMD = `require('fs').writeFileSync('SETTINGS/'+(NV?'NV':'F3')+'_PERKS.JSON','{}')`;
+
+// Perks and Skills are InvFile-backed on the device now (INV/{m}/PERKS.INV,
+// SKILLS.INV - same shape as the item categories), so pre-sync backup/restore
+// treats them as two more INV categories instead of separate JSON files.
+const PRESYNC_CATEGORIES = [...INVENTORY_CATEGORIES, 'PERKS', 'SKILLS'];
+
+// Weapon DAM (skill/condition-adjusted display damage) lives in a side
+// *_DAM.INV file, mirrored via batched player.setdams()/setdamsbulk_* calls so
+// the device opens and flash-writes the file once per batch instead of once
+// per entry.
+// Entries per setdams command. Each `[id,cnd,dam],` triple is ~16 chars and the
+// serial bridge packs lines into 512-byte chunks - 24 keeps a full command
+// safely inside one chunk so it never floods the device's USB RX buffer.
+const MAX_DAM_BATCH = 24;
+// Same rationale as MAX_DAM_BATCH, for player.additemsbulk()/removeitemsbulk()
+// batches: N items changing in the same category cost the device one flash
+// write per batch instead of one per item.
+const MAX_ITEM_BATCH = 24;
+const REFRESH_WEAPON_DAM_CMD = 'player.refreshweapondam()';
 /** Refresh open WEAPONS/APPAREL scroller after remote equip; safe if .boot0 not loaded */
-const REFRESH_EQUIP_CMD = `if(typeof Pip!=='undefined'){if(Pip.refreshEquipState)Pip.refreshEquipState();else Pip.emit('scroller','refreshEquip');}`;
+const REFRESH_EQUIP_CMD = 'player.refreshequip()';
 
 export class SyncEngine extends EventEmitter {
   constructor(serialBridge, formIdMapper) {
@@ -87,12 +119,21 @@ export class SyncEngine extends EventEmitter {
     // we expect to see echoed back in an upcoming game snapshot.
     // gameFormId (lowercase) -> { count, time }
     this._deviceConsumed = new Map();
-    // Device-initiated equip/unequip — suppress bag-count echoes (equip moves 1
+    // Device-initiated equip/unequip - suppress bag-count echoes (equip moves 1
     // to worn without reducing total owned; unequip returns 1 to bag).
     // gameFormId (lowercase) -> { action: 'equip'|'unequip', count, time }
     this._deviceEquipPending = new Map();
-    // Device-initiated torch toggles — don't let a stale game snapshot turn the LED off.
+    // Device-initiated torch toggles - don't let a stale game snapshot turn the LED off.
     this._deviceTorchPending = null;
+    this._resyncEquipAfterInventory = false;
+    // Last AP value actually pushed to the device - see _diffAP. Reset
+    // alongside previousState so a full resync always pushes the current AP.
+    this._lastSentAp = undefined;
+    // Bumped on save load / forced resync. A snapshot that began processing
+    // under an older generation must not write its (now stale) state back into
+    // previousState, or it would downgrade the next post-load full sync to an
+    // incremental diff and leave inventory out of sync.
+    this._stateGeneration = 0;
     this.stats = {
       snapshotsProcessed: 0,
       commandsSent: 0,
@@ -110,6 +151,7 @@ export class SyncEngine extends EventEmitter {
     }
     this.gameMode = mode;
     this.previousState = null; // Force full sync on game mode change
+    this._lastSentAp = undefined;
     this._lastMismatchWarning = null;
     this.emit('game-mode-changed', mode);
   }
@@ -119,6 +161,7 @@ export class SyncEngine extends EventEmitter {
     if (!this.gameMode) return;
     this.gameMode = null;
     this.previousState = null;
+    this._lastSentAp = undefined;
     this._lastMismatchWarning = null;
     this.emit('game-mode-changed', null);
   }
@@ -224,7 +267,7 @@ export class SyncEngine extends EventEmitter {
     if (!this.enabled || !this.bridge.connected) return;
     if (this._processingSnapshot) {
       // The game only sends snapshots when something changed, so we can't just
-      // drop this one — park it (keeping only the newest) and process it as
+      // drop this one - park it (keeping only the newest) and process it as
       // soon as the current batch finishes.
       this._pendingSnapshot = snapshot;
       return;
@@ -233,12 +276,18 @@ export class SyncEngine extends EventEmitter {
     this._processingSnapshot = true;
     this.stats.snapshotsProcessed++;
 
+    // Capture the generation this snapshot is processed under. If a save load
+    // (or forced resync) bumps the generation mid-flight, we must not let this
+    // snapshot's stale state overwrite the freshly-reset previousState.
+    const processingGeneration = this._stateGeneration;
+
     // Remap form IDs when runtime load order differs from Pip-Boy fixed offsets.
     if (snapshot.loadOrder && this.mapper?.setLoadOrder) {
       const loadOrderChanged = this.mapper.setLoadOrder(snapshot.loadOrder);
       if (loadOrderChanged && this.previousState) {
         this.previousState = null;
-        this.emit('status', 'Load order updated — forcing full resync');
+        this._lastSentAp = undefined;
+        this.emit('status', 'Load order updated - forcing full resync');
       }
     }
 
@@ -261,12 +310,12 @@ export class SyncEngine extends EventEmitter {
       if (isFullSync && this.gameMode === 'FNV' && !this._getFactions(snapshot).length) {
         this.emit(
           'warning',
-          'Game plugin did not send faction data — rebuild FalloutPipBoySync.dll (v6+) and restart the game'
+          'Game plugin did not send faction data - rebuild FalloutPipBoySync.dll (v6+) and restart the game'
         );
       }
 
       if (commands.length > 0) {
-        const factionCmd = commands.find((c) => c.includes('REP_VISIBLE.JSON'));
+        const factionCmd = commands.find((c) => c.startsWith('player.syncfactions('));
         if (factionCmd) {
           const discovered = this._normalizeFactions(this._getFactions(snapshot)).filter(
             (f) => f.discovered
@@ -288,9 +337,9 @@ export class SyncEngine extends EventEmitter {
             .map((c) => "'" + c + "'")
             .join(',');
           if (catsArray.length > 0) {
-            commands.push(`[${catsArray}].forEach(function(v){try{var d=new DataFile('DATA/'+(NV?'NV':'F3')+'/'+v+'.DAT');var i=(typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id===v)?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/'+v+'.INV',{idOrder:d.ids});if(i._requiresSort)i.sort(d.ids);if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id===v)Pip.emit('scroller','refresh');d.close();}catch(e){}})`);
+            commands.push(`player.sortandrefreshinv([${catsArray}])`);
           }
-          // Caps and carry weight live in the ITEMS header — only refresh on inventory tabs.
+          // Caps and carry weight live in the ITEMS header - only refresh on inventory tabs.
           commands.push(ITEMS_HEADER_SOFT_REFRESH_CMD);
         }
 
@@ -309,12 +358,33 @@ export class SyncEngine extends EventEmitter {
 
         this.emit('syncing', { commandCount: commands.length });
 
-        for (const cmd of commands) {
-          await this.bridge.sendCommand(cmd);
-          this.stats.commandsSent++;
+        const guardActive =
+          typeof this.bridge.isAudioGuardActive === 'function' &&
+          this.bridge.isAudioGuardActive();
+
+        if (guardActive) {
+          // A device sound is playing: keep the per-command path so equip
+          // confirmations bypass the guard while regular commands wait it out.
+          for (const cmd of commands) {
+            if (this._isEquipCommand(cmd)) {
+              await this.bridge.sendEquipCommand(cmd);
+            } else {
+              await this.bridge.sendCommand(cmd);
+            }
+            this.stats.commandsSent++;
+          }
+        } else {
+          // Common case (game-driven sync, no sound playing): send the whole
+          // ordered list as a batch. The device receives the exact same framed
+          // lines, just without the 25ms inter-command spacing - collapsing a
+          // typical 6–10 command sync from ~150–250ms of pure spacing to one or
+          // two writes. Equip vs regular distinction is irrelevant here since the
+          // guard is closed and everything may flow immediately.
+          await this.bridge.sendBatch(commands);
+          this.stats.commandsSent += commands.length;
         }
 
-        // SYNC-DISABLED: player.sync() — inventory menus flush .INV on page exit
+        // SYNC-DISABLED: player.sync() - inventory menus flush .INV on page exit
         // const now = Date.now();
         // if (now - this.lastSyncFlush >= SYNC_FLUSH_INTERVAL_MS) {
         //   await this.bridge.sendCommand('player.sync()');
@@ -331,7 +401,13 @@ export class SyncEngine extends EventEmitter {
         this.emit('initial-sync-complete');
       }
 
-      this.previousState = this._cloneSnapshot(snapshot);
+      // Only cache this snapshot as previousState if no save load / forced
+      // resync happened while we were processing it. Otherwise a stale pre-load
+      // snapshot would clobber the null reset and turn the next post-load
+      // snapshot into an incremental diff (inventory ends up out of sync).
+      if (processingGeneration === this._stateGeneration) {
+        this.previousState = this._cloneSnapshot(snapshot);
+      }
     } catch (err) {
       this.stats.errors++;
       this.emit('error', err);
@@ -360,7 +436,7 @@ export class SyncEngine extends EventEmitter {
     const prev = this.previousState;
 
     if (!prev) {
-      // First snapshot — do a full sync
+      // First snapshot - do a full sync
       return this._generateFullSync(snapshot);
     }
 
@@ -370,7 +446,7 @@ export class SyncEngine extends EventEmitter {
 
     if (!this._inventorySyncPaused) {
       // Simple scalar attributes
-      // 'hp' is the game's true health pool (kAV_Health) — the Pip-Boy firmware
+      // 'hp' is the game's true health pool (kAV_Health) - the Pip-Boy firmware
       // uses it directly instead of averaging limb conditions when present.
       // maxHP is NOT synced: the Pip-Boy derives it correctly from endurance/level.
       const scalarAttrs = ['name', 'level', 'hp', 'karma', 'perceptioncondition', 'endurancecondition', 'leftattackcondition', 'rightattackcondition', 'leftmobilitycondition', 'rightmobilitycondition'];
@@ -389,6 +465,15 @@ export class SyncEngine extends EventEmitter {
         if (current !== undefined && current !== previous) {
           if (attr === 'level') {
             commands.push(`player.setlevel(${player.level})`);
+            // Also push XP on level-up so the display reflects the new total.
+            // setav() only marks the player object modified - sync() is what
+            // actually flushes it to PLAYER.JSON, so without it XP sits
+            // unpersisted until some unrelated action (equip, settings edit)
+            // happens to call sync() next.
+            if (player.xp !== undefined) {
+              commands.push(`player.setav('xp',${player.xp},!0)`);
+              commands.push('player.sync()');
+            }
           } else if (attr === 'name') {
             commands.push(`player.setav('name', ${JSON.stringify(player.name)}, !0)`);
           } else {
@@ -414,23 +499,45 @@ export class SyncEngine extends EventEmitter {
 
     }
 
-    // Carry weight + AP — game-authoritative; always sync (not gated on inventory pause)
+    // Carry weight + AP - game-authoritative; always sync (not gated on inventory pause)
     commands.push(...this._diffWeight(player, prevPlayer));
     commands.push(...this._diffAP(player, prevPlayer));
 
-    // --- Inventory diffs (before equip so items exist on the device) ---
+    // --- Inventory diffs ---
     const invCommands = this._diffInventory(
       snapshot.inventory || [],
       prev.inventory || []
     );
-    commands.push(...invCommands);
 
-    // Weapon ammo — ephemeral UI state; always sync (not gated on inventory pause)
+    // --- Equip diffs ---
+    // Run inventory diff first so _resyncEquipAfterInventory is set, then
+    // decide ordering: equip command goes BEFORE inventory changes (fast split
+    // on device) unless this is an authoritative re-sync after removals (it
+    // must come after so the device sees the correct post-removal state).
+    if (!this._inventorySyncPaused) {
+      if (this._resyncEquipAfterInventory) {
+        // Inventory removed items - push inventory first, then re-authorise equip
+        this._resyncEquipAfterInventory = false;
+        commands.push(...invCommands);
+        commands.push(...this._buildAuthoritativeEquipCommands(player, prevPlayer));
+      } else {
+        // Normal case: equip command first so split appears as fast as possible,
+        // then inventory count updates follow.
+        commands.push(...this._diffEquipped(player, prevPlayer));
+        commands.push(...invCommands);
+      }
+    } else {
+      commands.push(...invCommands);
+    }
+
+    // Weapon DAM (skill/condition-adjusted) - mirror per-stack deltas. Self-gated
+    // on inventory pause; placed after inventory so the rows it annotates exist.
+    commands.push(...this._diffWeaponDamage(snapshot.inventory || [], prev.inventory || []));
+
+    // Weapon ammo - ephemeral UI state; always sync (not gated on inventory pause)
     commands.push(...this._diffWeaponAmmo(player, prevPlayer));
 
     if (!this._inventorySyncPaused) {
-      // --- Equipped item diffs ---
-      commands.push(...this._diffEquipped(player, prevPlayer));
 
       // --- Perk diffs ---
       const perkCommands = this._diffPerks(
@@ -439,14 +546,14 @@ export class SyncEngine extends EventEmitter {
       );
       commands.push(...perkCommands);
 
-      // --- Skill diffs (written to SETTINGS/*_SKILLS.JSON on device) ---
+      // --- Skill diffs (written to INV/*/SKILLS.INV on device) ---
       commands.push(...this._diffSkills(player, prevPlayer));
     }
 
-    // Faction reputation — always sync (not gated on inventory pause)
+    // Faction reputation - always sync (not gated on inventory pause)
     commands.push(...this._diffFactions(this._getFactions(snapshot), this._getFactions(prev)));
 
-    // Pip-Boy flashlight LED — game → device only (independent of inventory pause)
+    // Pip-Boy flashlight LED - game -> device only (independent of inventory pause)
     if (
       this.torchSyncEnabled &&
       player.torch !== undefined &&
@@ -454,7 +561,7 @@ export class SyncEngine extends EventEmitter {
       !this._shouldSuppressGameToDeviceTorch(player.torch)
     ) {
       commands.push(
-        `if(typeof Pip!=='undefined'&&Pip.setTorch)Pip.setTorch(${player.torch ? '!0' : '!1'});`
+        `player.settorch(${player.torch ? '!0' : '!1'})`
       );
     }
 
@@ -503,9 +610,6 @@ export class SyncEngine extends EventEmitter {
     const player = snapshot.player || {};
 
     if (!this._inventorySyncPaused) {
-      // Reset inventory synchronously to avoid race conditions. Completely clear the files instead of loading the Pip-Boy's default start items.
-      commands.push(CLEAR_INV_CMD);
-
       // Set player name
       if (player.name) {
         commands.push(`player.setav('name', ${JSON.stringify(player.name)}, !0)`);
@@ -516,8 +620,16 @@ export class SyncEngine extends EventEmitter {
         commands.push(`player.setlevel(${player.level})`);
       }
 
+      // XP - pushed on first sync and save-loads (full syncs only). sync()
+      // flushes it to PLAYER.JSON immediately rather than leaving it
+      // unpersisted until an unrelated action happens to call sync() later.
+      if (player.xp !== undefined) {
+        commands.push(`player.setav('xp',${player.xp},!0)`);
+        commands.push('player.sync()');
+      }
+
       // Set all scalar attributes (hp = true health pool from the game;
-      // maxHP is omitted — the Pip-Boy calculates it itself)
+      // maxHP is omitted - the Pip-Boy calculates it itself)
       const attrs = ['hp', 'karma', 'perceptioncondition', 'endurancecondition', 'leftattackcondition', 'rightattackcondition', 'leftmobilitycondition', 'rightmobilitycondition'];
       for (const attr of attrs) {
         if (player[attr] !== undefined) {
@@ -535,57 +647,78 @@ export class SyncEngine extends EventEmitter {
         }
       }
 
-      // Carry weight — game-authoritative (see _diffWeight)
+      // Carry weight - game-authoritative (see _diffWeight)
       commands.push(...this._diffWeight(player, {}));
 
-      // Skills — stored in SETTINGS/*_SKILLS.JSON (not player.setav)
+      // Skills - stored in INV/*/SKILLS.INV (not player.setav)
       if (player.skills) {
         const skillCmd = this._buildSyncSkillsCommand(player.skills);
         if (skillCmd) commands.push(skillCmd);
       }
 
-      // Add all inventory items
+      // Reconcile every category to exactly this snapshot's contents (device
+      // diffs in place - see setitemsbulk_begin/chunk/end), rather than
+      // clearing every category's file and readding, so a full sync only
+      // flash-writes categories whose contents actually changed. Every
+      // category runs even if empty in this snapshot - that's what removes
+      // stale rows from a category the player emptied out.
       const inventory = snapshot.inventory || [];
+      const addBatches = new Map(); // cat -> [formId,count,cnd][]
       for (const item of inventory) {
         const formId = this._resolveFormId(item.formId);
         if (formId === null) continue;
-
-        if (this._itemHasDegradedCondition(item)) {
-          commands.push(
-            this._buildAddItemHealthPercentCommand(formId, item.count || 1, item.condition)
-          );
-        } else {
-          commands.push(
-            this._buildAddItemCommand(formId, item.count || 1)
-          );
-        }
+        const cat = this._toPipBoyCategory(item.type);
+        if (!cat) continue;
+        const list = addBatches.get(cat) || addBatches.set(cat, []).get(cat);
+        list.push(this._toItemEntry(formId, item.count || 1, item.condition));
       }
+      for (const cat of INVENTORY_CATEGORIES) {
+        commands.push(...this._buildSetItemsBulkCommands(cat, addBatches.get(cat) || []));
+      }
+
+      // Reconcile weapon DAM (skill/condition-adjusted display damage) the
+      // same way, instead of clearing *_DAM.INV and rewriting it whole.
+      const damEntries = [];
+      for (const item of inventory) {
+        if (item.dam == null) continue;
+        const formId = this._resolveFormId(item.formId);
+        if (formId === null) continue;
+        damEntries.push(this._toDamEntry(formId, item.condition, item.dam));
+      }
+      commands.push(...this._buildSetDamsBulkCommands(damEntries));
       // SYNC-DISABLED: calculateInvWeight() writes every .INV file
       // commands.push('player.calculateInvWeight()');
 
-      // Equipped items — after inventory is populated
-      commands.push(...this._diffEquipped(player, {}));
+      // Equipped items - after inventory is populated
+      commands.push(...this._diffEquipped(player, {}, true));
     }
 
-    // Action Points — always sync on full sync
+    // Action Points - always sync on full sync
     commands.push(...this._diffAP(player, {}));
 
-    // Weapon ammo — ephemeral UI state for AMMO tab dimming/selection
-    commands.push(...this._diffWeaponAmmo(player, {}));
+    // Weapon ammo - ephemeral UI state for AMMO tab dimming/selection
+    commands.push(...this._diffWeaponAmmo(player, {}, true));
 
     if (!this._inventorySyncPaused) {
-      // Add all perks (clear existing first)
-      commands.push(CLEAR_PERKS_CMD);
+      // Reconcile PERKS.INV to exactly this set in one pass (setperksbulk),
+      // instead of clearing it to empty and rebuilding it from scratch. A
+      // clear+rebuild rewrites the file at a different size on every full
+      // sync even when the perk list hasn't changed at all - three separate
+      // device crashes were traced to a PERKS.INV write during exactly this
+      // clear-then-regrow sequence, so this now only touches rows that
+      // actually changed (and skips the flash write entirely if nothing did).
       const perks = snapshot.perks || [];
+      const perkFormIds = [];
       for (const perk of perks) {
         const formIdStr = typeof perk === 'string' ? perk : perk.formId;
         const formId = this._toFormIdInt(formIdStr);
         if (formId === null) continue;
-        commands.push(this._buildSafeAddPerk(formId));
+        perkFormIds.push(formId);
       }
+      commands.push(this._buildSetPerksBulkCommand(perkFormIds));
     }
 
-    // Faction reputation — always sync (not gated on inventory pause)
+    // Faction reputation - always sync (not gated on inventory pause)
     const factions = this._getFactions(snapshot);
     if (factions.length) {
       const factionCmd = this._buildSyncFactionsCommand(factions);
@@ -598,7 +731,7 @@ export class SyncEngine extends EventEmitter {
     // Match in-game flashlight to the physical torch LED
     if (this.torchSyncEnabled && player.torch !== undefined) {
       commands.push(
-        `if(typeof Pip!=='undefined'&&Pip.setTorch)Pip.setTorch(${player.torch ? '!0' : '!1'});`
+        `player.settorch(${player.torch ? '!0' : '!1'})`
       );
     }
 
@@ -609,20 +742,22 @@ export class SyncEngine extends EventEmitter {
    * Record that an item was consumed on the Pip-Boy itself. The device has
    * already decremented its local count, so when the game snapshot echoes the
    * same decrement back, we must NOT send a removal command (it would
-   * double-decrement the device).
+   * double-decrement the device). Also used for device-initiated drops
+   * (count > 1 for a whole-stack drop).
    * @param {string|number} gameFormId
+   * @param {number} [count]
    */
-  notifyDeviceConsumed(gameFormId) {
+  notifyDeviceConsumed(gameFormId, count = 1) {
     const key = String(gameFormId).toLowerCase();
     const entry = this._deviceConsumed.get(key) || { count: 0, time: 0 };
-    entry.count++;
+    entry.count += count;
     entry.time = Date.now();
     this._deviceConsumed.set(key, entry);
   }
 
   /**
    * User equipped an item on the Pip-Boy. The game moves one unit to the worn
-   * slot but total owned is unchanged — do not mirror a bag-count drop on device.
+   * slot but total owned is unchanged - do not mirror a bag-count drop on device.
    */
   notifyDeviceEquipped(gameFormId) {
     const key = String(gameFormId).toLowerCase();
@@ -635,7 +770,7 @@ export class SyncEngine extends EventEmitter {
 
   /**
    * User unequipped on the Pip-Boy. The game returns one unit to the bag but
-   * total owned is unchanged — do not mirror a bag-count rise on device.
+   * total owned is unchanged - do not mirror a bag-count rise on device.
    */
   notifyDeviceUnequipped(gameFormId) {
     const key = String(gameFormId).toLowerCase();
@@ -647,7 +782,7 @@ export class SyncEngine extends EventEmitter {
   }
 
   /**
-   * User toggled the torch on the physical Pip-Boy. Ignore game→device torch
+   * User toggled the torch on the physical Pip-Boy. Ignore game->device torch
    * sync that disagrees until the game catches up or the window expires.
    */
   notifyDeviceTorch(on) {
@@ -673,7 +808,7 @@ export class SyncEngine extends EventEmitter {
   }
 
   /**
-   * Pip-Boy restored pre-sync data (only possible when cmode is off — companion
+   * Pip-Boy restored pre-sync data (only possible when cmode is off - companion
    * app disconnected). Pause game sync until resync; firmware already cleared PRESYNC.
    */
   async notifyPresyncRestored() {
@@ -750,6 +885,15 @@ export class SyncEngine extends EventEmitter {
   /**
    * Diff two inventory arrays and generate add/remove commands
    */
+  /**
+   * Composite stack identity: form ID + condition percent. Two entries of the
+   * same form but different displayed condition are distinct stacks (so they no
+   * longer merge into one stack at the highest condition).
+   */
+  _inventoryStackKey(item) {
+    return `${item.formId}|${this._normalizeItemCondition(item.condition)}`;
+  }
+
   _diffInventory(current, previous) {
     const commands = [];
     this._lastChangedCategories = new Set();
@@ -758,131 +902,255 @@ export class SyncEngine extends EventEmitter {
       return commands;
     }
 
-    // Build maps keyed by formId for fast lookup
+    // Build maps keyed by (formId, condition) for fast lookup
     const currentMap = new Map();
     for (const item of current) {
-      currentMap.set(item.formId, item);
+      currentMap.set(this._inventoryStackKey(item), item);
     }
 
     const previousMap = new Map();
     for (const item of previous) {
-      previousMap.set(item.formId, item);
+      previousMap.set(this._inventoryStackKey(item), item);
     }
 
-    // Check for too many changes — might indicate a save load or major event
+    // Check for too many changes - might indicate a save load or major event
     const addedIds = [...currentMap.keys()].filter(id => !previousMap.has(id));
     const removedIds = [...previousMap.keys()].filter(id => !currentMap.has(id));
 
+    // Adds/removes are grouped per category and flushed as additemsbulk/
+    // removeitemsbulk commands at the end, so N items changing in the same
+    // category cost the device one flash write instead of N (flash writes are
+    // by far the slowest device operation - this is what made full syncs and
+    // multi-item pickups visibly lag behind the commands being sent).
+    const addBatches = new Map(); // cat -> [formId,count,cnd][]
+    const removeBatches = new Map(); // cat -> [formId,qty,cnd|undefined][]
+    const queueAdd = (cat, formId, count, condition) => {
+      // No Pip-Boy category (e.g. books/keys) - the device has no file to add
+      // this to under any category, so there is nothing useful to send.
+      if (!cat) return;
+      const list = addBatches.get(cat) || addBatches.set(cat, []).get(cat);
+      list.push(this._toItemEntry(formId, count, condition));
+    };
+    const queueRemove = (cat, formId, qty, condition) => {
+      if (!cat) return;
+      const list = removeBatches.get(cat) || removeBatches.set(cat, []).get(cat);
+      list.push([
+        formId,
+        qty,
+        condition === undefined || condition === null
+          ? undefined
+          : this._normalizeItemCondition(condition),
+      ]);
+    };
+    const flushBatches = () => {
+      for (const [cat, entries] of addBatches) {
+        commands.push(...this._buildAddItemsBulkCommands(cat, entries));
+      }
+      for (const [cat, entries] of removeBatches) {
+        commands.push(...this._buildRemoveItemsBulkCommands(cat, entries));
+      }
+    };
+
     if (addedIds.length + removedIds.length > MAX_INVENTORY_DELTA) {
-      // Too many changes — do a full inventory reset
+      // Too many changes - reconcile every category to the current snapshot
+      // (device diffs in place) rather than clearing and readding everything.
       this.emit('status', 'Large inventory change detected, performing full reset');
       this._lastChangedCategories = new Set(['AID','AMMO','APPAREL','MISC','WEAPONS']);
-      commands.push(CLEAR_INV_CMD);
       // SYNC-DISABLED: calculateInvWeight() writes every .INV file
     // commands.push('player.calculateInvWeight()');
       for (const item of current) {
         const formId = this._resolveFormId(item.formId);
         if (formId === null) continue;
-        if (this._itemHasDegradedCondition(item)) {
-          commands.push(
-            this._buildAddItemHealthPercentCommand(formId, item.count || 1, item.condition)
-          );
-        } else {
-          commands.push(
-            this._buildAddItemCommand(formId, item.count || 1)
-          );
-        }
+        const cat = this._toPipBoyCategory(item.type);
+        queueAdd(cat, formId, item.count || 1, item.condition);
+      }
+      for (const cat of INVENTORY_CATEGORIES) {
+        commands.push(...this._buildSetItemsBulkCommands(cat, addBatches.get(cat) || []));
       }
       return commands;
+    }
+
+    // Forms whose per-condition stack distribution changed while the form still
+    // exists before AND after (e.g. a weapon/armor degraded or was repaired).
+    // Representing that as add(newCond)+remove(oldCond) is fragile: if the remove
+    // half is lost or the device already moved past that condition, a stale row
+    // is orphaned and shows as a duplicate. Instead authoritatively rebuild just
+    // that form's rows from the current snapshot - atomic, and self-heals any
+    // pre-existing orphan. Pure adds/removals stay on the incremental path so
+    // device equip/use credits keep working.
+    const rebuildForms = new Set();
+    {
+      const condsByForm = (map) => {
+        const m = new Map();
+        for (const it of map.values()) {
+          const set = m.get(it.formId) || m.set(it.formId, new Set()).get(it.formId);
+          set.add(this._normalizeItemCondition(it.condition));
+        }
+        return m;
+      };
+      const curConds = condsByForm(currentMap);
+      const prevConds = condsByForm(previousMap);
+      const sameSet = (a, b) =>
+        a && b && a.size === b.size && [...a].every((v) => b.has(v));
+      for (const [gameFormId, curSet] of curConds) {
+        const prevSet = prevConds.get(gameFormId);
+        if (!prevSet) continue; // pure add - handled incrementally
+        if (sameSet(curSet, prevSet)) continue; // only counts changed, if anything
+        if (this._resolveFormId(gameFormId) === null) continue;
+        rebuildForms.add(gameFormId);
+      }
+
+      for (const gameFormId of rebuildForms) {
+        const formId = this._resolveFormId(gameFormId);
+        let type = null;
+        const stacks = [];
+        for (const it of currentMap.values()) {
+          if (it.formId !== gameFormId) continue;
+          if (type === null) type = it.type;
+          stacks.push({
+            cnt: it.count || 1,
+            cnd: this._normalizeItemCondition(it.condition),
+          });
+        }
+        // Intentionally do NOT add to _lastChangedCategories here.
+        // setformstacks sorts the INV inline (dbIds is already cached, no extra
+        // flash read) and syncs/persists the result, so a separate sortandrefreshinv
+        // is unnecessary. The equip re-sync that always follows provides the
+        // required UI refresh.
+        commands.push(this._buildSetFormStacksCommand(formId, stacks));
+        this._resyncEquipAfterInventory = true;
+      }
     }
 
     // Items added (new formIds not in previous)
     for (const id of addedIds) {
       const item = currentMap.get(id);
+      if (rebuildForms.has(item.formId)) continue;
       const formId = this._resolveFormId(item.formId);
       if (formId === null) continue;
       const cat = this._toPipBoyCategory(item.type);
       if (cat) this._lastChangedCategories.add(cat);
 
-      if (this._itemHasDegradedCondition(item)) {
-        commands.push(
-          this._buildAddItemHealthPercentCommand(formId, item.count || 1, item.condition)
-        );
-      } else {
-        commands.push(
-          this._buildAddItemCommand(formId, item.count || 1)
-        );
-      }
+      queueAdd(cat, formId, item.count || 1, item.condition);
     }
 
-    // Items where count changed
-    for (const [id, currentItem] of currentMap) {
-      if (previousMap.has(id)) {
-        const prevItem = previousMap.get(id);
+    // Stacks where only the count changed (same form + same condition). A
+    // condition change instead surfaces as a removed key + an added key, handled
+    // by the add/remove loops, so the cnd is carried on remove to target the
+    // correct stack on the device.
+    for (const [key, currentItem] of currentMap) {
+      if (rebuildForms.has(currentItem.formId)) continue;
+      if (previousMap.has(key)) {
+        const prevItem = previousMap.get(key);
+        const gameFormId = currentItem.formId;
         const countDelta = (currentItem.count || 1) - (prevItem.count || 1);
 
         if (countDelta > 0) {
-          const formId = this._resolveFormId(id);
+          const formId = this._resolveFormId(gameFormId);
           if (formId === null) continue;
-          const addQty = countDelta - this._takeDeviceEquipPending(id, countDelta, 'up');
+          const addQty = countDelta - this._takeDeviceEquipPending(gameFormId, countDelta, 'up');
           if (addQty <= 0) continue;
           const cat = this._toPipBoyCategory(currentItem.type);
-          if (cat) this._lastChangedCategories.add(cat);
-          if (this._itemHasDegradedCondition(currentItem)) {
-            commands.push(
-              this._buildAddItemHealthPercentCommand(formId, addQty, currentItem.condition)
-            );
-          } else {
-            commands.push(this._buildAddItemCommand(formId, addQty));
-          }
+          // Don't add to _lastChangedCategories: additemhealthpercent already emits
+          // 'count' on-menu and syncs off-menu, so sortandrefreshinv is redundant for
+          // count-only increases on existing forms. For new forms the addedIds path
+          // (above) is responsible for adding to _lastChangedCategories.
+          queueAdd(cat, formId, addQty, currentItem.condition);
         } else if (countDelta < 0) {
           // Skip decrements the device already applied to itself (item used
           // on the Pip-Boy and mirrored into the game by us)
           const removeQty =
             Math.abs(countDelta) -
-            this._takeDeviceConsumed(id, Math.abs(countDelta)) -
-            this._takeDeviceEquipPending(id, Math.abs(countDelta), 'down');
+            this._takeDeviceConsumed(gameFormId, Math.abs(countDelta)) -
+            this._takeDeviceEquipPending(gameFormId, Math.abs(countDelta), 'down');
           if (removeQty <= 0) continue;
 
-          const formId = this._resolveFormId(id);
+          const formId = this._resolveFormId(gameFormId);
           if (formId === null) continue;
           const cat = this._toPipBoyCategory(currentItem.type);
-          if (cat) this._lastChangedCategories.add(cat);
-          const removeCmd = this._buildRemoveItemCommand(cat, formId, removeQty);
-          commands.push(removeCmd);
-        }
-
-        // Condition change — update cnd in place (Pip-Boy stores 0–100 per stack)
-        if (this._itemConditionChanged(currentItem, prevItem)) {
-          const formId = this._resolveFormId(id);
-          if (formId !== null) {
-            const cat = this._toPipBoyCategory(currentItem.type);
-            if (cat) this._lastChangedCategories.add(cat);
-            commands.push(
-              this._buildSetItemConditionCommand(formId, currentItem.condition)
-            );
-          }
+          // Don't add to _lastChangedCategories: removeitem already emits 'count' on-menu
+          // and syncs off-menu, making sortandrefreshinv redundant here (it would open
+          // the DAT + INV files, find _requiresSort = false, and do nothing useful).
+          queueRemove(cat, formId, removeQty, currentItem.condition);
+          // Only weapons and apparel can affect equip state; ammo/aid/misc removals
+          // never change what is equipped, so skip the expensive authoritative resync.
+          if (cat === 'WEAPONS' || cat === 'APPAREL') this._resyncEquipAfterInventory = true;
         }
       }
     }
 
-    // Items removed (formIds in previous but not in current)
-    for (const id of removedIds) {
-      const prevItem = previousMap.get(id);
+    // Stacks removed (form+condition present before but not now)
+    for (const key of removedIds) {
+      const prevItem = previousMap.get(key);
+      if (rebuildForms.has(prevItem.formId)) continue;
+      const gameFormId = prevItem.formId;
       // Skip units the device already removed from itself
       const prevCount = prevItem.count || 1;
-      const removeQty = prevCount - this._takeDeviceConsumed(id, prevCount);
+      const removeQty = prevCount - this._takeDeviceConsumed(gameFormId, prevCount);
       if (removeQty <= 0) continue;
 
-      const formId = this._resolveFormId(id);
+      this._deviceEquipPending.delete(String(gameFormId).toLowerCase());
+
+      const formId = this._resolveFormId(gameFormId);
       if (formId !== null) {
         const cat = this._toPipBoyCategory(prevItem.type);
-        if (cat) this._lastChangedCategories.add(cat);
-        const removeCmd = this._buildRemoveItemCommand(cat, formId, removeQty);
-        commands.push(removeCmd);
+        // Don't add to _lastChangedCategories: removeitem's 'count' event handles
+        // the on-menu display, and inv.sync() handles off-menu persistence.
+        // sortandrefreshinv would open DAT+INV from flash for nothing (no sort needed
+        // since only a row was removed, not reordered).
+        queueRemove(cat, formId, removeQty, prevItem.condition);
+        if (cat === 'WEAPONS' || cat === 'APPAREL') this._resyncEquipAfterInventory = true;
       }
     }
 
+    flushBatches();
+    return commands;
+  }
+
+  /**
+   * Per-(formId, condition) weapon DAM sync. The plugin tags each weapon
+   * inventory stack with `dam` (its game-calculated, skill+condition-adjusted
+   * display damage); we mirror only the deltas into the device's *_DAM.INV so
+   * a single degradation or skill change updates one entry rather than the
+   * whole file. Removed stacks have their DAM entry dropped so the file does
+   * not accumulate stale rows as weapons degrade into new condition stacks.
+   * Gated on inventory pause, since DAM tracks the inventory it describes.
+   */
+  _diffWeaponDamage(current, previous) {
+    const commands = [];
+    if (this._inventorySyncPaused) return commands;
+
+    const prevMap = new Map();
+    for (const it of previous) {
+      if (it && it.dam != null) prevMap.set(this._inventoryStackKey(it), it);
+    }
+
+    const setEntries = [];
+    for (const it of current) {
+      if (!it || it.dam == null) continue;
+      const formId = this._resolveFormId(it.formId);
+      if (formId === null) continue;
+      const key = this._inventoryStackKey(it);
+      const prev = prevMap.get(key);
+      if (!prev || prev.dam !== it.dam) {
+        setEntries.push(this._toDamEntry(formId, it.condition, it.dam));
+      }
+      prevMap.delete(key);
+    }
+    // Batched so a skill change (which re-computes DAM for every carried
+    // weapon at once) costs one device file open + flash write per batch
+    // instead of one per weapon stack.
+    commands.push(...this._buildSetDamBatchCommands(setEntries));
+
+    const removeEntries = [];
+    for (const it of prevMap.values()) {
+      const formId = this._resolveFormId(it.formId);
+      if (formId === null) continue;
+      removeEntries.push([formId, this._normalizeItemCondition(it.condition)]);
+    }
+    commands.push(...this._buildRemoveDamBatchCommands(removeEntries));
+
+    if (commands.length) commands.push(REFRESH_WEAPON_DAM_CMD);
     return commands;
   }
 
@@ -913,7 +1181,7 @@ export class SyncEngine extends EventEmitter {
   }
 
   /**
-   * Write skill levels to SETTINGS/*_SKILLS.JSON on the Pip-Boy.
+   * Write skill levels to INV/{mode}/SKILLS.INV on the Pip-Boy.
    * Matches game actor-value keys (e.g. "energyweapons") to SKILLS.DAT display names.
    */
   _buildSyncSkillsCommand(skills) {
@@ -921,21 +1189,7 @@ export class SyncEngine extends EventEmitter {
     if (Object.keys(filtered).length === 0) return null;
 
     const payload = JSON.stringify(filtered);
-    return (
-      `(()=>{try{var g=${payload},m=NV?'NV':'F3',` +
-      `db=new DataFile('DATA/'+m+'/SKILLS.DAT'),` +
-      `p='SETTINGS/'+m+'_SKILLS.JSON',` +
-      `u=loadJSONWithDefaults(p,'SETTINGS/DEFAULT/'+m+'_SKILLS.JSON'),` +
-      `chg=!1,nm=function(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'')},` +
-      `i,id,dat,k,lvl,dt;` +
-      `for(i=0;i<db.ids.length;i++){id=db.ids[i];dat=db.getId(id);dt=nm(dat.txt);` +
-      `for(k in g){if(dt===nm(k)){lvl=E.clip(Math.round(g[k]),1,100);` +
-      `if(u[Pip.formatId(id)]!==lvl){u[Pip.formatId(id)]=lvl;chg=!0}break}}}` +
-      `db.close();` +
-      `if(chg){fs.writeFileSync(p,JSON.stringify(u));` +
-      SKILLS_SOFT_REFRESH_CMD + `}}` +
-      `catch(e){debug('skill sync',e)}})()`
-    );
+    return `player.syncskills(${payload})`;
   }
 
   _diffSkills(currentPlayer, previousPlayer) {
@@ -948,9 +1202,16 @@ export class SyncEngine extends EventEmitter {
     return commands;
   }
 
-  /** True when a command mutates inventory files (not SETTINGS/REP or skills). */
   _isInventoryRefreshCommand(cmd) {
-    if (cmd.includes('InvFile') || cmd.includes('resetinventory') || cmd.includes('additem')) {
+    if (
+      cmd.includes('InvFile') ||
+      cmd.includes('resetinventory') ||
+      cmd.includes('additem') ||
+      cmd.includes('removeitem') ||
+      cmd.includes('setitemcondition') ||
+      cmd.includes('setformstacks') ||
+      cmd.includes('additemhealthpercent')
+    ) {
       return true;
     }
     if (!cmd.includes('fs.writeFileSync')) return false;
@@ -1006,7 +1267,11 @@ export class SyncEngine extends EventEmitter {
     const normalized = this._normalizeFactions(factions);
     if (normalized.length === 0) return null;
 
-    const curVis = normalized.filter((f) => f.discovered).map((f) => f.name);
+    // Only send discovered factions - the firmware skips undiscovered ones
+    // anyway. Sending the full list (13+ NV factions) can OOM the device.
+    const discovered = normalized.filter((f) => f.discovered);
+
+    const curVis = discovered.map((f) => f.name);
     let visListChanged = !previous;
     if (previous) {
       const prevVis = this._normalizeFactions(previous)
@@ -1017,20 +1282,12 @@ export class SyncEngine extends EventEmitter {
         curVis.some((n, i) => n !== prevVis[i]);
     }
 
-    const payload = JSON.stringify(normalized);
-    const generalRefresh = visListChanged
-      ? `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id==='GENERAL'&&Pip.changeMenu)Pip.changeMenu();`
-      : `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id==='GENERAL')Pip.emit('factions');`;
+    // If nothing is discovered yet, nothing to write - return null to skip the
+    // command entirely (avoids writing empty REP.JSON which clears the UI).
+    if (discovered.length === 0) return null;
 
-    return (
-      `(()=>{try{var d=${payload},rep={},vis=[],i,f,t;` +
-      `for(i=0;i<d.length;i++){f=d[i];if(!f.discovered)continue;` +
-      `t=E.clip(Math.round(f.tier),0,15);rep[f.name]=t;vis.push(f.name);}` +
-      `fs.writeFileSync('SETTINGS/REP.JSON',JSON.stringify(rep));` +
-      `fs.writeFileSync('SETTINGS/REP_VISIBLE.JSON',JSON.stringify(vis));` +
-      `${generalRefresh}` +
-      `}catch(e){debug('faction sync',e)}})()`
-    );
+    const payload = JSON.stringify(discovered);
+    return `player.syncfactions(${payload},${visListChanged ? '!0' : '!1'})`;
   }
 
   _diffFactions(current, previous) {
@@ -1056,44 +1313,64 @@ export class SyncEngine extends EventEmitter {
     const previousSet = new Set(previous.map(extractId));
 
     // Added perks
+    const addedFormIds = [];
     for (const perkId of currentSet) {
       if (!previousSet.has(perkId)) {
         const formId = this._toFormIdInt(perkId);
         if (formId === null) continue;
-        commands.push(this._buildSafeAddPerk(formId));
+        addedFormIds.push(formId);
       }
     }
+    commands.push(...this._buildAddPerksBulkCommands(addedFormIds));
 
     // Removed perks
+    const removedFormIds = [];
     for (const perkId of previousSet) {
       if (!currentSet.has(perkId)) {
         const formId = this._toFormIdInt(perkId);
         if (formId === null) continue;
-        commands.push(this._buildSafeRemovePerk(formId));
+        removedFormIds.push(formId);
       }
     }
+    commands.push(...this._buildRemovePerksBulkCommands(removedFormIds));
 
     return commands;
   }
 
   /**
-   * Generate action-point commands from game → Pip-Boy.
+   * Generate action-point commands from game -> Pip-Boy.
    * Stock firmware shows maxAP/maxAP in the STATS header; boot0 overrides when
    * cmode is on. Values are ephemeral (!1) and refreshed via renderHeader.
+   *
+   * curAp is chunked against the last value actually sent (this._lastSentAp),
+   * not the raw delta since last snapshot - AP recharges/drains continuously,
+   * so an un-chunked diff would push on nearly every snapshot. Empty (0) and
+   * full (curMaxAp) always push immediately regardless of chunk size, so the
+   * display never sits visibly wrong at either end just because the last step
+   * into it was smaller than a chunk - this also sidesteps maxAP not being a
+   * multiple of AP_SYNC_CHUNK, since chunking is relative to the last-sent
+   * value rather than fixed absolute boundaries.
    */
   _diffAP(player, prevPlayer) {
     const commands = [];
     const curAp =
       player.ap !== undefined ? Math.floor(player.ap) : undefined;
-    const prevAp =
-      prevPlayer.ap !== undefined ? Math.floor(prevPlayer.ap) : undefined;
     const curMaxAp =
       player.maxAP !== undefined ? Math.round(player.maxAP) : undefined;
     const prevMaxAp =
       prevPlayer.maxAP !== undefined ? Math.round(prevPlayer.maxAP) : undefined;
 
-    if (curAp !== undefined && curAp !== prevAp) {
-      commands.push(`player.setav('ap', ${JSON.stringify(curAp)}, !1)`);
+    if (curAp !== undefined) {
+      const lastSent = this._lastSentAp;
+      const atBound = curAp === 0 || (curMaxAp !== undefined && curAp === curMaxAp);
+      const shouldSend =
+        lastSent === undefined ||
+        (atBound && lastSent !== curAp) ||
+        Math.abs(curAp - lastSent) >= AP_SYNC_CHUNK;
+      if (shouldSend) {
+        commands.push(`player.setav('ap', ${JSON.stringify(curAp)}, !1)`);
+        this._lastSentAp = curAp;
+      }
     }
     if (curMaxAp !== undefined && curMaxAp !== prevMaxAp) {
       commands.push(`player.setav('maxap', ${JSON.stringify(curMaxAp)}, !1)`);
@@ -1105,7 +1382,7 @@ export class SyncEngine extends EventEmitter {
   }
 
   /**
-   * Generate carry-weight commands from game → Pip-Boy.
+   * Generate carry-weight commands from game -> Pip-Boy.
    *
    * The current weight (`wg`) and max weight (`maxWg`) are copied directly from
    * the game and stored as ephemeral player values (persist = !1) so they never
@@ -1135,25 +1412,94 @@ export class SyncEngine extends EventEmitter {
   }
 
   /**
-   * Generate equip/unequip commands from game → Pip-Boy equipped state.
+   * Returns true for commands that confirm an equip/unequip state change.
+   * These are routed through sendEquipCommand() to bypass the audio guard.
+   */
+  _isEquipCommand(cmd) {
+    return (
+      cmd.includes('equippedWeap') ||
+      cmd.includes('refreshequip') ||
+      cmd.includes('equipapparel')
+    );
+  }
+
+  _buildAuthoritativeEquipCommands(player, prevPlayer = {}) {
+    const commands = [];
+    const weapon = this._toFormIdInt(player.equippedweap) ?? 0;
+    const weapCnd = this._normalizeItemCondition(player.equippedweapcnd);
+    const weapWhole = player.equippedweapwhole ? 1 : 0;
+    // skipRefresh=!0 prevents a redundant Pip.refreshEquipState() inside setav;
+    // REFRESH_EQUIP_CMD (player.refreshequip()) does the single authoritative render.
+    commands.push(
+      `player.setav('equippedWeap', ${weapon}, !0, !0);player.setav('equippedWeapCnd', ${weapCnd}, !1);player.setav('equippedWeapWhole', ${weapWhole}, !1);${REFRESH_EQUIP_CMD}`
+    );
+    // equipapparel re-reads APPAREL.DAT from flash AND triggers its own
+    // refreshequip() (a second full render). For the common case - a weapon's
+    // condition degrading - apparel is unchanged, so re-asserting it is pure
+    // waste: it doubles the render count and adds a flash read for nothing. Only
+    // send it when the equipped apparel set actually changed. The weapon line
+    // above already provides the single authoritative render.
+    const curApparel = this._normalizeEquippedApparelWithCnd(player);
+    const prevApparel = this._normalizeEquippedApparelWithCnd(prevPlayer);
+    if (JSON.stringify(curApparel) !== JSON.stringify(prevApparel)) {
+      commands.push(this._buildEquipApparelCommand(curApparel));
+    }
+    return commands;
+  }
+
+  /**
+   * Generate equip/unequip commands from game -> Pip-Boy equipped state.
    * Apparel slots are resolved on-device via APPAREL.DAT (item.es).
    */
-  _diffEquipped(player, prevPlayer) {
+  // force=true always emits both commands regardless of the diff - used for
+  // full syncs, where prevPlayer is {} and "equipped nothing" would otherwise
+  // look identical to "no change from an unknown prior device state" and get
+  // skipped, leaving a stale equip from before the sync stuck on the device.
+  _diffEquipped(player, prevPlayer, force = false) {
     const commands = [];
 
     const currentWeapon = this._toFormIdInt(player.equippedweap) ?? 0;
     const previousWeapon = this._toFormIdInt(prevPlayer.equippedweap) ?? 0;
-    if (currentWeapon !== previousWeapon) {
-      commands.push(`player.setav('equippedWeap', ${currentWeapon}, !0);${REFRESH_EQUIP_CMD}`);
+    const currentWeapCnd = this._normalizeItemCondition(player.equippedweapcnd);
+    const previousWeapCnd = this._normalizeItemCondition(prevPlayer.equippedweapcnd);
+    const currentWeapWhole = player.equippedweapwhole ? 1 : 0;
+    const previousWeapWhole = prevPlayer.equippedweapwhole ? 1 : 0;
+    if (
+      force ||
+      currentWeapon !== previousWeapon ||
+      currentWeapCnd !== previousWeapCnd ||
+      currentWeapWhole !== previousWeapWhole
+    ) {
+      // skipRefresh=!0 avoids a double Pip.refreshEquipState() call; refreshequip() renders once.
+      commands.push(
+        `player.setav('equippedWeap', ${currentWeapon}, !0, !0);player.setav('equippedWeapCnd', ${currentWeapCnd}, !1);player.setav('equippedWeapWhole', ${currentWeapWhole}, !1);${REFRESH_EQUIP_CMD}`
+      );
     }
 
-    const currentApparel = this._normalizeEquippedApparel(player.equippedapparel);
-    const previousApparel = this._normalizeEquippedApparel(prevPlayer.equippedapparel);
-    if (JSON.stringify(currentApparel) !== JSON.stringify(previousApparel)) {
+    const currentApparel = this._normalizeEquippedApparelWithCnd(player);
+    const previousApparel = this._normalizeEquippedApparelWithCnd(prevPlayer);
+    if (force || JSON.stringify(currentApparel) !== JSON.stringify(previousApparel)) {
       commands.push(this._buildEquipApparelCommand(currentApparel));
     }
 
     return commands;
+  }
+
+  /**
+   * Equipped apparel as {id, cnd} pairs (sorted by id), so the device can flag
+   * only the worn condition row of each apparel form. Falls back to condition
+   * 100 when the snapshot omits per-slot conditions.
+   */
+  _normalizeEquippedApparelWithCnd(player) {
+    const ids = Array.isArray(player?.equippedapparel) ? player.equippedapparel : [];
+    const cnds = Array.isArray(player?.equippedapparelcnd) ? player.equippedapparelcnd : [];
+    return ids
+      .map((id, i) => ({
+        id: this._toFormIdInt(id),
+        cnd: this._normalizeItemCondition(cnds[i]),
+      }))
+      .filter((p) => p.id !== null && p.id !== 0)
+      .sort((a, b) => a.id - b.id);
   }
 
   _normalizeEquippedApparel(value) {
@@ -1166,13 +1512,13 @@ export class SyncEngine extends EventEmitter {
 
   /**
    * Push the equipped weapon's ammo state to the device for ammo selection:
-   *   ammoActive — the ammo currently loaded (so AMMO.JS can mark it equipped)
-   *   ammoUsable — every ammo form the weapon accepts (others are dimmed and
+   *   ammoActive - the ammo currently loaded (so AMMO.JS can mark it equipped)
+   *   ammoUsable - every ammo form the weapon accepts (others are dimmed and
    *                cannot be selected)
    * Both are stored ephemerally (!1) so they never persist to PLAYER.JSON. When
    * the AMMO tab is open, re-read + re-render it so the change shows immediately.
    */
-  _diffWeaponAmmo(player, prevPlayer) {
+  _diffWeaponAmmo(player, prevPlayer, forceRefresh = false) {
     const commands = [];
     const wa = player.weaponammo || {};
     const prevWa = prevPlayer.weaponammo || {};
@@ -1184,8 +1530,8 @@ export class SyncEngine extends EventEmitter {
     const currentWeapon = this._toFormIdInt(player.equippedweap) ?? 0;
     const prevWeapon = this._toFormIdInt(prevPlayer.equippedweap) ?? 0;
     const weaponChanged = currentWeapon !== prevWeapon;
-    const force = this._needsWeaponAmmoRefresh;
-    if (force) this._needsWeaponAmmoRefresh = false;
+    const force = forceRefresh || this._needsWeaponAmmoRefresh;
+    if (this._needsWeaponAmmoRefresh) this._needsWeaponAmmoRefresh = false;
 
     if (force || weaponChanged) {
       commands.push(`player.setav('ammoActive', ${currentAmmo}, !1)`);
@@ -1199,9 +1545,7 @@ export class SyncEngine extends EventEmitter {
       }
     }
     if (commands.length > 0) {
-      commands.push(
-        `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.CURRENT.id==='AMMO'){if(Pip.refreshEquipState)Pip.refreshEquipState();else Pip.emit('scroller','refreshEquip');}`
-      );
+      commands.push("player.refreshequip('AMMO')");
     }
 
     return commands;
@@ -1222,23 +1566,57 @@ export class SyncEngine extends EventEmitter {
     const weaponChanged =
       (this._toFormIdInt(player.equippedweap) ?? 0) !==
       (this._toFormIdInt(prevPlayer.equippedweap) ?? 0);
+    const weapCndChanged =
+      this._normalizeItemCondition(player.equippedweapcnd) !==
+      this._normalizeItemCondition(prevPlayer.equippedweapcnd);
+    const weapWholeChanged = !!(player.equippedweapwhole) !== !!(prevPlayer.equippedweapwhole);
     const apparelChanged =
       JSON.stringify(this._normalizeEquippedApparel(player.equippedapparel)) !==
       JSON.stringify(this._normalizeEquippedApparel(prevPlayer.equippedapparel));
-    return weaponChanged || apparelChanged;
+    return weaponChanged || weapCndChanged || weapWholeChanged || apparelChanged;
   }
 
-  _buildEquipApparelCommand(apparelIds) {
-    const idList = apparelIds.join(',');
-    return `(()=>{var active=[0,0,0,0],ids=[${idList}],db=new DataFile('DATA/'+(NV?'NV':'F3')+'/APPAREL.DAT');ids.forEach(function(id){var it=db.getId(id);if(it&&it.es!=null)active[it.es]=id;});db.close();player.setav('equippedApparel',active,!0);${REFRESH_EQUIP_CMD}})()`;
+  _buildEquipApparelCommand(apparel) {
+    // Accepts either [{id, cnd}] pairs or a bare [id] list (back-compat).
+    const pairs = apparel.map((p) =>
+      typeof p === 'object' && p !== null ? p : { id: p, cnd: 100 }
+    );
+    const idList = pairs.map((p) => p.id).join(',');
+    const cndList = pairs.map((p) => this._normalizeItemCondition(p.cnd)).join(',');
+    return `player.equipapparel([${idList}],[${cndList}])`;
   }
 
-  _buildSafeAddPerk(formId) {
-    return `(()=>{var p=${formId},db=new DataFile('DATA/'+(NV?'NV':'F3')+'/PERK.DAT');if(db.ids.indexOf(p)>=0)player.addperk(p);db.close();})()`;
+  /**
+   * Batch forms of safeaddperk/saferemoveperk: formIds is a flat array, split
+   * into player.addperksbulk()/removeperksbulk() commands of ≤MAX_ITEM_BATCH
+   * entries each so the device opens PERKS.DAT/PERKS.INV once per batch
+   * instead of once per perk.
+   */
+  _buildAddPerksBulkCommands(formIds) {
+    const commands = [];
+    for (let i = 0; i < formIds.length; i += MAX_ITEM_BATCH) {
+      const slice = formIds.slice(i, i + MAX_ITEM_BATCH);
+      commands.push(`player.addperksbulk([${slice.join(',')}])`);
+    }
+    return commands;
   }
 
-  _buildSafeRemovePerk(formId) {
-    return `(()=>{var p=${formId},db=new DataFile('DATA/'+(NV?'NV':'F3')+'/PERK.DAT');if(db.ids.indexOf(p)>=0)player.removeperk(p);db.close();})()`;
+  _buildRemovePerksBulkCommands(formIds) {
+    const commands = [];
+    for (let i = 0; i < formIds.length; i += MAX_ITEM_BATCH) {
+      const slice = formIds.slice(i, i + MAX_ITEM_BATCH);
+      commands.push(`player.removeperksbulk([${slice.join(',')}])`);
+    }
+    return commands;
+  }
+
+  /**
+   * Full-sync perk reconciliation: formIds is the complete desired perk set.
+   * Unlike the add/remove batches above, this must arrive as one call (the
+   * device diffs it against PERKS.INV's current contents), so it isn't split.
+   */
+  _buildSetPerksBulkCommand(formIds) {
+    return `player.setperksbulk([${formIds.join(',')}])`;
   }
 
   _normalizeItemCondition(condition) {
@@ -1250,10 +1628,6 @@ export class SyncEngine extends EventEmitter {
     return Math.round(Math.min(100, Math.max(0, n)));
   }
 
-  _itemHasDegradedCondition(item) {
-    return this._normalizeItemCondition(item?.condition) !== 100;
-  }
-
   _itemConditionChanged(currentItem, prevItem) {
     return (
       this._normalizeItemCondition(currentItem?.condition) !==
@@ -1263,21 +1637,138 @@ export class SyncEngine extends EventEmitter {
 
   _buildSetItemConditionCommand(formId, condition) {
     const cnd = this._normalizeItemCondition(condition);
-    return `(()=>{var id=${formId},cnd=${cnd};['AID','AMMO','APPAREL','MISC','WEAPONS'].forEach(function(v){try{var db=new DataFile('DATA/'+(NV?'NV':'F3')+'/'+v+'.DAT');if(db.ids.indexOf(id)<0){db.close();return;}var onMenu=typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id===v,inv=onMenu?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/'+v+'.INV',{idOrder:db.ids}),i=inv.indexOf(id);if(i<0){db.close();return;}var it=inv.get(i);it.cnd=cnd;inv.set(i,it);if(!onMenu)inv.sync();if(onMenu)Pip.emit('scroller','refresh');db.close();}catch(e){}});})()`;
+    return `player.setitemcondition(${formId},${cnd})`;
   }
 
-  _buildAddItemHealthPercentCommand(formId, count, condition) {
-    const cnt = count || 1;
-    const cnd = this._normalizeItemCondition(condition);
-    return `(()=>{var id=${formId},cnt=${cnt},cnd=${cnd};if(cnt<=0)return;['AID','AMMO','APPAREL','MISC','WEAPONS'].forEach(function(v){try{var db=new DataFile('DATA/'+(NV?'NV':'F3')+'/'+v+'.DAT'),idx=db.ids.indexOf(id);if(db.close(),idx<0)return;var onMenu=typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id===v,inv=onMenu?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/'+v+'.INV',{idOrder:db.ids}),inx=inv.indexOf(id);if(inx>=0){var it=inv.get(inx);it.cnt+=cnt;it.cnd=cnd;inv.set(inx,it);}else inv.add({id:id,cnt:cnt,cnd:cnd});if(!onMenu)inv.sync();if(onMenu)Pip.emit('scroller','count',inv.count);}catch(e){}});})()`;
+  _toItemEntry(formId, count, condition) {
+    return [formId, count, this._normalizeItemCondition(condition)];
   }
 
-  _buildAddItemCommand(formId, count) {
-    return this._buildAddItemHealthPercentCommand(formId, count, 100);
+  /**
+   * Batch form of additemhealthpercent: entries are [formId,count,cnd] triples
+   * for a single category, split into player.additemsbulk() commands of
+   * ≤MAX_ITEM_BATCH entries each so the device opens and flash-writes the
+   * category file once per batch rather than once per item.
+   */
+  _buildAddItemsBulkCommands(cat, entries) {
+    const commands = [];
+    for (let i = 0; i < entries.length; i += MAX_ITEM_BATCH) {
+      const slice = entries.slice(i, i + MAX_ITEM_BATCH);
+      commands.push(
+        `player.additemsbulk('${cat}',[${slice.map((e) => `[${e[0]},${e[1]},${e[2]}]`).join(',')}])`
+      );
+    }
+    return commands;
   }
 
-  _buildRemoveItemCommand(cat, formId, removeQty) {
-    return `(()=>{var id=${formId},qty=${removeQty};if(qty<=0)return;['AID','AMMO','APPAREL','MISC','WEAPONS'].forEach(function(v){try{var db=new DataFile('DATA/'+(NV?'NV':'F3')+'/'+v+'.DAT');if(db.ids.indexOf(id)<0){db.close();return;}var onMenu=typeof Pip!=='undefined'&&Pip.inv&&Pip.CURRENT&&Pip.CURRENT.id===v,inv=onMenu?Pip.inv:new InvFile('INV/'+(NV?'NV':'F3')+'/'+v+'.INV',{idOrder:db.ids}),i=inv.indexOf(id);if(i>=0){var it=inv.get(i);it.cnt-=qty;if(it.cnt>0)inv.set(i,it);else inv.remove(i);if(!onMenu)inv.sync();if(onMenu)Pip.emit('scroller','count',inv.count);}db.close();}catch(e){}});})()`;
+  /**
+   * Batch form of removeitem: entries are [formId,qty,cnd] triples (cnd may be
+   * `undefined` to match by id only) for a single category.
+   */
+  _buildRemoveItemsBulkCommands(cat, entries) {
+    const commands = [];
+    for (let i = 0; i < entries.length; i += MAX_ITEM_BATCH) {
+      const slice = entries.slice(i, i + MAX_ITEM_BATCH);
+      commands.push(
+        `player.removeitemsbulk('${cat}',[${slice
+          .map((e) => `[${e[0]},${e[1]},${e[2] === undefined ? 'undefined' : e[2]}]`)
+          .join(',')}])`
+      );
+    }
+    return commands;
+  }
+
+  /**
+   * Full-sync reconciliation for one category: entries is the complete desired
+   * contents (device diffs against what's actually on the card and only
+   * touches rows that differ - see setitemsbulk_begin/chunk/end). Unlike
+   * setperksbulk this can't arrive as one call - a category's item list can
+   * exceed what safely fits in one line-buffered command - so it's split into
+   * a begin/chunk x N/end sequence instead. Called for every category on every
+   * full sync, even with an empty entries array, since that's what clears out
+   * a category the player emptied.
+   */
+  _buildSetItemsBulkCommands(cat, entries) {
+    const commands = [`player.setitemsbulk_begin('${cat}')`];
+    for (let i = 0; i < entries.length; i += MAX_ITEM_BATCH) {
+      const slice = entries.slice(i, i + MAX_ITEM_BATCH);
+      commands.push(
+        `player.setitemsbulk_chunk('${cat}',[${slice.map((e) => `[${e[0]},${e[1]},${e[2]}]`).join(',')}])`
+      );
+    }
+    commands.push(`player.setitemsbulk_end('${cat}')`);
+    return commands;
+  }
+
+  /**
+   * Authoritatively rebuild every row of `formId` on the device from the given
+   * per-condition stacks. Used for condition-distribution changes so a single
+   * command replaces a fragile add+remove pair (and clears any orphaned row).
+   */
+  _buildSetFormStacksCommand(formId, stacks) {
+    const list = stacks
+      .filter((s) => (s.cnt || 0) > 0)
+      .map((s) => `{cnt:${s.cnt || 1},cnd:${this._normalizeItemCondition(s.cnd)}}`)
+      .join(',');
+    return `player.setformstacks(${formId},[${list}])`;
+  }
+
+  _toDamEntry(formId, condition, dam) {
+    return [
+      formId,
+      this._normalizeItemCondition(condition),
+      Math.max(0, Math.round(dam)),
+    ];
+  }
+
+  /**
+   * Batch form of setdam: `entries` is an array of [formId, cnd, dam] triples,
+   * split into player.setdams() commands of ≤MAX_DAM_BATCH entries each so the
+   * device opens and flash-writes *_DAM.INV once per batch rather than once
+   * per weapon stack (flash writes are the slowest device operation).
+   */
+  _buildSetDamBatchCommands(entries) {
+    const commands = [];
+    for (let i = 0; i < entries.length; i += MAX_DAM_BATCH) {
+      const slice = entries.slice(i, i + MAX_DAM_BATCH);
+      commands.push(
+        `player.setdams([${slice.map((e) => `[${e[0]},${e[1]},${e[2]}]`).join(',')}])`
+      );
+    }
+    return commands;
+  }
+
+  /**
+   * Full-sync DAM reconciliation: entries is the complete desired *_DAM.INV
+   * contents, split into a begin/chunk x N/end sequence (device diffs in place
+   * - see setdamsbulk_begin/chunk/end) instead of clearing the file and
+   * rewriting it whole on every full sync.
+   */
+  _buildSetDamsBulkCommands(entries) {
+    const commands = ['player.setdamsbulk_begin()'];
+    for (let i = 0; i < entries.length; i += MAX_DAM_BATCH) {
+      const slice = entries.slice(i, i + MAX_DAM_BATCH);
+      commands.push(
+        `player.setdamsbulk_chunk([${slice.map((e) => `[${e[0]},${e[1]},${e[2]}]`).join(',')}])`
+      );
+    }
+    commands.push('player.setdamsbulk_end()');
+    return commands;
+  }
+
+  /**
+   * Batch form of removedam: entries are [formId,cnd] pairs, split into
+   * player.removedams() commands of ≤MAX_DAM_BATCH entries each.
+   */
+  _buildRemoveDamBatchCommands(entries) {
+    const commands = [];
+    for (let i = 0; i < entries.length; i += MAX_DAM_BATCH) {
+      const slice = entries.slice(i, i + MAX_DAM_BATCH);
+      commands.push(
+        `player.removedams([${slice.map((e) => `[${e[0]},${e[1]}]`).join(',')}])`
+      );
+    }
+    return commands;
   }
 
   /**
@@ -1303,7 +1794,7 @@ export class SyncEngine extends EventEmitter {
           typeof mapped === 'number'
             ? `0x${(mapped >>> 0).toString(16)}`
             : String(mapped);
-        this.emit('status', `Form ID ${fromHex} → ${toHex}`);
+        this.emit('status', `Form ID ${fromHex} -> ${toHex}`);
       }
       resolved = mapped;
     }
@@ -1344,7 +1835,10 @@ export class SyncEngine extends EventEmitter {
   }
 
   async _getPresyncBackupStatus() {
-    const expr = `(()=>{try{var f=require('fs'),m=NV?'NV':'F3',r={hasManifest:!1,manifestOld:!0,playerMissing:!0,invMissing:!0,perksMissing:!0,skillsMissing:!0},cats=['AID','AMMO','APPAREL','MISC','WEAPONS'],i,p;try{var man=JSON.parse(f.readFileSync('INV/PRESYNC/MANIFEST.JSON'));r.hasManifest=!0;r.manifestOld=!man.v||man.v<2}catch(e){}try{f.statSync('SETTINGS/PRESYNC/PLAYER.JSON');r.playerMissing=!1}catch(e){}try{f.statSync('INV/PRESYNC/'+m);for(i=0;i<5;i++){p='INV/PRESYNC/'+m+'/'+cats[i]+'.INV';try{f.statSync(p);r.invMissing=!1;break}catch(e){}}}catch(e){}try{f.statSync('SETTINGS/PRESYNC/'+m+'_PERKS.JSON');r.perksMissing=!1}catch(e){}try{f.statSync('SETTINGS/PRESYNC/'+m+'_SKILLS.JSON');r.skillsMissing=!1}catch(e){}return r}catch(e){return{error:!0}}})()`;
+    // manifest v3: presyncCats grew from 5 item categories to 7 (added PERKS,
+    // SKILLS as INV files) - bumping the version forces one fresh backup pass
+    // for installs upgrading from the old JSON-based perk/skill backup.
+    const expr = `(()=>{try{var f=require('fs'),m=NV?'NV':'F3',r={hasManifest:!1,manifestOld:!0,playerMissing:!0,invMissing:!0},cats=['AID','AMMO','APPAREL','MISC','WEAPONS','PERKS','SKILLS'],i,p;try{var man=JSON.parse(f.readFileSync('INV/PRESYNC/MANIFEST.JSON'));r.hasManifest=!0;r.manifestOld=!man.v||man.v<3}catch(e){}try{f.statSync('SETTINGS/PRESYNC/PLAYER.JSON');r.playerMissing=!1}catch(e){}try{f.statSync('INV/PRESYNC/'+m);for(i=0;i<cats.length;i++){p='INV/PRESYNC/'+m+'/'+cats[i]+'.INV';try{f.statSync(p);r.invMissing=!1;break}catch(e){}}}catch(e){}return r}catch(e){return{error:!0}}})()`;
     const raw = await this.bridge.eval(expr);
     return this._parsePresyncBackupStatus(raw);
   }
@@ -1370,27 +1864,20 @@ export class SyncEngine extends EventEmitter {
         );
       }
 
-      if (status.invMissing) {
+      if (status.invMissing || status.manifestOld) {
         this.emit('status', 'Backing up pre-sync inventory...');
         await this.bridge.sendCommand(
           `(()=>{var f=require('fs'),m=NV?'NV':'F3';f.statSync('INV/'+m)||f.mkdirSync('INV/'+m)})()`
         );
-        for (const cat of INVENTORY_CATEGORIES) {
+        for (const cat of PRESYNC_CATEGORIES) {
           await this.bridge.sendCommand(
             `(()=>{var f=require('fs'),m=NV?'NV':'F3',live='INV/'+m+'/${cat}.INV',def='INV/DEFAULT/'+m+'/${cat}.INV',dst='INV/PRESYNC/'+m+'/${cat}.INV',d='';try{d=f.readFileSync(live)}catch(e){}if(!d||!d.length){try{d=f.readFileSync(def)}catch(e){}}try{f.writeFileSync(dst,d||'')}catch(e){}})()`
           );
         }
       }
 
-      if (status.perksMissing || status.manifestOld) {
-        await this._backupPresyncSettingsFile('PERKS');
-      }
-      if (status.skillsMissing || status.manifestOld) {
-        await this._backupPresyncSettingsFile('SKILLS');
-      }
-
       await this.bridge.sendCommand(
-        `(()=>{try{require('fs').writeFileSync('INV/PRESYNC/MANIFEST.JSON',JSON.stringify({mode:NV?'NV':'F3',ts:Date.now(),v:2}))}catch(e){}})()`
+        `(()=>{try{require('fs').writeFileSync('INV/PRESYNC/MANIFEST.JSON',JSON.stringify({mode:NV?'NV':'F3',ts:Date.now(),v:3}))}catch(e){}})()`
       );
 
       this.emit('status', 'Pre-sync data backed up');
@@ -1399,38 +1886,44 @@ export class SyncEngine extends EventEmitter {
     }
   }
 
-  async _backupPresyncSettingsFile(kind) {
-    const perkFallback =
-      kind === 'PERKS'
-        ? "if(!d||!d.length){try{d=f.readFileSync('SETTINGS/DEFAUlT/'+m+'_PERKS.JSON')}catch(e){}}"
-        : '';
-    await this.bridge.sendCommand(
-      `(()=>{var f=require('fs'),m=NV?'NV':'F3',live='SETTINGS/'+m+'_${kind}.JSON',dst='SETTINGS/PRESYNC/'+m+'_${kind}.JSON',def='SETTINGS/DEFAULT/'+m+'_${kind}.JSON',d='';try{d=f.readFileSync(live)}catch(e){}if(!d||!d.length){try{d=f.readFileSync(def)}catch(e){}}${perkFallback}try{f.writeFileSync(dst,d||'')}catch(e){}})()`
-    );
-  }
-
   /**
    * Force a full resync from scratch
    */
   async forceFullSync() {
-    this._inventorySyncPaused = false;
-    this.previousState = null;
-    this._deviceConsumed.clear();
-    this._deviceEquipPending.clear();
-    this._deviceTorchPending = null;
+    this._resetForFullSync();
     this.emit('status', 'Forced full resync on next snapshot');
   }
 
   /**
-   * Game loaded a save or started a new game — discard cached state.
+   * Game loaded a save or started a new game - discard cached state.
    */
   handleSaveLoad() {
+    this._resetForFullSync();
+    this.emit('status', 'Game save loaded - full resync on next snapshot');
+  }
+
+  /**
+   * Reset all cached/queued snapshot state so the next processed snapshot is a
+   * guaranteed full sync. Bumps the state generation so any snapshot currently
+   * mid-flight cannot write its stale state back into previousState, and drops
+   * any debounced/pending pre-load snapshots that would otherwise seed an
+   * incremental diff.
+   */
+  _resetForFullSync() {
+    this._stateGeneration++;
     this._inventorySyncPaused = false;
     this.previousState = null;
     this._deviceConsumed.clear();
     this._deviceEquipPending.clear();
     this._deviceTorchPending = null;
-    this.emit('status', 'Game save loaded — full resync on next snapshot');
+    this._resyncEquipAfterInventory = false;
+    this._lastSentAp = undefined;
+    if (this._debounceTimer) {
+      clearTimeout(this._debounceTimer);
+      this._debounceTimer = null;
+    }
+    this._debouncedSnapshot = null;
+    this._pendingSnapshot = null;
   }
 
   /**

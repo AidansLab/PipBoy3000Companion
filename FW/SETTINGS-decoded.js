@@ -164,120 +164,6 @@
       l
     );
   }
-  function showTextEntry(text, desc, callback) {
-    let kbx = 0,
-      kby = 0,
-      kbShift = !1,
-      flashToggle = !1;
-    const KEYMAPLOWER = [
-        '`1234567890-=\b',
-        ' qwertyuiop[]\x03',
-        "\x02asdfghjkl;'\x03\x03",
-        ' \\zxcvbnm,./  '
-      ],
-      KEYMAPUPPER = [
-        '~!"#$%^&*()_+\b',
-        ' QWERTYUIOP{}\x03',
-        '\x02ASDFGHJKL:@\x03\x03',
-        ' |ZXCVBNM<>?  '
-      ],
-      capsLockImg =
-        '\x15\x15\x82\0\0\0\x15\0\0\0\0\x1F\xE0\0\0\0\x1Fn\0\0\0\x1FB\xE0\0\0\x0F@>\0\0\x0B\x80\x03\xD0\0\x0B\x80\0}\0\x0B\x80\0\x07\xD0\x0B\x80\0\0}\x0B\x80\0\0\x07\xD7\x80\0\0\0}\xFF\xE0\0\x1F\xFF/\xFC\0\x07\xFE@\x0B\0\x01\xD0\0\x02\xC0\0t\0\0\xB5Um\0\0/\xFF\xFF@\0\x01UU@\0\0\0\0\0\0\0j\xAA\xA9\0\0/\xFF\xFF@\0',
-      backspaceImg =
-        '\x1B\x12\x82\0\0\x07\xFF\xFF\xFF\xFF\xFC\0?\xFF\xFF\xFF\xFF\xF0\x02\xE0\0\0\0\x03\xC0/\0\0\0\0\x0F\x01\xF4\0\0\0\0<\x1F@\x03\x80<\0\xF0\xF8\0\x0F\x83\xF0\x03\xCF\x80\0\x0F\xBF\0\x0F\xBC\0\0\x1F\xF0\0>\xF0\0\0?\x80\0\xF3\xE0\0\x03\xFF\x80\x03\xC7\xD0\0?\x1F\x80\x0F\x07\xD0\x01\xF0\x1F\0<\x0B\xC0\x01\0\x10\0\xF0\x0B\xC0\0\0\0\x03\xC0\x0F\x80\0\0\0\x0F\0\x1F\xFF\xFF\xFF\xFF\xFC\0\x1F\xFF\xFF\xFF\xFF\xF0',
-      enterPoly = [
-        439, 185, 464, 185, 464, 242, 408, 242, 408, 218, 439, 218, 439, 185
-      ],
-      spaceRect = { x: 407, y: 249, x2: 464, y2: 274 };
-    function onKnob1(dir, long) {
-      if (long) {
-        let keyRepeatTimer = setInterval(() => {
-          onKnob1(dir);
-        }, 200);
-        return (
-          setWatch(
-            () => {
-              clearInterval(keyRepeatTimer);
-            },
-            ENC1_PRESS,
-            { edge: -1, repeat: !1 }
-          ),
-          void 0
-        );
-      }
-      if (dir) (Pip.playSound('SCROLL'), (kby = (kby + 4 + dir) % 4), l.draw());
-      else {
-        Pip.playSound('SELECT');
-        var ch = (kbShift ? KEYMAPUPPER : KEYMAPLOWER)[kby][kbx];
-        ('\x02' == ch
-          ? (kbShift = !kbShift)
-          : '\x03' == ch
-            ? callback(text)
-            : '\b' == ch
-              ? (text = text.slice(0, -1))
-              : (text += ch),
-          l.removed || l.draw());
-      }
-    }
-    function onKnob2(dir) {
-      (Pip.playSound('SCROLL'), (kbx = (kbx + dir + 14) % 14), l.draw());
-    }
-    let l = {
-      draw: () => {
-        const map = kbShift ? KEYMAPUPPER : KEYMAPLOWER;
-        (h.reset().setFontAlign(0, 0),
-          h.clearRect(BR).setColor(1),
-          kbx >= 0 &&
-            ((kbx >= 12 && 2 == kby) || (13 == kbx && 1 == kby)
-              ? h.fillPoly(enterPoly)
-              : kbx >= 12 && 3 == kby
-                ? h.fillRect(spaceRect)
-                : h.fillRect(
-                    20 + 32 * kbx,
-                    150 + 32 * kby,
-                    20 + 32 * (kbx + 1) - 1,
-                    150 + 32 * (kby + 1) - 1
-                  )),
-          h.setColor(3).drawImage(capsLockImg, 25, 219),
-          h.drawImage(backspaceImg, 439, 156),
-          h
-            .setFontMonofonto14()
-            .drawString('Enter', 430, 232)
-            .drawPoly(enterPoly),
-          h.drawString('Space', 430, 264).drawRect(spaceRect),
-          h.setFontMonofonto23());
-        let x = 36,
-          y = 166;
-        for (let i = 0; i < 14; i++)
-          (h
-            .drawString(map[0][i], x, y)
-            .drawString(map[1][i], x, 198)
-            .drawString(map[2][i], x, 230)
-            .drawString(map[3][i], x, 262),
-            (x += 32));
-        (h.setFontMonofonto14().setFontAlign(-1, 0),
-          h.drawString(desc, 20, BR.y + 38),
-          h.setFontMonofonto28(),
-          h.stringWidth(text) > 415 && (text = text.slice(0, -1)),
-          h.drawRect(20, BR.y + 52, 465, BR.y + 102),
-          h.drawString(text + (flashToggle ? '_' : ' '), 32, BR.y + 80),
-          h.flip());
-      },
-      remove: () => {
-        ((l.removed = !0),
-          Pip.removeListener('knob1', onKnob1),
-          Pip.removeListener('knob2', onKnob2),
-          clearInterval(flashInterval));
-      }
-    };
-    (l.draw(),
-      Pip.onExclusive('knob1', onKnob1),
-      Pip.onExclusive('knob2', onKnob2));
-    var flashInterval = setInterval(() => {
-      ((flashToggle = !flashToggle), l.draw());
-    }, 600);
-    return l;
-  }
   function showMainMenu() {
     (menu && menu.remove(),
       (menu = showMenu({
@@ -290,8 +176,10 @@
         '> User': showUserMenu,
         'Pip-Boy mode': {
           value: !!NV,
-          format: (v) => (v ? 'New Vegas' : 'Fallout 3'),
+          //format: (v) => (v && !cmode ? 'New Vegas' : 'Fallout 3'),
+          format: (v) => (cmode ? "Disallowed in companion mode." : v ? 'New Vegas' : 'Fallout 3'),
           onchange: (v) => {
+            if (cmode) return;
             ((NV = v),
               writeSetting('nv', v),
               settings.theme || setRGB(void 0),
@@ -303,6 +191,130 @@
         'Start Demo Mode': () => setTimeout(Pip.demoMode, 500)
       })));
   }
+  // ── Pre-sync backup/restore (companion feature) ──────────────────────────
+  // Perks and Skills are now InvFile-backed (INV/{m}/PERKS.INV, SKILLS.INV -
+  // same shape as the item categories), so they fold straight into the
+  // generic presyncCats INV backup/restore loop below instead of needing
+  // their own JSON read/write special case.
+  const presyncCats = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS', 'PERKS', 'SKILLS'];
+  function tryStat(path) {
+    try {
+      fs.statSync(path);
+      return !0;
+    } catch (e) {}
+    return !1;
+  }
+  function tryRead(path) {
+    try {
+      const data = fs.readFileSync(path);
+      if (data && data.length) return data;
+    } catch (e) {}
+    return '';
+  }
+  function ensureDir(dir) {
+    const parts = dir.split('/');
+    let p = '';
+    for (let i = 0; i < parts.length; i++) {
+      if (!parts[i]) continue;
+      p = p ? p + '/' + parts[i] : parts[i];
+      try {
+        fs.statSync(p);
+      } catch (e) {
+        try {
+          fs.mkdirSync(p);
+        } catch (e2) {}
+      }
+    }
+  }
+  function hasPreSyncBackupFiles(mode) {
+    if (tryStat('SETTINGS/PRESYNC/PLAYER.JSON')) return !0;
+    const base = 'INV/PRESYNC/' + mode;
+    for (let i = 0; i < presyncCats.length; i++) {
+      if (tryStat(base + '/' + presyncCats[i] + '.INV')) return !0;
+    }
+    return !1;
+  }
+  function hasPreSyncBackup(mode) {
+    if (!hasPreSyncBackupFiles(mode)) return !1;
+    const manifestRaw = tryRead('INV/PRESYNC/MANIFEST.JSON');
+    if (!manifestRaw) return !0;
+    try {
+      const m = JSON.parse(manifestRaw);
+      if (m && m.v && m.v < 2) return !1;
+      if (m && m.mode && m.mode !== mode) return !1;
+    } catch (e) {
+      return !1;
+    }
+    return !0;
+  }
+  function clearPreSyncBackup() {
+    const tryUnlink = (p) => {
+      try {
+        fs.unlinkSync(p);
+      } catch (e) {}
+    };
+    tryUnlink('SETTINGS/PRESYNC/PLAYER.JSON');
+    ['F3', 'NV'].forEach((m) => {
+      presyncCats.forEach((c) => tryUnlink('INV/PRESYNC/' + m + '/' + c + '.INV'));
+    });
+    tryUnlink('INV/PRESYNC/MANIFEST.JSON');
+  }
+  function readPresyncOrDefault(src, defaults) {
+    const data = tryRead(src);
+    if (data) return data;
+    for (let i = 0; i < defaults.length; i++) {
+      const fallback = tryRead(defaults[i]);
+      if (fallback) return fallback;
+    }
+    return '';
+  }
+  function restorePreSyncData() {
+    const mode = NV ? 'NV' : 'F3',
+      srcDir = 'INV/PRESYNC/' + mode,
+      dstDir = 'INV/' + mode,
+      refreshIds = [
+        'WEAPONS',
+        'APPAREL',
+        'AID',
+        'MISC',
+        'AMMO',
+        'SPECIAL',
+        'SKILLS',
+        'PERKS'
+      ];
+    if (!hasPreSyncBackup(mode)) return !1;
+    if (cmode) return !1;
+    try {
+      ensureDir(dstDir);
+      typeof Pip !== 'undefined' && Pip.inv && delete Pip.inv;
+      const playerData = tryRead('SETTINGS/PRESYNC/PLAYER.JSON');
+      if (playerData) {
+        fs.writeFileSync('SETTINGS/PLAYER.JSON', playerData);
+        const restored = JSON.parse(playerData);
+        for (let k in restored) player.player[k] = restored[k];
+        player.ephemeral = {};
+        player.modified = !0;
+        player.sync();
+      }
+      presyncCats.forEach((v) => {
+        const live = dstDir + '/' + v + '.INV',
+          def = 'INV/DEFAULT/' + mode + '/' + v + '.INV';
+        const data = readPresyncOrDefault(srcDir + '/' + v + '.INV', [def]);
+        fs.writeFileSync(live, data || '');
+      });
+      player.calculateInvWeight && player.calculateInvWeight();
+      Pip.renderHeader && Pip.renderHeader();
+      clearPreSyncBackup();
+      console.log('PIPSYNC:RESTORE:PRESYNC');
+      Pip.CURRENT &&
+        refreshIds.indexOf(Pip.CURRENT.id) >= 0 &&
+        Pip.changeMenu &&
+        Pip.changeMenu();
+      return !0;
+    } catch (e) {
+      return !1;
+    }
+  }
   function showUserMenu() {
     (menu && menu.remove(),
       (menu = showMenu({
@@ -311,7 +323,7 @@
           value: player.getav('name') || '',
           onchange: () => {
             (menu && menu.remove(),
-              (menu = showTextEntry(
+              (menu = Pip.createKeyboard(
                 player.getav('name') || '',
                 "Edit your name, then select 'Enter' when done",
                 (name) => {
@@ -336,30 +348,27 @@
         'Restore pre-sync data': function () {
           const mode = NV ? 'NV' : 'F3';
           (menu && menu.remove(),
-            typeof cmode !== 'undefined' && cmode
+            cmode
               ? (menu = showMenu({
                   '': { title: 'Cannot Restore', back: showUserMenu },
                   'Not allowed while in companion mode.': () => {}
                 }))
-              : (() => {
-                  let ps;
-                  try {
-                    ps = eval(fs.readFileSync('JS/PRESYNC.JS'));
-                  } catch (e) {
-                    ps = null;
-                  }
-                  !ps || !ps.hasPreSyncBackup(mode)
-                    ? (menu = showMenu({
-                        '': { title: 'No Backup', back: showUserMenu },
-                        'No pre-sync data backup found for this mode.': () => {}
-                      }))
-                    : (menu = showMenu({
-                        '': { title: 'Restore pre-sync data?', back: showUserMenu },
-                        Yes: function () {
-                          (ps.restore(mode), showUserMenu());
-                        }
-                      }));
-                })());
+              : hasPreSyncBackup(mode)
+                ? (menu = showMenu({
+                    '': { title: 'Restore pre-sync data?', back: showUserMenu },
+                    Yes: function () {
+                      restorePreSyncData()
+                        ? showUserMenu()
+                        : (menu = showMenu({
+                            '': { title: 'Restore Failed', back: showUserMenu },
+                            'Could not restore pre-sync data.': () => {}
+                          }));
+                    }
+                  }))
+                : (menu = showMenu({
+                    '': { title: 'No Backup', back: showUserMenu },
+                    'No pre-sync data backup found for this mode.': () => {}
+                  })));
         },
         'Reset inventory': function () {
           (menu && menu.remove(),
@@ -489,7 +498,10 @@
           onchange: (v) => {
             (writeSetting('debug', v),
               Pip.renderDebugInfo(),
-              Pip.renderHeader());
+              Pip.renderHeader(),
+              v
+                ? Pip.startDebugInfoTimer()
+                : (clearInterval(Pip.timers.debug), delete Pip.timers.debug));
           }
         }
       })));
@@ -499,12 +511,12 @@
       (menu = showMenu({
         '': { title: 'Sound Settings', back: showMainMenu },
         'Sound effects volume': {
-          value: Math.round((settings.volume || 27) / 2.7),
-          min: 1,
-          max: 10,
+          value: Math.round((settings.volume || 27) / 1.35),
+          min: 0,
+          max: 20,
           step: 1,
           onchange: (v) => {
-            (writeSetting('volume', Math.round(2.7 * v)),
+            (writeSetting('volume', Math.round(1.35 * v)),
               Pip.setVol(settings.volume));
           }
         },
@@ -540,7 +552,7 @@
           value: settings.torchPattern || 'SOS',
           onchange: (v) => {
             (menu && menu.remove(),
-              (menu = showTextEntry(
+              (menu = Pip.createKeyboard(
                 v,
                 "Enter a message, then select 'Enter' when done",
                 (value) => {
@@ -556,14 +568,15 @@
       (menu = showMenu({
         '': { title: 'Date & Time Settings', back: showMainMenu },
         'Set date & time': function () {
-          showDateTimeSettingUI(
-            Pip.getDateAndTime(),
-            !0,
-            'SET DATE & TIME',
-            (d) => {
-              (Pip.setDateAndTime(d), Pip.renderHeader(), showDateTimeMenu());
-            }
-          );
+          (menu && menu.remove(),
+            (menu = Pip.createDateTimePicker(
+              Pip.getDateAndTime(),
+              !0,
+              'SET DATE & TIME',
+              (d) => {
+                (Pip.setDateAndTime(d), Pip.renderHeader(), showDateTimeMenu());
+              }
+            )));
         },
         Timezone: {
           value: settings.tz || 0,
@@ -633,14 +646,15 @@
       'Set alarm time': {
         value: `${time.getHours().toString().padStart(2, 0)}:${time.getMinutes().toString().padStart(2, 0)}`,
         onchange: function () {
-          showDateTimeSettingUI(time, !1, 'SET ALARM', (d) => {
-            (writeSetting('alarm.enabled', !0),
-              writeSetting('alarm.time', d.getTime()),
-              writeSetting('alarm.snoozeTime', void 0),
-              Pip.configureAlarm(),
-              Pip.renderHeader(),
-              showAlarmMenu());
-          });
+          (menu && menu.remove(),
+            (menu = Pip.createDateTimePicker(time, !1, 'SET ALARM', (d) => {
+              (writeSetting('alarm.enabled', !0),
+                writeSetting('alarm.time', d.getTime()),
+                writeSetting('alarm.snoozeTime', void 0),
+                Pip.configureAlarm(),
+                Pip.renderHeader(),
+                showAlarmMenu());
+            })));
         }
       },
       'Alarm sound': {
@@ -699,123 +713,6 @@
       }
     });
   }
-  function showDateTimeSettingUI(d, withDate, title, callback) {
-    d.setSeconds(0);
-    let settingStep = withDate ? 0 : 3,
-      drawDateTime = () => {
-        let hh = d.getHours().twoDigit(),
-          mm = d.getMinutes().twoDigit();
-        (h.reset().setFontMonofonto28().setFontAlign(-1, -1),
-          withDate
-            ? (h.drawString(
-                d.getFullYear().toString().padStart(4),
-                117,
-                148,
-                !0
-              ),
-              h.drawString('-', 176, 148),
-              h.drawString((d.getMonth() + 1).twoDigit(), 193, 148, !0),
-              h.drawString('-', 224, 148),
-              h.drawString(d.getDate().twoDigit(), 241, 148, !0),
-              h.drawString(hh, 289, 148, !0),
-              h.drawString(':', 320, 148),
-              h.drawString(mm, 337, 148, !0))
-            : (h.drawString(hh, 202, 148, !0),
-              h.drawString(':', 233, 148),
-              h.drawString(mm, 250, 148, !0)));
-      },
-      drawThickBox = (x, y, W, H, l) => {
-        null == l && (l = 1);
-        let x1 = x,
-          x2 = x + W,
-          y1 = y,
-          y2 = y + H;
-        for (; l--; ) (h.drawRect(x1, y1, x2, y2), x1++, x2--, y1++, y2--);
-      },
-      drawBox = (b) => {
-        let boxes;
-        (null == b && (b = 3),
-          (boxes = withDate
-            ? [
-                [113, 141, 64, 42, 2],
-                [189, 141, 36, 42, 2],
-                [237, 141, 36, 42, 2],
-                [285, 141, 36, 42, 2],
-                [333, 141, 36, 42, 2],
-                [190, 210, 100, 33, 1]
-              ]
-            : [
-                [],
-                [],
-                [],
-                [198, 141, 36, 42, 2],
-                [246, 141, 36, 42, 2],
-                [190, 210, 100, 33, 1]
-              ]),
-          h.setColor(b));
-        let c = boxes[settingStep];
-        (5 == settingStep &&
-          (h.setBgColor(1).clearRect(c[0], c[1], c[0] + c[2], c[1] + c[3]),
-          h.setFontMonofonto23().setFontAlign(0, -1),
-          h.drawString('SET', 240, 215).setBgColor(0)),
-          drawThickBox(c[0], c[1], c[2], c[3], c[4]));
-      };
-    function onKnob1(dir) {
-      if (dir) {
-        switch (settingStep) {
-          case 0:
-            d.setFullYear(d.getFullYear() - dir);
-            break;
-          case 1:
-            d.setMonth(d.getMonth() - dir);
-            break;
-          case 2:
-            d.setDate(d.getDate() - dir);
-            break;
-          case 3:
-            d.setHours(d.getHours() - dir);
-            break;
-          case 4:
-            d.setMinutes(d.getMinutes() - dir);
-        }
-        (drawDateTime(), Pip.playSound('SCROLL'));
-      } else
-        settingStep >= 5
-          ? (Pip.playSound('SELECT'), setTimeout(callback, 400, d))
-          : (Pip.playSound('TAB'), drawBox(0), settingStep++, drawBox());
-      h.flip();
-    }
-    function onKnob2(dir) {
-      (Pip.playSound('TAB'),
-        drawBox(5 == settingStep ? 0.3 : 0),
-        (settingStep = withDate
-          ? (settingStep + dir + 6) % 6
-          : ((settingStep + dir + 3) % 3) + 3),
-        drawBox(),
-        h.flip());
-    }
-    (menu && menu.remove(),
-      (menu = {
-        remove: () => {
-          (Pip.removeListener('knob1', onKnob1),
-            Pip.removeListener('knob2', onKnob2));
-        }
-      }),
-      Pip.onExclusive('knob1', onKnob1),
-      Pip.onExclusive('knob2', onKnob2),
-      h.reset().clearRect(BR),
-      h.setFontMonofonto28().setColor(2).setFontAlign(0, -1),
-      h.drawString(title, 240, 88),
-      h.setFontMonofonto23().setColor(1),
-      h.drawString('SET', 240, 215),
-      h.drawRect(190, 210, 290, 243),
-      withDate
-        ? drawThickBox(88, 134, 306, 56, 3)
-        : drawThickBox(164, 134, 152, 56, 3),
-      drawDateTime(),
-      drawBox(),
-      h.flip());
-  }
   return (
     debug(' - SETTINGS: Before showing main menu'),
     showMainMenu(),
@@ -825,7 +722,6 @@
       remove: () => {
         (menu.remove(),
           player.sync(),
-          Pip.audioStop(),
           writeTimeout &&
             (clearTimeout(writeTimeout),
             (writeTimeout = void 0),

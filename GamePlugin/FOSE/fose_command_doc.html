@@ -1,0 +1,2081 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html><head><meta content="text/html; charset=ISO-8859-1" http-equiv="content-type"><title>FOSE Command Docs</title></head>
+<body><h2>Fallout Script Extender v1 Command Documentation</h2><span style="font-weight: bold;">Table of Contents<span style="font-weight: bold;"><br></span></span><a href="#Function_Quick_Reference">Function Quick Reference</a><br><a href="#Function_Syntax_Format">Function Syntax Format</a><br><a href="#Function_Calling_Conventions">Function Calling
+Conventions</a><br><a href="#Functions_In_Detail">Functions
+in Detail</a><br><br><b><a name="Function_Quick_Reference"></a>Function Quick
+Reference</b>
+<br>(nothing) <a href="#AddSpellNS">AddSpellNS</a>
+spell:SpellItem <br>(Float) <a href="#Ceil">Ceil</a>
+float:Float <br>(Float) <span style="font-style: italic;">reference.</span><a href="#CompareNames">CompareNames</a>
+inv item:GenericObject <i>target item:</i><i>GenericObject</i>
+<br>(nothing) <a href="#con_CloseAllMenus">con_CloseAllMenus</a>
+<br>(IntegerOrFloat) <a href="#con_GetINISetting">con_GetINISetting</a>
+String:String <br>(nothing) <a href="#con_LoadGame">con_LoadGame</a>
+String:String <i>Integer (Optional):Integer</i> <br>(nothing)
+<a href="#con_QuitGame">con_QuitGame</a>
+<br>(nothing) <a href="#con_RefreshINI">con_RefreshINI</a>
+<br>(nothing) <a href="#con_SetCameraFOV">con_SetCameraFOV</a>
+<i>Float (Optional):Float</i> <i>Float
+(Optional):Float</i> <br>(nothing) <a href="#con_SetGameSetting">con_SetGameSetting</a>
+String:String String:String <br>(nothing) <a href="#con_SetINISetting">con_SetINISetting</a>
+String:String String:String <br>(nothing) reference.<a href="#con_SetVel">con_SetVel</a>
+Axis:Axis Float:Float <br>(nothing) <a href="#con_Save">con_Save</a>
+String:String <i>Integer (Optional):Integer</i> <br>(nothing)
+<a href="#con_SaveINI">con_SaveINI</a>
+<br>(nothing) <a href="#DebugPrint">DebugPrint</a>
+format string:String <i>variable:Float</i> <i>variable:Float</i>
+<i>variable:Float</i> <i>variable:Float</i> <i>variable:Float</i>
+<i>variable:Float</i> <i>variable:Float</i> <i>variable:Float</i>
+<i>variable:Float</i> <i>variable:Float</i> <i>variable:Float</i>
+<i>variable:Float</i> <i>variable:Float</i> <i>variable:Float</i>
+<i>variable:Float</i> <i>variable:Float</i> <i>variable:Float</i>
+<i>variable:Float</i> <i>variable:Float</i> <i>variable:Float</i>
+<br>(nothing) <a href="#DisableControl">DisableControl</a>
+<a href="#ControlCodes">controlCode:Integer</a>
+<br>(nothing) <a href="#DisableKey">DisableKey</a>
+<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br>(nothing) <a href="#EnableControl">EnableControl</a>&nbsp;<a href="#ControlCodes">controlCode:Integer</a>
+<br>(nothing) <a href="#EnableKey">EnableKey</a>
+<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br>(Float) <a href="#Exp">Exp</a>
+float:Float <br>(Float) <a href="#Floor">Floor</a>
+float:Float <br>(Float) <a href="#fmod">fmod</a>
+x:Float n:Float <i>offset:Float</i> <br>(<a href="#DirectX_Scancodes">scanCode:Integer</a>)
+<a href="#GetAltControl">GetAltControl</a>&nbsp;<a href="#ControlCodes">controlCode:Integer</a>
+<br>(Integer) <span style="font-style: italic;">reference.</span><a href="#GetArmorAR">GetArmorAR</a>
+<i>item:InventoryObject</i> <br>(Integer) <span style="font-style: italic;">reference.</span><a href="#GetAttackDamage">GetAttackDamage</a>
+<i>item:InventoryObject</i> <br>(BaseForm) reference.<a href="#GetBaseObject">GetBaseObject</a>
+<br>(<a href="#DirectX_Scancodes">scanCode:Integer</a>)
+<a href="#GetControl">GetControl</a>&nbsp;<a href="#ControlCodes">controlCode:Integer</a>
+<br>(Reference) <a href="#GetCrosshairRef">GetCrosshairRef</a>
+<br>(Bool) <a href="#GetDebugMode">GetDebugMode</a>
+<i>int:Integer</i> <br>(Float) reference.<a href="#GetEquippedCurrentHealth">GetEquippedCurrentHealth</a>
+int:Integer <br>(BaseForm) reference.<a href="#GetEquippedObject">GetEquippedObject</a>
+<a href="#Equipment_Slot_IDs">atIndex:Integer</a> <br>(<a href="#Equip_Type">equipType:Integer</a>)
+<span style="font-style: italic;">reference.</span><a href="#GetEquipType">GetEquipType</a>
+<i>item:InventoryObject</i> <br>(Reference) <a href="#GetFirstRef">GetFirstRef</a>&nbsp;<i><a href="#Form_Type_IDs"><i>form
+type:Integer</i></a></i> <i>cell depth:Integer</i>
+<i>include taken refs:Bool</i> <br>(Reference) <a href="#GetFirstRefInCell">GetFirstRefInCell</a>
+cell:Cell&nbsp;<i><a href="#Form_Type_IDs"><i>form
+type:Integer</i></a></i> <i>cell depth:Integer</i>
+<i>include taken refs:Bool</i> <br>(Integer) <a href="#GetFOSEVersion">GetFOSEVersion</a> <br>(Integer)
+<a href="#GetFOSERevision">GetFOSERevision</a> <br>(Integer)
+<a href="#GetFOSEBeta">GetFOSEBeta</a>
+<br>(Bool) <a href="#GetGameLoaded">GetGameLoaded</a>
+<br>(Bool) <a href="#GetGameRestarted">GetGameRestarted</a>
+<br>(Integer) <span style="font-style: italic;">reference.</span><a href="#GetHealth">GetHealth</a>
+<i>item:GenericObject</i> <br>(BaseForm) <a href="#GetHotkeyItem">GetHotkeyItem</a>
+int:Integer <br>(<a href="#DirectX_Scancodes">scanCode:Integer</a>)
+<a href="#GetKeyPress">GetKeyPress</a>
+int:Integer <br>(BaseForm) reference.<a href="#GetLinkedDoor">GetLinkedDoor</a>
+<br>(Integer) <a href="#GetModIndex">GetModIndex</a>
+string:String <br>(<a href="#DirectX_Scancodes">scanCode:Integer</a>)
+<a href="#GetMouseButtonPress">GetMouseButtonPress</a>
+int:Integer <br>(Reference) <a href="#GetNextRef">GetNextRef</a>
+<br>(IntegerOrFloat) <a href="#GetNumericGameSetting">GetNumericGameSetting</a>
+string:String <br>(IntegerOrFloat)&nbsp;<span style="font-style: italic;"></span><a href="#GetNumericIniSetting">GetNumericIniSetting</a>
+string:String <br>(Integer) <a href="#GetNumKeysPressed">GetNumKeysPressed</a>
+<br>(Integer) <a href="#GetNumLoadedMods">GetNumLoadedMods</a>
+<br>(Integer) <a href="#GetNumRefs">GetNumRefs</a>&nbsp;<i><a href="#Form_Type_IDs"><i>form
+type:Integer</i></a></i> <i>cell depth:Integer</i>
+<i>include taken refs:Bool</i> <br>(Integer) <a href="#GetNumRefsInCell">GetNumRefsInCell</a>
+cell:Cell&nbsp;<i><a href="#Form_Type_IDs"><i>form
+type:Integer</i></a></i> <i>cell depth:Integer</i>
+<i>include taken refs:Bool</i> <br>(count:Integer) <a href="#GetNumMouseButtonsPressed">GetNumMouseButtonsPressed</a>
+<br>(BaseForm) <span style="font-style: italic;">reference.</span><a href="#GetObjectEffect">GetObjectEffect</a>
+<i>item:InventoryObject</i> <br>(BaseForm) reference.<a href="#GetOpenKey">GetOpenKey</a>
+<br>(BaseForm) reference.<a href="#GetParentCell">GetParentCell</a>
+<br>(BaseForm) reference.<a href="#GetParentWorldspace">GetParentWorldspace</a>
+<br>(FormList) <span style="font-style: italic;">reference.</span><a href="#GetRepairList">GetRepairList</a>
+<i>item:InventoryObject</i> <br>(BaseForm) <span style="font-style: italic;">reference.</span><a href="#GetScript">GetScript</a>
+<i>item:</i><i>GenericObject</i> <br>(Integer)
+<span style="font-style: italic;">reference.</span><a href="#GetSourceModIndex">GetSourceModIndex</a>
+<i>item:</i><i>GenericObject</i> <br>(BaseForm)
+reference.<a href="#GetTeleportCell">GetTeleportCell</a>
+<br>(<a href="#Form_Type_IDs">formType:Integer</a>)
+<span style="font-style: italic;">reference.</span><a href="#GetType">GetType</a>
+<i>item:</i><i>GenericObject</i> <br>(Float)
+<a href="#GetUIFloat">GetUIFloat</a>
+string:String <br>(Integer) <span style="font-style: italic;">reference.</span><a href="#GetValue">GetValue</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeight">GetWeight</a> <i>item:InventoryObject</i>
+<br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponActionPoints">GetWeaponActionPoints</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponAimArc">GetWeaponAimArc</a>
+<i>item:InventoryObject</i> <br>(BaseForm) <span style="font-style: italic;">reference.</span><a href="#GetWeaponAmmo">GetWeaponAmmo</a> <i>item:InventoryObject</i>
+<br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponAmmoUse">GetWeaponAmmoUse</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponAnimAttackMult">GetWeaponAnimAttackMult</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponAnimJamTime">GetWeaponAnimJamTime</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponAnimMult">GetWeaponAnimMult</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponAnimReloadTime">GetWeaponAnimReloadTime</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponAnimShotsPerSec">GetWeaponAnimShotsPerSec</a>
+<i>item:InventoryObject</i> <br>(<a href="#Attack_Animations">attackAnimation:Integer</a>)
+<span style="font-style: italic;">reference.</span><a href="#GetWeaponAttackAnimation">GetWeaponAttackAnimation</a>
+<i>item:InventoryObject</i> <br>(Integer) <span style="font-style: italic;">reference.</span><a href="#GetWeaponBaseVATSChance">GetWeaponBaseVATSChance</a>
+<i>item:InventoryObject</i> <br>(Integer) <span style="font-style: italic;">reference.</span><a href="#GetWeaponClipRounds">GetWeaponClipRounds</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponCritChance">GetWeaponCritChance</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponCritDamage">GetWeaponCritDamage</a>
+<i>item:InventoryObject</i> <br>(BaseForm) <span style="font-style: italic;">reference.</span><a href="#GetWeaponCritEffect">GetWeaponCritEffect</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponFireDelayMin">GetWeaponFireDelayMin</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponFireDelayMax">GetWeaponFireDelayMax</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponFireRate">GetWeaponFireRate</a>
+<i>item:InventoryObject</i> <br>(<a href="#Weapon_Hand_Grips">handGrip:Integer</a>)
+<span style="font-style: italic;">reference.</span><a href="#GetWeaponHandGrip">GetWeaponHandGrip</a>
+<i>item:InventoryObject</i> <br>(Bool) <span style="font-style: italic;">reference.</span><a href="#GetWeaponHasScope">GetWeaponHasScope</a>
+<i>item:InventoryObject</i> <br>(Bool) <span style="font-style: italic;">reference.</span><a href="#GetWeaponIsAutomatic">GetWeaponIsAutomatic</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponLimbDamageMult">GetWeaponLimbDamageMult</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponMaxRange">GetWeaponMaxRange</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponMinRange">GetWeaponMinRange</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponMinSpread">GetWeaponMinSpread</a>
+<i>item:InventoryObject</i> <br>(Integer) <span style="font-style: italic;">reference.</span><a href="#GetWeaponNumProjectiles">GetWeaponNumProjectiles</a>
+<i>item:InventoryObject</i> <br>(BaseForm) <span style="font-style: italic;">reference.</span><a href="#GetWeaponProjectile">GetWeaponProjectile</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponReach">GetWeaponReach</a>
+<i>item:InventoryObject</i> <br>(<a href="#Reload_Animations">reloadAnim:Integer</a>)
+<span style="font-style: italic;">reference.</span><a href="#GetWeaponReloadAnim">GetWeaponReloadAnim</a>
+<i>item:InventoryObject</i> <br>(<a href="#Actor_Value_Codes">resistValue:Integer</a>)
+<span style="font-style: italic;">reference.</span><a href="#GetWeaponResistType">GetWeaponResistType</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponRumbleDuration">GetWeaponRumbleDuration</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponRumbleLeftMotor">GetWeaponRumbleLeftMotor</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponRumbleRightMotor">GetWeaponRumbleRightMotor</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponRumbleWavelength">GetWeaponRumbleWavelength</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponSightFOV">GetWeaponSightFOV</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponSightUsage">GetWeaponSightUsage</a>
+<i>item:InventoryObject</i> <br>(<a href="#Actor_Value_Codes">weaponSkill:Integer</a>)
+<span style="font-style: italic;">reference.</span><a href="#GetWeaponSkill">GetWeaponSkill</a>
+<i>item:InventoryObject</i> <br>(Float) <span style="font-style: italic;">reference.</span><a href="#GetWeaponSpread">GetWeaponSpread</a>
+<i>item:InventoryObject</i> <br>(<a href="#Weapon_Type">weaponType:Integer</a>)
+<span style="font-style: italic;">reference.</span><a href="#GetWeaponType">GetWeaponType</a>
+<i>item:InventoryObject</i> <br>(nothing) <a href="#Goto">Goto</a> <i>int:Integer</i>
+<br>(nothing) <a href="#HoldKey">HoldKey</a>
+<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br>(Bool) <span style="font-style: italic;">reference.</span><a href="#IsClonedForm">IsClonedForm</a>
+<i>item:</i><i>GenericObject</i> <br>(Bool)
+<a href="#IsControl">IsControl</a>&nbsp;<a href="#ControlCodes">controlCode:Integer</a>
+<br>(Bool) <a href="#IsControlDisabled">IsControlDisabled</a>&nbsp;<a href="#ControlCodes">controlCode:Integer</a>
+<br>(Bool) <a href="#IsControlPressed">IsControlPressed</a>&nbsp;<a href="#ControlCodes">controlCode:Integer</a>
+<br>(Bool) <span style="font-style: italic;">reference.</span><a href="#IsFormValid">IsFormValid</a>
+<i>item:InventoryObject</i> <br>(Bool) <a href="#IsKeyDisabled">IsKeyDisabled</a>&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br>(Bool) <a href="#IsKeyPressed">IsKeyPressed</a>
+<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br>(Bool) <a href="#IsModLoaded">IsModLoaded</a>
+string:String <br>(Bool) <span style="font-style: italic;">reference.</span><a href="#IsPowerArmor">IsPowerArmor</a>
+<i>item:InventoryObject</i> <br>(Bool) <a href="#IsReference">IsReference</a>
+reference:ObjectRef <br>(Bool) <span style="font-style: italic;">reference.</span><a href="#IsScripted">IsScripted</a>
+<i>item:</i><i>GenericObject</i> <br>(nothing)
+<a href="#Label">Label</a>
+<i>int:Integer</i> <br>(Integer) <a href="#LeftShift">LeftShift</a>
+int:Integer int:Integer <br>(addedAtIndex:Integer) reference.<a href="#ListAddReference">ListAddReference</a>
+form list:FormList <i>index:Integer</i> <br>(addedAtIndex:Integer)
+<span style="font-style: italic;"></span><a href="#ListAddForm">ListAddForm</a>
+form list:FormList form:GenericObject <i>index:Integer</i><br>(Integer)&nbsp;<span style="font-style: italic;"></span><a href="#ListGetCount">ListGetCount</a> form
+list:FormList <br>(BaseForm)&nbsp;<span style="font-style: italic;"></span><a href="#ListGetNthForm">ListGetNthForm</a> form
+list:FormList index:Integer <br>(Integer)&nbsp;<span style="font-style: italic;"></span><a href="#ListGetFormIndex">ListGetFormIndex</a> form
+list:FormList form:GenericObject <br>(oldIndex:Integer) <a href="#ListRemoveForm">ListRemoveForm</a>
+form list:FormList form:GenericObject <br>(removedForm:BaseForm)
+<a href="#ListRemoveNthForm">ListRemoveNthForm</a>
+form list:FormList <i>index:Integer</i> <br>(oldIndex:Integer)
+<a href="#ListReplaceForm">ListReplaceForm</a>
+form list:FormList replaceWith:GenericObject
+formToReplace:GenericObject <br>(oldForm:BaseForm) <a href="#ListReplaceNthForm">ListReplaceNthForm</a>
+form list:FormList replaceWith:GenericObject <i>formIndex:Integer</i>
+<br>(Float) <a href="#Log10">Log10</a>
+float:Float <br>(Integer) <a href="#LogicalAnd">LogicalAnd</a>
+int:Integer int:Integer <br>(Integer) <a href="#LogicalNot">LogicalNot</a>
+int:Integer <br>(Integer) <a href="#LogicalOr">LogicalOr</a>
+int:Integer int:Integer <br>(Integer) <a href="#LogicalXor">LogicalXor</a>
+int:Integer int:Integer <br>(nothing) <a href="#MenuHoldKey">MenuHoldKey</a>&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br>(nothing) <a href="#MenuReleaseKey">MenuReleaseKey</a>&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br>(nothing) <a href="#MenuTapKey">MenuTapKey</a>&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br>(nothing) <a href="#PrintActiveTile">PrintActiveTile</a><br>(nothing)
+<a href="#PrintToConsole">PrintToConsole</a>
+format string:String <i>variable:Float</i> <i>variable:Float</i>
+<i>variable:Float</i> <i>variable:Float</i> <i>variable:Float</i>
+<i>variable:Float</i> <i>variable:Float</i> <i>variable:Float</i>
+<i>variable:Float</i> <i>variable:Float</i> <i>variable:Float</i>
+<i>variable:Float</i> <i>variable:Float</i> <i>variable:Float</i>
+<i>variable:Float</i> <i>variable:Float</i> <i>variable:Float</i>
+<i>variable:Float</i> <i>variable:Float</i> <i>variable:Float</i>
+<br>(nothing) <a href="#ReleaseKey">ReleaseKey</a>
+<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br>(oldScript:BaseForm) <span style="font-style: italic;">reference.</span><a href="#RemoveScript">RemoveScript</a>
+<i>item:</i><i>GenericObject</i> <br>(Integer)
+<a href="#RightShift">RightShift</a>
+int:Integer int:Integer <br>(nothing) <a href="#SetAltControl">SetAltControl</a>&nbsp;<a href="#ControlCodes">controlCode:Integer</a>&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br>(nothing) <span style="font-style: italic;">reference.</span><a href="#SetAttackDamage">SetAttackDamage</a>
+path type:Integer <i>item:InventoryObject</i> <br>(nothing)
+<a href="#SetBaseItemValue">SetBaseItemValue</a>
+form:InventoryObject newValue:Integer<br>(nothing) <a href="#SetControl">SetControl</a>&nbsp;<a href="#ControlCodes">controlCode:Integer</a>&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br>(nothing) <a href="#SetDebugMode">SetDebugMode</a>
+int:Integer <i>int:Integer</i> <br>(nothing)
+reference.<a href="#SetEquippedCurrentHealth">SetEquippedCurrentHealth</a>
+val:Float slot:Integer<br>(nothing) <span style="font-style: italic;">reference</span>.<a href="#SetHealth">SetHealth</a>&nbsp;
+newHealth:Integer <i>item:GenericObject</i><br>(nothing)
+<a href="#SetIsControl">SetIsControl</a>&nbsp;<a href="#ControlCodes">controlCode:Integer</a>&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br>(nothing) <span style="font-style: italic;">reference.</span><a href="#SetIsPowerArmor">SetIsPowerArmor</a>
+path type:Integer <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetName">SetName</a>
+string:String <i>item:</i><i>GenericObject</i>
+<br>(nothing) <a href="#SetNumericGameSetting">SetNumericGameSetting</a>
+string:String float:Float <br>(nothing)&nbsp;<span style="font-style: italic;"></span><a href="#SetNumericIniSetting">SetNumericIniSetting</a>
+string:String float:Float <br>(nothing) reference.<a href="#SetOpenKey">SetOpenKey</a>
+item:InventoryObject <br>(nothing) <span style="font-style: italic;">reference.</span><a href="#SetRepairList">SetRepairList</a>
+form list:FormList <i>target item:InventoryObject</i> <br>(oldScript:BaseForm)
+<span style="font-style: italic;">reference.</span><a href="#SetScript">SetScript</a>
+magic item:GenericObject <i>item:</i><i>GenericObject</i>
+<br>(nothing) <a href="#SetUIFloat">SetUIFloat</a>
+string:String float:Float <br>(nothing) <a href="#SetUIString">SetUIString</a>
+string:String string:String <br>(nothing) <span style="font-style: italic;">reference.</span><a href="#SetWeaponActionPoints">SetWeaponActionPoints</a>
+float:Float <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponAimArc">SetWeaponAimArc</a>
+float:Float <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponAmmo">SetWeaponAmmo</a>
+inv item:MagicItem <i>target item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponAmmoUse">SetWeaponAmmoUse</a>
+path type:Integer <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponAnimAttackMult">SetWeaponAnimAttackMult</a>
+float:Float <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponAnimMult">SetWeaponAnimMult</a>
+float:Float <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponAttackAnimation">SetWeaponAttackAnimation</a>
+path type:Integer <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponBaseVATSChance">SetWeaponBaseVATSChance</a>
+path type:Integer <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponClipRounds">SetWeaponClipRounds</a>
+path type:Integer <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponCritChance">SetWeaponCritChance</a>
+float:Float <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponCritDamage">SetWeaponCritDamage</a>
+path type:Integer <i>item:InventoryObject</i> <br>(oldCriticalEffect:BaseForm)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponCritEffect">SetWeaponCritEffect</a>
+magic item:MagicItem <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponHandGrip">SetWeaponHandGrip</a>
+path type:Integer <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponIsAutomatic">SetWeaponIsAutomatic</a>
+path type:Integer <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponLimbDamageMult">SetWeaponLimbDamageMult</a>
+float:Float <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponMaxRange">SetWeaponMaxRange</a>
+float:Float <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponMinRange">SetWeaponMinRange</a>
+float:Float <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponMinSpread">SetWeaponMinSpread</a>
+float:Float <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponNumProjectiles">SetWeaponNumProjectiles</a>
+path type:Integer <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponProjectile">SetWeaponProjectile</a>
+inv item:MagicItem <i>target item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponReach">SetWeaponReach</a>
+float:Float <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponReloadAnim">SetWeaponReloadAnim</a>
+path type:Integer <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponSpread">SetWeaponSpread</a>
+float:Float <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponSightFOV">SetWeaponSightFOV</a>
+float:Float <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponSightUsage">SetWeaponSightUsage</a>
+float:Float <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeaponType">SetWeaponType</a>
+path type:Integer <i>item:InventoryObject</i> <br>(nothing)
+<span style="font-style: italic;">reference.</span><a href="#SetWeight">SetWeight</a> float:Float <i>item:InventoryObject</i>
+<br>(nothing) <a href="#TapControl">TapControl</a>&nbsp;<a href="#ControlCodes">controlCode:Integer</a>
+<br>(nothing) <a href="#TapKey">TapKey</a> <a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br>(clonedForm:BaseForm) <span style="font-style: italic;">reference.</span><a href="#TempCloneForm">TempCloneForm</a>
+<i>item:</i><i>GenericObject</i> <br><br><br><hr><span style="font-weight: bold;"><a name="Function_Syntax_Format"></a>Function Syntax
+Format</span><br>&nbsp;&nbsp;&nbsp;
+(ReturnType) reference.FunctionName requiredParameter1:Type <span style="font-style: italic;">optionalParameter2:Type</span><br><br><span style="font-weight: bold;">Return Type</span>:
+the type of value the function returns. &nbsp;Sometimes this will
+also
+have a descriptive name, if the return value is not obvious based on
+the function definition.<br><br><span style="font-weight: bold;">reference</span>:
+If in plain text a required reference the function must be called upon.
+&nbsp;In an object script the object the script is attached to is
+considered the implicit reference for the function. &nbsp;If
+italicized
+the reference is optional but can be used to identify the object for
+the function to use. &nbsp;Usually the optional reference is teamed
+with an optional last argument which takes the place of the optional
+reference if used.<br><br><span style="font-weight: bold;">FunctionName: </span>the
+main name of the function and a link to the function details.<br><br><span style="font-weight: bold;">requiredParameter:Type:</span>
+a parameter in plain text is a required parameter that must be
+provided. &nbsp;The Type is the type of parameter needed.<br><span style="font-weight: bold;">optionalParameter:Type:</span>
+a parameter in italics is an optional parameter which can be provided.
+&nbsp;If not provided, a default value is used in its place.<br><br><span style="font-weight: bold;">Parameter and Return Types<br></span>Bool
+- an integer with a value of 0 (false) or 1 (true)<br>Float - a
+positive or negative floating point number<br>Integer - an
+positive integral number<br>IntegerOrFloat - either an integer or
+a float<br>BaseForm - a base form type whose values apply to all
+instances of that form<br>ObjectRef - a specific instance of a
+base form type<br>GenericObject - a base form object type.
+Frequently used when passing a form type
+which has no specific parameter type. &nbsp;As such the form
+identifier
+is first placed in a ref variable and that ref variable is used as the
+parameter.<br>InventoryObject - a base form object type which can
+be placed in an Inventory (weapon, armor, aid, misc item)<br>MagicItem
+- a base effect form. &nbsp;<br><span style="font-weight: bold;"></span><br><hr><span style="font-weight: bold;"><a name="Function_Calling_Conventions"></a>Function
+Calling Conventions</span><br>Fallout
+scripting functions are generally called on either a reference or by
+passing in a base form (either the EditorName of the base form or the
+base form in a reference variable.)<br><br><span style="font-weight: bold;"><a name="ByReference"></a>Calling
+By Reference (R):</span><br style="font-weight: bold;">Syntax
+Example: reference.FunctionName someParameters<br>
+Examples:<br>&nbsp;&nbsp;&nbsp; ; get the base object
+of a given reference<br>
+<span style="font-family: monospace;"></span>&nbsp;&nbsp;&nbsp;
+ref baseObject<br>&nbsp;&nbsp;&nbsp; set baseObject
+to reference.GetBaseObject<br>or<br>&nbsp;&nbsp;&nbsp;
+; get the current health of the player's equipped weapon<br>&nbsp;&nbsp;&nbsp;
+float weaponHealth<br>&nbsp;&nbsp;&nbsp; set
+weaponHealth to player.GetEquippedCurrentHealth 5<br><br>Functions
+with this calling convention use the reference to collect important
+information. &nbsp;All scripts running on an object or an actor
+reference have an implicit reference to that actor which will be used
+if another reference is not specified.<br><br><br><span style="font-weight: bold;"><a name="ByBaseForm"></a>Calling
+By Base Form (B):<br></span>Syntax Example: FunctionName
+someParameters objectID:ref<span style="font-weight: bold;"><br></span>Examples:<br>&nbsp;&nbsp;&nbsp;
+; get the form at index 2 (3rd item) of the Alcholic Drinks form list<br>&nbsp;&nbsp;&nbsp;
+ref form<br>&nbsp;&nbsp;&nbsp; set form to
+ListGetNthForm AlchohlicDrinks 2<br><span style="font-weight: bold;"><br></span>Most
+Fallout scripting functions use this calling convention, where all
+information is passed into the function as a parameter. &nbsp;These
+parameters can be base forms, integers, floats, form lists or
+references. &nbsp;Base forms can either be passed in using the
+Editor
+Name directly, or the base form could be put into a reference variable
+first<span style="font-weight: bold;">. </span>In
+some documentation you will see the term ObjectID rather than Base Form
+- these terms are mostly interchangeable.<br><span style="font-weight: bold;"><br><a name="ByEither"></a>Calling
+by Either Reference or Base Form (E):<br></span><span style="font-family: monospace;">Syntax Example: </span><span style="font-style: italic; font-family: monospace;">reference.</span><span style="font-family: monospace;">FunctionName
+someParameters </span><span style="font-style: italic; font-family: monospace;">objectID:ref<span style="font-style: italic;"><br>
+<span style="font-style: italic;"></span></span></span>Examples:<br>&nbsp;&nbsp;&nbsp;
+int health<br>&nbsp;&nbsp;&nbsp; ref weaponBaseForm<br>&nbsp;&nbsp;&nbsp;
+set health to GetHealth weaponBaseForm<br>or<br>&nbsp;&nbsp;&nbsp;
+int helth<br>&nbsp;&nbsp;&nbsp; ref droppedWeaponRef<br>&nbsp;&nbsp;&nbsp;
+set health to weaponRef.GetHealth<br><br>Many
+FOSE functions can be called using either Reference or Base Form
+syntax. &nbsp;These functions will have an optional calling
+reference
+and the last argument will be an optional object or form parameter.
+&nbsp;These functions will use the last optional base form argument
+to
+identify the form to act upon if provided, but if not provided will act
+upon the base form of the calling reference (if any.) &nbsp;This
+provides a single function which can be used either with a reference to
+an instance of an object, or on the base form itself.<br><br><hr style="width: 100%; height: 2px;"><span style="font-weight: bold;"><a name="NamingConventions"></a>Naming Conventions</span><br><span style="font-weight: bold;"></span><span style="font-weight: bold;"></span>When
+using functions like ListGetNthForm to treat a Form List like an array,
+make sure to end the name of the list with "OrderedList" (no quotes) so
+mod merging tools like FO3Edit know not to reorder or otherwise modify
+the list.<br><br> <hr><br><b><a name="Functions_In_Detail"></a>Functions In Detail</b>
+<p><a name="GetFOSEVersion"></a><b>GetFOSEVersion</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>0
+<br><b>Return Type:</b> Integer<br><b>Opcode:</b>
+0x1400 (5120)<br><b>Condition Function:</b> Yes<br><span style="font-weight: bold;">Introduced In: 1</span><br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><b>Description:</b>
+returns the installed version of FOSE</p>
+<p><a name="GetFOSERevision"></a><b>GetFOSERevision</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>0
+<br><b>Return Type:</b> Integer<br><b>Opcode:</b>
+0x1401 (5121)<br><b>Condition Function:</b> Yes<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><b>Description:</b>
+returns the numbered revision of the installed version of FOSE</p><p><a name="GetWeight"></a><b>GetWeight</b> <br><b>Alias:</b>
+none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Float<br><b>Opcode:</b>
+0x1404 (5124)<br><b>Condition Function:</b> Yes<br><span style="font-weight: bold;"></span><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the weight of the sepcified base form</p>
+<p><a name="GetRepairList"></a><b>GetRepairList</b>
+<br><b>Alias:</b> grl<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> FormList<br><b>Opcode:</b>
+0x1405 (5125)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the repair list for the inventory object</p>
+<p><a name="GetWeaponAmmo"></a><b>GetWeaponAmmo</b>
+<br><b>Alias:</b> GetAmmo<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> BaseForm<br><b>Opcode:</b>
+0x1406 (5126)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the ammo of a weapon</p>
+<p><a name="GetWeaponClipRounds"></a><b>GetWeaponClipRounds</b>
+<br><b>Alias:</b> GetClipSize<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Integer<br><b>Opcode:</b>
+0x1407 (5127)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the clip size for the weapon</p>
+<p><a name="GetAttackDamage"></a><b>GetAttackDamage</b>
+<br><b>Alias:</b> GetDamage<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Integer<br><b>Opcode:</b>
+0x1408 (5128)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the attack damage for the weapon</p>
+<p><a name="GetWeaponType"></a><b>GetWeaponType</b>
+<br><b>Alias:</b> GetWeapType<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> <a href="#Weapon_Type">WeaponType:Integer</a><br><b>Opcode:</b>
+0x1409 (5129)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the weapon type</p>
+<p><a name="GetWeaponMinSpread"></a><b>GetWeaponMinSpread</b>
+<br><b>Alias:</b> GetMinSpread<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Float<br><b>Opcode:</b>
+0x140a (5130)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the minimum spread of the weapon</p>
+<p><a name="GetWeaponSpread"></a><b>GetWeaponSpread</b>
+<br><b>Alias:</b> GetSpread<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Float<br><b>Opcode:</b>
+0x140b (5131)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the spread of the weapon</p>
+<p><a name="GetWeaponProjectile"></a><b>GetWeaponProjectile</b>
+<br><b>Alias:</b> GetWeapProj<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> BaseForm<br><b>Opcode:</b>
+0x140c (5132)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the weapon projectile info</p>
+<p><a name="GetWeaponSightFOV"></a><b>GetWeaponSightFOV</b>
+<br><b>Alias:</b> GetSightFOV<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Float<br><b>Opcode:</b>
+0x140d (5133)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the zoom field of view for the weapon</p>
+<p><a name="GetWeaponMinRange"></a><b>GetWeaponMinRange</b>
+<br><b>Alias:</b> GetMinRange<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Float<br><b>Opcode:</b>
+0x140e (5134)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the min range of the weapon</p>
+<p><a name="GetWeaponMaxRange"></a><b>GetWeaponMaxRange</b>
+<br><b>Alias:</b> GetMaxRange<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Float<br><b>Opcode:</b>
+0x140f (5135)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the max range of the weapon</p>
+<p><a name="GetWeaponAmmoUse"></a><b>GetWeaponAmmoUse</b>
+<br><b>Alias:</b> GetAmmoUse<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Float<br><b>Opcode:</b>
+0x1410 (5136)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the ammo used per shot of the weapon</p>
+<p><a name="GetWeaponActionPoints"></a><b>GetWeaponActionPoints</b>
+<br><b>Alias:</b> GetAP<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Float<br><b>Opcode:</b>
+0x1411 (5137)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the number of action points per shot of the weapon</p>
+<p><a name="GetWeaponCritDamage"></a><b>GetWeaponCritDamage</b>
+<br><b>Alias:</b> GetCritDam<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Float<br><b>Opcode:</b>
+0x1412 (5138)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the critical damage of the weapon</p>
+<p><a name="GetWeaponCritChance"></a><b>GetWeaponCritChance</b>
+<br><b>Alias:</b> GetCritPerc<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Float<br><b>Opcode:</b>
+0x1413 (5139)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the chance of a critical shot for the weapon</p>
+<p><a name="GetWeaponCritEffect"></a><b>GetWeaponCritEffect</b>
+<br><b>Alias:</b> GetCritEffect<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> BaseForm<br><b>Opcode:</b>
+0x1414 (5140)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the spell for the critical effect for the weapon</p>
+<p><a name="GetEquipType"></a><b>GetEquipType</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Integer<br><b>Opcode:</b>
+0x1415 (5141)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the equipment type of the inventory object</p>
+<p><a name="GetBaseObject"></a><b>GetBaseObject</b>
+<br><b>Alias:</b> gbo<br><b>Parameters:</b>0
+<br><b>Return Type:</b> BaseForm<br><b>Opcode:</b>
+0x1416 (5142)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByReference">R</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the base object id of the reference</p>
+<p><a name="GetHealth"></a><b>GetHealth</b>
+<br><b>Alias:</b> GetBaseHealth<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:</i><i>GenericObject</i>
+<br><b>Return Type:</b> Integer<br><b>Opcode:</b>
+0x1417 (5143)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the base health of the object or calling reference</p>
+<p><a name="GetValue"></a><b>GetValue</b>
+<br><b>Alias:</b> GetItemValue<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Integer<br><b>Opcode:</b>
+0x1418 (5144)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the base value of the object or calling reference</p>
+<p><a name="GetWeaponFireRate"></a><b>GetWeaponFireRate</b>
+<br><b>Alias:</b> GetFireRate<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Float<br><b>Opcode:</b>
+0x1419 (5145)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the fire rate of the weapon.</p>
+<p><a name="GetWeaponAnimAttackMult"></a><b>GetWeaponAnimAttackMult</b>
+<br><b>Alias:</b> GetAnimAttackMult<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Float<br><b>Opcode:</b>
+0x141a (5146)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the animation attack multiplier of the weapon.</p>
+<p><a name="GetWeaponRumbleLeftMotor"></a><b>GetWeaponRumbleLeftMotor</b>
+<br><b>Alias:</b> GetRumbleLeft<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Float<br><b>Opcode:</b>
+0x141b (5147)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the rumble left motor of the weapon.</p>
+<p><a name="GetWeaponRumbleRightMotor"></a><b>GetWeaponRumbleRightMotor</b>
+<br><b>Alias:</b> GetRumbleRight<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Float<br><b>Opcode:</b>
+0x141c (5148)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the rumble right motor of the weapon.</p>
+<p><a name="GetWeaponRumbleDuration"></a><b>GetWeaponRumbleDuration</b>
+<br><b>Alias:</b> GetRumbleDuration<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Float<br><b>Opcode:</b>
+0x141d (5149)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the rumble duration of the weapon.</p>
+<p><a name="GetWeaponRumbleWavelength"></a><b>GetWeaponRumbleWavelength</b>
+<br><b>Alias:</b> GetRumbleWavelen<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Float<br><b>Opcode:</b>
+0x141e (5150)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the rumble wavelegnth for the weapon.</p>
+<p><a name="GetWeaponAnimShotsPerSec"></a><b>GetWeaponAnimShotsPerSec</b>
+<br><b>Alias:</b> GetAnimShotsPerSec<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b>&nbsp;Float<br><b>Opcode:</b>
+0x141f (5151)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the animation shots per second of the weapon.</p>
+<p><a name="GetWeaponAnimReloadTime"></a><b>GetWeaponAnimReloadTime</b>
+<br><b>Alias:</b> GetAnimReloadTime<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b>&nbsp;Float<br><b>Opcode:</b>
+0x1420 (5152)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+retuns the animation reload time for the weapon.</p>
+<p><a name="GetWeaponAnimJamTime"></a><b>GetWeaponAnimJamTime</b>
+<br><b>Alias:</b> GetAnimJamTime<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b>&nbsp;Float<br><b>Opcode:</b>
+0x1421 (5153)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the animation jam time of the weapon.</p>
+<p><a name="GetWeaponSkill"></a><b>GetWeaponSkill</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> <a href="#Actor_Value_Codes">WeaponSkill:Integer</a><br><b>Opcode:</b>
+0x1422 (5154)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the skill for the weapon.</p>
+<p><a name="GetWeaponResistType"></a><b>GetWeaponResistType</b>
+<br><b>Alias:</b> GetWeaponResist<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> <a href="#Actor_Value_Codes">ResistValue:Integer</a><br><b>Opcode:</b>
+0x1423 (5155)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the resist type for the weapon.</p>
+<p><a name="GetWeaponFireDelayMin"></a><b>GetWeaponFireDelayMin</b>
+<br><b>Alias:</b> GetFireDelayMin<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b>&nbsp;Float<br><b>Opcode:</b>
+0x1424 (5156)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the semi-auto min fire delay for the weapon.</p>
+<p><a name="GetWeaponFireDelayMax"></a><b>GetWeaponFireDelayMax</b>
+<br><b>Alias:</b> GetFireDelayMax<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b>&nbsp;Float<br><b>Opcode:</b>
+0x1425 (5157)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the semi-auto max fire delay for the weapon.</p>
+<p><a name="ListGetCount"></a><b>ListGetCount</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;form list:FormList <br><b>Return
+Type:</b> Integer<br><b>Opcode:</b> 0x1426
+(5158)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+"returns the count of items in the form list"</p>
+<p><a name="ListGetNthForm"></a><b>ListGetNthForm</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;form list:FormList <br>&nbsp;&nbsp;&nbsp;index:Integer
+<br><b>Return Type:</b> BaseForm<br><b>Opcode:</b>
+0x1427 (5159)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the nth form in the form list</p>
+<p><a name="ListAddForm"></a><b>ListAddForm</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>3
+<br>&nbsp;&nbsp;&nbsp;form list:FormList <br>&nbsp;&nbsp;&nbsp;form:GenericObject
+<br>&nbsp;&nbsp;&nbsp;<i>index:Integer</i>
+<br><b>Return Type:</b> BaseForm<br><b>Opcode:</b>
+0x1428 (5160)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+adds the form to the list at the given index (or at the end if not
+provided)</p>
+<p><a name="ListGetFormIndex"></a><b>ListGetFormIndex</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;form list:FormList <br>&nbsp;&nbsp;&nbsp;form:GenericObject
+<br><b>Return Type:</b> Integer<br><b>Opcode:</b>
+0x1429 (5161)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the index for the specified form</p>
+<p><a name="ListAddReference"></a><b>ListAddReference</b>
+<br><b>Alias:</b> ListAddRef<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;form list:FormList <br>&nbsp;&nbsp;&nbsp;<i>index:Integer</i>
+<br><b>Return Type:</b> Integer<br><b>Opcode:</b>
+0x142a (5162)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">R</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+adds the calling reference at the given index (or at the end if not
+provided)</p>
+<p><a name="SetWeaponClipRounds"></a><b>SetWeaponClipRounds</b>
+<br><b>Alias:</b> SetClipSize<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;path type:Integer <br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x142b (5163)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the weapon clip size</p>
+<p><a name="SetWeaponMinSpread"></a><b>SetWeaponMinSpread</b>
+<br><b>Alias:</b> SetMinSpread<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;float:Float <br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b>&nbsp;Nothing<br><b>Opcode:</b>
+0x142c (5164)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the weapon min spread</p>
+<p><a name="SetWeaponSpread"></a><b>SetWeaponSpread</b>
+<br><b>Alias:</b> SetSpread<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;float:Float <br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b>&nbsp;Nothing<br><b>Opcode:</b>
+0x142d (5165)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the weapon spread</p>
+<p><a name="SetWeaponSightFOV"></a><b>SetWeaponSightFOV</b>
+<br><b>Alias:</b> SetSightFOV<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;float:Float <br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b>&nbsp;Nothing<br><b>Opcode:</b>
+0x142e (5166)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the weapon xoom field of view</p>
+<p><a name="SetWeaponMinRange"></a><b>SetWeaponMinRange</b>
+<br><b>Alias:</b> SetMinRange<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;float:Float <br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b>&nbsp;Nothing<br><b>Opcode:</b>
+0x142f (5167)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the weapon min range</p>
+<p><a name="SetWeaponMaxRange"></a><b>SetWeaponMaxRange</b>
+<br><b>Alias:</b> SetMaxRange<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;float:Float <br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b>&nbsp;Nothing<br><b>Opcode:</b>
+0x1430 (5168)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the weapon max range.</p>
+<p><a name="SetWeaponAmmoUse"></a><b>SetWeaponAmmoUse</b>
+<br><b>Alias:</b> SetAmmoUse<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;path type:Integer <br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b>&nbsp;Nothing<br><b>Opcode:</b>
+0x1431 (5169)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the weapon ammo use</p>
+<p><a name="SetWeaponActionPoints"></a><b>SetWeaponActionPoints</b>
+<br><b>Alias:</b> SetAP<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;float:Float <br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b>&nbsp;Nothing<br><b>Opcode:</b>
+0x1432 (5170)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the weapon number of action pointer per shot</p>
+<p><a name="SetWeaponCritDamage"></a><b>SetWeaponCritDamage</b>
+<br><b>Alias:</b> SetWeaponCritDamage<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;path type:Integer <br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b>&nbsp;Nothing<br><b>Opcode:</b>
+0x1433 (5171)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the weapon critical hit damage.</p>
+<p><a name="SetWeaponCritChance"></a><b>SetWeaponCritChance</b>
+<br><b>Alias:</b> SetCritPerc<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;float:Float <br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b>&nbsp;Nothing<br><b>Opcode:</b>
+0x1434 (5172)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the weapon critical hit chance</p>
+<p><a name="SetWeaponCritEffect"></a><b>SetWeaponCritEffect</b>
+<br><b>Alias:</b> SetCritEffect<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;magic item:MagicItem <br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> OldCriticalEffect:BaseForm<br><b>Opcode:</b>
+0x1435 (5173)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the weapon critical hit effect</p>
+<p><a name="SetWeight"></a><b>SetWeight</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;float:Float <br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b>&nbsp;Nothing<br><b>Opcode:</b>
+0x1436 (5174)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the weight of the object</p>
+<p><a name="PrintToConsole"></a><b>PrintToConsole</b>
+<br><b>Alias:</b> printc<br><b>Parameters:</b>21
+<br>&nbsp;&nbsp;&nbsp;<a href="#FormatSpecifiers">format
+string</a>:String <br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br><b>Return Type:</b>&nbsp;Nothing<br><b>Opcode:</b>
+0x1437 (5175)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Print formatted string to console</p>
+<p><a name="DebugPrint"></a><b>DebugPrint</b>
+<br><b>Alias:</b> dbprintc<br><b>Parameters:</b>21
+<br>&nbsp;&nbsp;&nbsp;<a href="#FormatSpecifiers">format
+string</a>:String <br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>variable:Float</i>
+<br><b>Return Type:</b>&nbsp;Nothing<br><b>Opcode:</b>
+0x1438 (5176)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+prints a formatted string to the console if debug mode is enabled for
+calling script</p>
+<p><a name="SetDebugMode"></a><b>SetDebugMode</b>
+<br><b>Alias:</b> dbmode<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp; bEnableDebugMessages:Integer <br>&nbsp;&nbsp;
+<i>modIndex:Integer</i> <br><b>Return Type:</b>&nbsp;Nothing<br><b>Opcode:</b>
+0x1439 (5177)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+toggles debug mode for all scripts belonging to a mod. When called in
+the console, the mod index of the mod for which debug messages are to
+be toggled can be specified by the second parameter (in decimal, not
+hexadecimal, format).</p>
+<p><a name="IsKeyPressed"></a><b>IsKeyPressed</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br><b>Return Type:</b> Bool<br><b>Opcode:</b>
+0x143a (5178)<br><b>Condition Function:</b> Yes<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+return if a dx scancode is down or up</p>
+<p><a name="TapKey"></a><b>TapKey</b>
+<br><b>Alias:</b> tk<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x143b (5179)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Fakes a key press for one frame</p>
+<p><a name="HoldKey"></a><b>HoldKey</b>
+<br><b>Alias:</b> hk<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x143c (5180)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Fakes a key press indefinitely</p>
+<p><a name="ReleaseKey"></a><b>ReleaseKey</b>
+<br><b>Alias:</b> rk<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br><b>Return Type:</b> FixMe<br><b>Opcode:</b>
+0x143d (5181)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Releases a key held down by HoldKey</p>
+<p><a name="DisableKey"></a><b>DisableKey</b>
+<br><b>Alias:</b> dk<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x143e (5182)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Prevents a player from using a key</p>
+<p><a name="EnableKey"></a><b>EnableKey</b>
+<br><b>Alias:</b> ek<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x143f (5183)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Reenables a key previously disabled with DisableKey</p>
+<p><a name="GetNumKeysPressed"></a><b>GetNumKeysPressed</b>
+<br><b>Alias:</b> gnkp<br><b>Parameters:</b>0
+<br><b>Return Type:</b> Integer<br><b>Opcode:</b>
+0x1440 (5184)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Returns how many keyboard keys are currently being held down</p>
+<p><a name="GetKeyPress"></a><b>GetKeyPress</b>
+<br><b>Alias:</b> gkp<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp; index:Integer <br><b>Return
+Type:</b>&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a><br><b>Opcode:</b>
+0x1441 (5185)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Returns the scancode of the nth key which is currently being held down</p>
+<p><a name="GetNumMouseButtonsPressed"></a><b>GetNumMouseButtonsPressed</b>
+<br><b>Alias:</b> gnmbp<br><b>Parameters:</b>0
+<br><b>Return Type:</b> Integer<br><b>Opcode:</b>
+0x1442 (5186)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Returns how many mouse buttons are currently being held down</p>
+<p><a name="GetMouseButtonPress"></a><b>GetMouseButtonPress</b>
+<br><b>Alias:</b> gmbp<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp; index:Integer <br><b>Return
+Type:</b> FixMe<br><b>Opcode:</b> 0x1443 (5187)<br><b>Condition
+Function:</b> No<br><span style="font-weight: bold;">Introduced
+In: 1</span> <br><span style="font-weight: bold;">Calling
+Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Returns the code of the nth mouse button which is currently being held
+down</p>
+<p><a name="con_SetGameSetting"></a><b>con_SetGameSetting</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp; settingName:String <br>&nbsp;&nbsp;
+newValue:String <br><b>Return Type:</b> Nothin<br><b>Opcode:</b>
+0x1444 (5188)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:&nbsp;</b>Sets
+a game setting. Does not accept variables as arguments. </p>
+<p><a name="con_SetINISetting"></a><b>con_SetINISetting</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp; setting:String <br>&nbsp;&nbsp;
+newValue:String <br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x1445 (5189)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Setting string is of the format "SettingName:CategoryName" where
+CategoryName is the header under which the setting appears in the .ini
+file. Does not accept variables as arguments.</p>
+<p><a name="con_GetINISetting"></a><b>con_GetINISetting</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp; settingName:String <br><b>Return
+Type:</b> Nothing<br><b>Opcode:</b> 0x1446
+(5190)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Setting string is of the same format as that used by con_SetINISetting.
+Does not return a value but merely prints the value to the console.</p>
+<p><a name="con_SetCameraFOV"></a><b>con_SetCameraFOV</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;<i>Float (Optional):Float</i>
+<br>&nbsp;&nbsp;&nbsp;<i>Float (Optional):Float</i>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x1447 (5191)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Change the camera's field of view (in deg): default 75</p>
+<p><a name="con_RefreshINI"></a><b>con_RefreshINI</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>0
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x1448 (5192)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Refresh INI settings from files.</p>
+<p><a name="con_Save"></a><b>con_Save</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp; saveName:String <br>&nbsp;&nbsp;&nbsp;<i>Integer
+(Optional):Integer</i> <br><b>Return Type:</b>
+Nothing<br><b>Opcode:</b> 0x1449 (5193)<br><b>Condition
+Function:</b> No<br><span style="font-weight: bold;">Introduced
+In: 1</span> <br><span style="font-weight: bold;">Calling
+Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Saves the current game with the specified filename. If the second
+parameter is non-zero, generates a text file containing information
+about the saved data. <filename></filename></p>
+<p><a name="con_SaveINI"></a><b>con_SaveINI</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>0
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x144a (5194)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Writes all the .ini files.</p>
+<p><a name="con_QuitGame"></a><b>con_QuitGame</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>0
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x144b (5195)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Exit game without going through menus.</p>
+<p><a name="con_LoadGame"></a><b>con_LoadGame</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp; filename:String <br>&nbsp;&nbsp;&nbsp;<i>Integer
+(Optional):Integer</i> <br><b>Return Type:</b>
+Nothing<br><b>Opcode:</b> 0x144c (5196)<br><b>Condition
+Function:</b> No<br><span style="font-weight: bold;">Introduced
+In: 1</span> <br><span style="font-weight: bold;">Calling
+Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Loads the savegame with the specified filename if it exists. <filename></filename></p>
+<p><a name="con_CloseAllMenus"></a><b>con_CloseAllMenus</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>0
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x144d (5197)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Closes all open menus</p>
+<p><a name="GetControl"></a><b>GetControl</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<a href="#ControlCodes">controlCode:Integer</a>
+<br><b>Return Type:</b>&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a><br><b>Opcode:</b>
+0x144e (5198)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Returns the key assigned to a control</p>
+<p><a name="GetAltControl"></a><b>GetAltControl</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<a href="#ControlCodes">controlCode:Integer</a>
+<br><b>Return Type:</b>&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a><br><b>Opcode:</b>
+0x144f (5199)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Returns the mouse button assigned to a control</p>
+<p><a name="SetWeaponAmmo"></a><b>SetWeaponAmmo</b>
+<br><b>Alias:</b> SetAmmo<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp; NewAmmoInRef:MagicItem <br>&nbsp;&nbsp;&nbsp;<i>target
+item:InventoryObject</i> <br><b>Return Type:</b>
+OldAmmo:BaseForm<br><b>Opcode:</b> 0x1450 (5200)<br><b>Condition
+Function:</b> No<br><span style="font-weight: bold;">Introduced
+In: 1</span> <br><span style="font-weight: bold;">Calling
+Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the ammo of the weapon</p>
+<p><a name="SetWeaponProjectile"></a><b>SetWeaponProjectile</b>
+<br><b>Alias:</b> SetProjectile<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp; NewProjectileInRef:MagicItem <br>&nbsp;&nbsp;&nbsp;<i>target
+item:InventoryObject</i> <br><b>Return Type:</b>
+OldProjectile:BaseForm<br><b>Opcode:</b> 0x1451 (5201)<br><b>Condition
+Function:</b> No<br><span style="font-weight: bold;">Introduced
+In: 1</span> <br><span style="font-weight: bold;">Calling
+Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the projectile of the weapon</p>
+<p><a name="SetRepairList"></a><b>SetRepairList</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;form list:FormList <br>&nbsp;&nbsp;&nbsp;<i>target
+item:InventoryObject</i> <br><b>Return Type:</b>
+Nothing<br><b>Opcode:</b> 0x1452 (5202)<br><b>Condition
+Function:</b> No<br><span style="font-weight: bold;">Introduced
+In: 1</span> <br><span style="font-weight: bold;">Calling
+Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the repair list for the specified item.</p>
+<p><a name="GetNumericGameSetting"></a><b>GetNumericGameSetting</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp; settingName:String <br><b>Return
+Type:</b> IntegerOrFloat<br><b>Opcode:</b>
+0x1453 (5203)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the value of a numeric game setting</p>
+<p><a name="SetNumericGameSetting"></a><b>SetNumericGameSetting</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp; settingName:String <br>&nbsp;&nbsp;&nbsp;float:Float
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x1454 (5204)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets a numeric game setting. Accepts variables as arguments.</p>
+<p><a name="Label"></a><b>Label</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp; <i>labelID:Integer</i> <br><b>Return
+Type:</b>&nbsp;Nothing<br><b>Opcode:</b>
+0x1455 (5205)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Defines a labeled position in a script which subsequent calls to Goto
+can use to create loops. The label must be defined before Goto is
+called.</p>
+<p><a name="Goto"></a><b>Goto</b> <br><b>Alias:</b>
+none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp; <i>labelID:Integer</i> <br><b>Return
+Type:</b>&nbsp;Nothing<br><b>Opcode:</b>
+0x1456 (5206)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Jump to a labeled position in the script previously defined by a call
+to Label. Execution will return to the label, simulating a loop. Be
+careful to provide an exit condition to avoid creating infinite loops.</p>
+<p><a name="CompareNames"></a><b>CompareNames</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;inv item:GenericObject <br>&nbsp;&nbsp;&nbsp;<i>target
+item:</i><i>GenericObject</i> <br><b>Return
+Type:</b> Float<br><b>Opcode:</b> 0x1457 (5207)<br><b>Condition
+Function:</b> No<br><span style="font-weight: bold;">Introduced
+In: 1</span> <br><span style="font-weight: bold;">Calling
+Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+compares one name to another.</p>
+<p><a name="con_SetVel"></a><b>con_SetVel</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;Axis:Axis <br>&nbsp;&nbsp;&nbsp;Float:Float
+<br><b>Return Type:</b>&nbsp;Nothing<br><b>Opcode:</b>
+0x1458 (5208)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByReference">R</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Sets Velocity on a reference</p>
+<p><a name="GetEquippedObject"></a><b>GetEquippedObject</b>
+<br><b>Alias:</b> GetEqObj<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;<a href="#Equipment_Slot_IDs">atIndex:Integer</a>
+<br><b>Return Type:</b> BaseForm<br><b>Opcode:</b>
+0x1459 (5209)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByReference">R</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the base object of the item in the specified slot</p>
+<p><a name="MenuTapKey"></a><b>MenuTapKey</b>
+<br><b>Alias:</b> mtk<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br><b>Return Type:</b>&nbsp;Nothing<br><b>Opcode:</b>
+0x145a (5210)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Fakes a key press for one frame in menu mode</p>
+<p><a name="MenuReleaseKey"></a><b>MenuReleaseKey</b>
+<br><b>Alias:</b> mrk<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x145b (5211)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Releases a key held down by MenuHoldKey</p>
+<p><a name="MenuHoldKey"></a><b>MenuHoldKey</b>
+<br><b>Alias:</b> mhk<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x145c (5212)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Fakes a key press indefinately in menu mode</p>
+<p><a name="DisableControl"></a><b>DisableControl</b>
+<br><b>Alias:</b> dc<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<a href="#ControlCodes">controlCode:Integer</a>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x145d (5213)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+disables the key and button bound to a control</p>
+<p><a name="EnableControl"></a><b>EnableControl</b>
+<br><b>Alias:</b> ec<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<a href="#ControlCodes">controlCode:Integer</a>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x145e (5214)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+enables the key and button assigned to a control</p>
+<p><a name="TapControl"></a><b>TapControl</b>
+<br><b>Alias:</b> tc<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<a href="#ControlCodes">controlCode:Integer</a>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x145f (5215)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+taps the key or mouse button assigned to control</p>
+<p><a name="SetControl"></a><b>SetControl</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;<a href="#ControlCodes">controlCode:Integer</a>&nbsp;
+<br>&nbsp;&nbsp;&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br><b>Return Type:</b>&nbsp;Nothing<br><b>Opcode:</b>
+0x1460 (5216)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+assigns a new keycode to the specified keyboard control. Changes are
+saved to the .ini when the user exits the game.</p>
+<p><a name="SetAltControl"></a><b>SetAltControl</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;<a href="#ControlCodes">controlCode:Integer</a>&nbsp;
+<br>&nbsp;&nbsp;&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br><b>Return Type:</b>&nbsp;Nothing<br><b>Opcode:</b>
+0x1461 (5217)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+assigns a new mouse button code to the specified mouse control. Changes
+are saved to the ini when the user exits the game.</p>
+<p><a name="SetIsControl"></a><b>SetIsControl</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;<a href="#ControlCodes">controlCode:Integer</a>&nbsp;
+<br>&nbsp;&nbsp;&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br><b>Return Type:</b> Bool<br><b>Opcode:</b>
+0x1462 (5218)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Flags a key or mouse button as a control, allowing modders to define
+custom controls - other scripts can then use IsControl to detect
+conflicts in which two mods try to use the same key for different
+actions.</p>
+<p><a name="IsControl"></a><b>IsControl</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br><b>Return Type:</b> Bool<br><b>Opcode:</b>
+0x1463 (5219)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns 1 if key is a game control or 2 if a custom control set by
+SetIsControl.</p>
+<p><a name="IsKeyDisabled"></a><b>IsKeyDisabled</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<a href="#DirectX_Scancodes">scanCode:Integer</a>
+<br><b>Return Type:</b> Bool<br><b>Opcode:</b>
+0x1464 (5220)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns 1 if the key has been disabled by a script</p>
+<p><a name="IsControlDisabled"></a><b>IsControlDisabled</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<a href="#ControlCodes">controlCode:Integer</a>
+<br><b>Return Type:</b> Bool<br><b>Opcode:</b>
+0x1465 (5221)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns 1 if the control has been disabled by a script using
+DisableControl.</p>
+<p><a name="AddSpellNS"></a><b>AddSpellNS</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;spell:SpellItem <br><b>Return
+Type:</b> Nothing<br><b>Opcode:</b> 0x1466
+(5222)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByReference">R</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+identical to AddSpell but without the UI message</p>
+<p><a name="GetWeaponAnimMult"></a><b>GetWeaponAnimMult</b>
+<br><b>Alias:</b> GetAnimMult<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Float<br><b>Opcode:</b>
+0x1467 (5223)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the animation multiplier for the weapon</p>
+<p><a name="GetWeaponReach"></a><b>GetWeaponReach</b>
+<br><b>Alias:</b> GetReach<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Float<br><b>Opcode:</b>
+0x1468 (5224)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the reach of the weapon</p>
+<p><a name="GetWeaponIsAutomatic"></a><b>GetWeaponIsAutomatic</b>
+<br><b>Alias:</b> GetIsAutomatic<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Bool<br><b>Opcode:</b>
+0x1469 (5225)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns 1 if the weapon is an automatic weapon</p>
+<p><a name="GetWeaponHandGrip"></a><b>GetWeaponHandGrip</b>
+<br><b>Alias:</b> GetHandGrip<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b>&nbsp;<a href="#Weapon_Hand_Grips">handGrip:Integer</a><br><b>Opcode:</b>
+0x146a (5226)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the hand grip of the weapon</p>
+<p><a name="GetWeaponReloadAnim"></a><b>GetWeaponReloadAnim</b>
+<br><b>Alias:</b> GetReloadAnim<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b>&nbsp;<a href="#Reload_Animations">reloadAnim:Integer</a><br><b>Opcode:</b>
+0x146b (5227)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the reload animation of the weapon</p>
+<p><a name="GetWeaponBaseVATSChance"></a><b>GetWeaponBaseVATSChance</b>
+<br><b>Alias:</b> GetVATSChance<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Integer<br><b>Opcode:</b>
+0x146c (5228)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the base VATS chance of the weapon</p>
+<p><a name="GetWeaponAttackAnimation"></a><b>GetWeaponAttackAnimation</b>
+<br><b>Alias:</b> GetAttackAnim<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b>&nbsp;<a href="#Attack_Animations">attackAnimation:Integer</a><br><b>Opcode:</b>
+0x146d (5229)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the attack animation of the weapon</p>
+<p><a name="GetWeaponNumProjectiles"></a><b>GetWeaponNumProjectiles</b>
+<br><b>Alias:</b> GetNumProj<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Integer<br><b>Opcode:</b>
+0x146e (5230)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the number of projectiles used in a single shot by the weapon.</p><p><a name="GetWeaponAimArc"></a><b>GetWeaponAimArc</b>
+<br><b>Alias:</b> GetAimArc<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Float<br><b>Opcode:</b>
+0x146f (5231)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the aim arc of the weapon.</p>
+<p><a name="GetWeaponLimbDamageMult"></a><b>GetWeaponLimbDamageMult</b>
+<b><br>Alias:</b> GetLimbDamageMult<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Float<br><b>Opcode:</b>
+0x1470 (5232)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the limb damage multiplier of the weapon.</p>
+<p><a name="GetWeaponSightUsage"></a><b>GetWeaponSightUsage</b>
+<br><b>Alias:</b> GetSightUsage<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Float<br><b>Opcode:</b>
+0x1471 (5233)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the sight usage of the weapon.</p>
+<p><a name="SetAttackDamage"></a><b>SetAttackDamage</b>
+<br><b>Alias:</b> SetDamage<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp; damage:Integer <br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x1472 (5234)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the attack damage of the form</p>
+<p><a name="SetWeaponAnimMult"></a><b>SetWeaponAnimMult</b>
+<br><b>Alias:</b> SetAnimMult<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;float:Float <br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b>&nbsp;Nothing<br><b>Opcode:</b>
+0x1473 (5235)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the animiation multiple of the weapon.</p>
+<p><a name="SetWeaponReach"></a><b>SetWeaponReach</b>
+<br><b>Alias:</b> SetReach<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp; reach:Float <br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b>&nbsp;Nothing<br><b>Opcode:</b>
+0x1474 (5236)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the reach of the weapon.</p>
+<p><a name="SetWeaponIsAutomatic"></a><b>SetWeaponIsAutomatic</b>
+<br><b>Alias:</b> SetIsAutomatic<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp; isAutomatic:Bool <br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b>&nbsp;Nothing<br><b>Opcode:</b>
+0x1475 (5237)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets whether the weapon is an automatic weapon or not.</p>
+<p><a name="SetWeaponHandGrip"></a><b>SetWeaponHandGrip</b>
+<br><b>Alias:</b> SetHandGrip<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;<a href="#Weapon_Hand_Grips">handGrip:Integer</a>
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x1476 (5238)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the hand grip of the weapon.</p>
+<p><a name="SetWeaponReloadAnim"></a><b>SetWeaponReloadAnim</b>
+<br><b>Alias:</b> SetReloadAnim<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;<a href="#Reload_Animations">reloadAnim:Integer</a>
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x1477 (5239)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the reload animation of the weapon.</p>
+<p><a name="SetWeaponBaseVATSChance"></a><b>SetWeaponBaseVATSChance</b>
+<br><b>Alias:</b> SetVATSChance<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp; newVATSChance:Integer <br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x1478 (5240)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the base VATS chance for the weapon.</p>
+<p><a name="SetWeaponAttackAnimation"></a><b>SetWeaponAttackAnimation</b>
+<br><b>Alias:</b> SetAttackAnim<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;<a href="#Attack_Animations">attackAnimation:Integer</a>
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x1479 (5241)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the attack animation for the weapon.</p>
+<p><a name="SetWeaponNumProjectiles"></a><b>SetWeaponNumProjectiles</b>
+<br><b>Alias:</b> SetNumProj<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp; numProjectiles:Integer <br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x147a (5242)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the number of projectiles the weapon fires each time it is shot.</p>
+<p><a name="SetWeaponAimArc"></a><b>SetWeaponAimArc</b>
+<br><b>Alias:</b> SetAimArc<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp; aimArc:Float <br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x147b (5243)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the aim arc of the weapon.</p>
+<p><a name="SetWeaponLimbDamageMult"></a><b>SetWeaponLimbDamageMult</b>
+<br><b>Alias:</b> SetLimbDamageMult<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp; limbDamageMult:Float <br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x147c (5244)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the limb damage multiplier for the weapon.</p>
+<p><a name="SetWeaponSightUsage"></a><b>SetWeaponSightUsage</b>
+<br><b>Alias:</b> SetSightUsage<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp; sightUsage:Float <br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x147d (5245)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the sight usage for the weapon.</p>
+<p><a name="GetNumericIniSetting"></a><b>GetNumericIniSetting</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;settingName:String <br><b>Return
+Type:</b> IntegerOrFloat<br><b>Opcode:</b>
+0x147e (5246)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the value of a numeric setting. Setting name is of the format
+"SettingName:CategoryName" where CategoryName is the header under which
+the setting appears in the .ini file.</p>
+<p><a name="SetNumericIniSetting"></a><b>SetNumericIniSetting</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp; settingName:String <br>&nbsp;&nbsp;
+newValue:Float <br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x147f (5247)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets a numeric ini setting, using the same format for the setting name
+as GetNumericIniSetting. Accepts variables as arguments.</p>
+<p><a name="GetModIndex"></a><b>GetModIndex</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp; modName:String <br><b>Return
+Type:</b> Integer<br><b>Opcode:</b> 0x1480
+(5248)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the index of the specified mod</p>
+<p><a name="GetNumLoadedMods"></a><b>GetNumLoadedMods</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>0
+<br><b>Return Type:</b> Integer<br><b>Opcode:</b>
+0x1481 (5249)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the number of loaded mods</p>
+<p><a name="GetSourceModIndex"></a><b>GetSourceModIndex</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:</i><i>GenericObject</i>
+<br><b>Return Type:</b> Integer<br><b>Opcode:</b>
+0x1482 (5250)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the index of the mod associated with the form</p>
+<p><a name="IsModLoaded"></a><b>IsModLoaded</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp; modName:String <br><b>Return
+Type:</b> Bool<br><b>Opcode:</b> 0x1483 (5251)<br><b>Condition
+Function:</b> No<br><span style="font-weight: bold;">Introduced
+In: 1</span> <br><span style="font-weight: bold;">Calling
+Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the whether the specified mod is loaded</p>
+<p><a name="GetCrosshairRef"></a><b>GetCrosshairRef</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>0
+<br><b>Return Type:</b> Reference<br><b>Opcode:</b>
+0x1484 (5252)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the reference under the crosshair - i.e., the reference that
+would be activated if the player pressed the Activate button. Will
+return non-activatable items (like tables and trees) as long as they
+are within activation distance. Otherwise returns zero.</p>
+<p><a name="SetName"></a><b>SetName</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp; name:String <br>&nbsp;&nbsp;&nbsp;<i>item:</i><i>GenericObject</i>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x1485 (5253)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the name of the object.</p>
+<p><a name="TempCloneForm"></a><b>TempCloneForm</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp; <i>formToClone:</i><i>GenericObject</i>
+<br><b>Return Type:</b> BaseForm<br><b>Opcode:</b>
+0x1486 (5254)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+clones the specified form and returns a new base form. &nbsp;This
+base form will not be persisted in the save game.</p>
+<p><a name="IsClonedForm"></a><b>IsClonedForm</b>
+<br><b>Alias:</b> IsCloned<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:</i><i>GenericObject</i>
+<br><b>Return Type:</b> Bool<br><b>Opcode:</b>
+0x1487 (5255)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns whether the specified form is a dynamic object or not. Dynamic
+objects include those created with TempCloneForm and those generated by
+the game during play. These objects always have a mod index of 0xFF.</p>
+<p><a name="IsScripted"></a><b>IsScripted</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:</i><i>GenericObject</i>
+<br><b>Return Type:</b> Bool<br><b>Opcode:</b>
+0x1488 (5256)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns 1 if the object or reference has a script attached to it.</p>
+<p><a name="GetScript"></a><b>GetScript</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:</i><i>GenericObject</i>
+<br><b>Return Type:</b>&nbsp;BaseForm<br><b>Opcode:</b>
+0x1489 (5257)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the script of the reference or passed object.</p>
+<p><a name="RemoveScript"></a><b>RemoveScript</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:</i><i>GenericObject</i>
+<br><b>Return Type:</b> oldScript:BaseForm<br><b>Opcode:</b>
+0x148a (5258)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+removes the script of the reference or passed object.</p>
+<p><a name="SetScript"></a><b>SetScript</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp; scriptInRef:GenericObject <br>&nbsp;&nbsp;&nbsp;<i>item:</i><i>GenericObject</i>
+<br><b>Return Type:</b> oldScript:BaseForm<br><b>Opcode:</b>
+0x148b (5259)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the script of the reference or passed object.</p>
+<p><a name="GetObjectEffect"></a><b>GetObjectEffect</b>
+<br><b>Alias:</b> GetEnchantment<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> BaseForm<br><b>Opcode:</b>
+0x148c (5260)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the object effect of the inventory object.</p>
+<p><a name="GetWeaponHasScope"></a><b>GetWeaponHasScope</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Bool<br><b>Opcode:</b>
+0x148d (5261)<br><b>Condition Function:</b> Yes<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns whether the weapon has a scope or not.</p>
+<p><a name="IsControlPressed"></a><b>IsControlPressed</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<a href="#ControlCodes">controlCode:Integer</a>
+<br><b>Return Type:</b> Bool<br><b>Opcode:</b>
+0x148e (5262)<br><b>Condition Function:</b> Yes<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns 1 if the key or mouse button assigned to a control is pressed</p>
+<p><a name="ListRemoveNthForm"></a><b>ListRemoveNthForm</b>
+<br><b>Alias:</b> ListRemoveNth<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;form list:FormList <br>&nbsp;&nbsp;&nbsp;<i>index:Integer</i>
+<br><b>Return Type:</b> formRemoved:BaseForm<br><b>Opcode:</b>
+0x148f (5263)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+removes the nth form from the list</p>
+<p><a name="ListRemoveForm"></a><b>ListRemoveForm</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;form list:FormList <br>&nbsp;&nbsp;&nbsp;form:GenericObject
+<br><b>Return Type:</b> indexOfFormRemoved:Integer<br><b>Opcode:</b>
+0x1490 (5264)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+removes the specified from from the list.</p>
+<p><a name="GetEquippedCurrentHealth"></a><b>GetEquippedCurrentHealth</b>
+<br><b>Alias:</b> GetEqCurHealth<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp; <a href="#Equipment_Slot_IDs">equipmentSlot:Integer</a>
+<br><b>Return Type:</b> Float<br><b>Opcode:</b>
+0x1491 (5265)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByReference">R</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the current health of the object equipped in the specified slot</p>
+<p><a name="SetEquippedCurrentHealth"></a><b>SetEquippedCurrentHealth</b>
+<br><b>Alias:</b> SetEqCurHealth<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;val:Float <br>&nbsp;&nbsp;&nbsp;<a href="#Equipment_Slot_IDs">equipmentSlot:Integer</a>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x1492 (5266)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByReference">R</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the current health of the equipped object at the given slot.</p>
+<p><a name="GetType"></a><b>GetType</b>
+<br><b>Alias:</b> GetObjectType<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:</i><i>GenericObject</i>
+<br><b>Return Type:</b> <a href="#Form_Type_IDs">formType:Integer</a><br><b>Opcode:</b>
+0x1493 (5267)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the type of the specified base form</p>
+<p><a name="GetDebugMode"></a><b>GetDebugMode</b>
+<br><b>Alias:</b> GetDbMode<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp; <i>modIndex:Integer</i> <br><b>Return
+Type:</b> Bool<br><b>Opcode:</b> 0x1494 (5268)<br><b>Condition
+Function:</b> No<br><span style="font-weight: bold;">Introduced
+In: 1</span> <br><span style="font-weight: bold;">Calling
+Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns whether debug mode is set for the mod. If the mod index
+parameter is omitted, uses the mod index of the calling script.</p>
+<p><a name="GetParentCell"></a><b>GetParentCell</b>
+<br><b>Alias:</b> gpc<br><b>Parameters:</b>0
+<br><b>Return Type:</b> BaseForm<br><b>Opcode:</b>
+0x1495 (5269)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByReference">R</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the parent cell of the reference</p>
+<p><a name="Exp"></a><b>Exp</b> <br><b>Alias:</b>
+none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;float:Float <br><b>Return
+Type:</b> Float<br><b>Opcode:</b> 0x1496 (5270)<br><b>Condition
+Function:</b> No<br><span style="font-weight: bold;">Introduced
+In: 1</span> <br><span style="font-weight: bold;">Calling
+Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+calculates the exponential of a value</p>
+<p><a name="Log10"></a><b>Log10</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;float:Float <br><b>Return
+Type:</b> Float<br><b>Opcode:</b> 0x1497 (5271)<br><b>Condition
+Function:</b> No<br><span style="font-weight: bold;">Introduced
+In: 1</span> <br><span style="font-weight: bold;">Calling
+Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+calculates the base 10 log of a value</p>
+<p><a name="Floor"></a><b>Floor</b>
+<br><b>Alias:</b> flr<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;float:Float <br><b>Return
+Type:</b>&nbsp;Float<br><b>Opcode:</b>
+0x1498 (5272)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Returns the nearest whole number that is less than a float</p>
+<p><a name="Ceil"></a><b>Ceil</b> <br><b>Alias:</b>
+none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;float:Float <br><b>Return
+Type:</b>&nbsp;Float<br><b>Opcode:</b>
+0x1499 (5273)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Returns the nearest whole number that is greater than a float</p>
+<p><a name="LeftShift"></a><b>LeftShift</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;int:Integer <br>&nbsp;&nbsp;&nbsp;int:Integer
+<br><b>Return Type:</b> Integer<br><b>Opcode:</b>
+0x149a (5274)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Shifts a 32-bit integer left the specified number of bits</p>
+<p><a name="RightShift"></a><b>RightShift</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;int:Integer <br>&nbsp;&nbsp;&nbsp;int:Integer
+<br><b>Return Type:</b>&nbsp;Integer<br><b>Opcode:</b>
+0x149c (5276)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Shifts a 32-bit integer right the specified number of bits</p>
+<p><a name="LogicalAnd"></a><b>LogicalAnd</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;int:Integer <br>&nbsp;&nbsp;&nbsp;int:Integer
+<br><b>Return Type:</b>&nbsp;Integer<br><b>Opcode:</b>
+0x149c (5276)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Performs a logical AND between two 32-bit integers.</p>
+<p><a name="LogicalOr"></a><b>LogicalOr</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;int:Integer <br>&nbsp;&nbsp;&nbsp;int:Integer
+<br><b>Return Type:</b>&nbsp;Integer<br><b>Opcode:</b>
+0x149d (5277)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Performs a logical OR between two 32-bit integers.</p>
+<p><a name="LogicalXor"></a><b>LogicalXor</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;int:Integer <br>&nbsp;&nbsp;&nbsp;int:Integer
+<br><b>Return Type:</b>&nbsp;Integer<br><b>Opcode:</b>
+0x149e (5278)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Performs a logical XOR between two 32-bit integers.</p>
+<p><a name="LogicalNot"></a><b>LogicalNot</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;int:Integer <br><b>Return
+Type:</b>&nbsp;Integer<br><b>Opcode:</b>
+0x149f (5279)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Performs a logical NOT on a 32-bit integer.</p>
+<p><a name="fmod"></a><b>fmod</b> <br><b>Alias:</b>
+none<br><b>Parameters:</b>3
+<br>&nbsp;&nbsp;&nbsp;x:Float <br>&nbsp;&nbsp;&nbsp;n:Float
+<br>&nbsp;&nbsp;&nbsp;<i>offset:Float</i>
+<br><b>Return Type:</b>&nbsp;Float<br><b>Opcode:</b>
+0x14a0 (5280)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the result of a floating point modulous of the passed floats</p>
+<p><a name="GetArmorAR"></a><b>GetArmorAR</b>
+<br><b>Alias:</b> GetArmorArmorRating<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Integer<br><b>Opcode:</b>
+0x14a1 (5281)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the armor rating of the specified armor.</p>
+<p><a name="IsFormValid"></a><b>IsFormValid</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp; <i>refVar:variable</i><br><b>Return
+Type:</b> Bool<br><b>Opcode:</b> 0x14a2 (5282)<br><b>Condition
+Function:</b> No<br><span style="font-weight: bold;"></span><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><span style="font-weight: bold;"></span><b>Description:</b>
+returns 1 if the object passed in the ref variable is valid. Returns 0
+if the object stored in the variable is not currently loaded in memory
+(for instance, a non-persistent reference) or if the variable doesn't
+hold any object.</p>
+<p><a name="IsReference"></a><b>IsReference</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;reference:ObjectRef <br><b>Return
+Type:</b> Bool<br><b>Opcode:</b> 0x14a3 (5283)<br><b>Condition
+Function:</b> No<br><span style="font-weight: bold;">Introduced
+In: 1</span> <br><span style="font-weight: bold;">Calling
+Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns 1 if the passed refVar stores a reference.</p>
+<p><a name="IsPowerArmor"></a><b>IsPowerArmor</b>
+<br><b>Alias:</b> IsPA<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Bool<br><b>Opcode:</b>
+0x14a4 (5284)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><span style="font-weight: bold;"></span><b>Description:</b>
+returns whether the biped form is considered power armor.</p>
+<p><a name="SetIsPowerArmor"></a><b>SetIsPowerArmor</b>
+<br><b>Alias:</b> SetIsPA<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;path type:Integer <br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x14a5 (5285)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><span style="font-weight: bold;"></span><b>Description:</b>
+sets whether the armor is power armor or not.</p>
+<p><a name="GetOpenKey"></a><b>GetOpenKey</b>
+<br><b>Alias:</b> GetKey<br><b>Parameters:</b>0
+<br><b>Return Type:</b> BaseForm<br><b>Opcode:</b>
+0x14a6 (5286)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByReference">R</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the key associated with a lockable object</p>
+<p><a name="SetOpenKey"></a><b>SetOpenKey</b>
+<br><b>Alias:</b> SetKey<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp;&nbsp;item:InventoryObject <br><b>Return
+Type:</b> Nothing<br><b>Opcode:</b> 0x14a7
+(5287)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByReference">R</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the key uesd to unlock the calling object</p>
+<p><a name="GetGameLoaded"></a><b>GetGameLoaded</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>0
+<br><b>Return Type:</b> Bool<br><b>Opcode:</b>
+0x14a8 (5288)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByReference">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns 1 after a game is loaded on a per-script basis. For each script
+that calls GetGameLoaded, the command will return true exactly once
+each time the game is loaded and false thereafter.</p>
+<p><a name="GetGameRestarted"></a><b>GetGameRestarted</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>0
+<br><b>Return Type:</b> Bool<br><b>Opcode:</b>
+0x14a9 (5289)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByReference">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns 1 when the game is restarted on a per-script basis. For each
+script that calls GetGameRestarted, the commands returns true exactly
+once per game session. Useful for situations in which a script must set
+certain object properties or settings each time the game is started.</p>
+<p><a name="SetWeaponType"></a><b>SetWeaponType</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp; <a href="#Weapon_Type">weaponType:Integer</a>
+<br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x14aa (5290)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><span style="font-weight: bold;"></span><b>Description:</b>
+sets the weapon type of the weapon.</p>
+<p><a name="SetWeaponAnimAttackMult"></a><b>SetWeaponAnimAttackMult</b>
+<br><b>Alias:</b> SetAnimAttackMult<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp;&nbsp;float:Float <br>&nbsp;&nbsp;&nbsp;<i>item:InventoryObject</i>
+<br><b>Return Type:</b>&nbsp;Nothing<br><b>Opcode:</b>
+0x14ab (5291)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><span style="font-weight: bold;"></span><b>Description:</b>
+sets the anim attack multiplier.</p>
+<p><a name="GetHotkeyItem"></a><b>GetHotkeyItem</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp; hotkey:Integer <br><b>Return
+Type:</b> BaseForm<br><b>Opcode:</b> 0x14ac
+(5292)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByReference">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the item assigned to the specified hotkey from 1 to 8</p>
+<p><a name="GetTeleportCell"></a><b>GetTeleportCell</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>0
+<br><b>Return Type:</b> BaseForm<br><b>Opcode:</b>
+0x14ad (5293)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByReference">R</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the cell to which the calling door reference teleports</p>
+<p><a name="GetLinkedDoor"></a><b>GetLinkedDoor</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>0
+<br><b>Return Type:</b> BaseForm<br><b>Opcode:</b>
+0x14ae (5294)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByReference">R</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the door to which the calling reference is linked</p>
+<p><a name="GetFirstRef"></a><b>GetFirstRef</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>3
+<br>&nbsp;&nbsp;&nbsp;<a href="#Form_Type_IDs"><i>form
+type:Integer</i></a> <br>&nbsp;&nbsp;&nbsp;<i>cell
+depth:Integer</i> <br>&nbsp;&nbsp;&nbsp;<i>include
+taken refs:Bool</i> <br><b>Return Type:</b>
+ObjectRef<br><b>Opcode:</b> 0x14af (5295)<br><b>Condition
+Function:</b> No<br><span style="font-weight: bold;">Introduced
+In: 1</span> <br><span style="font-weight: bold;">Calling
+Convention: </span><a href="#ByReference">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the first reference of the specified type in the current cell</p>
+<p><a name="GetNextRef"></a><b>GetNextRef</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>0
+<br><b>Return Type:</b>&nbsp;ObjectRef<br><b>Opcode:</b>
+0x14b0 (5296)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByReference">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the next reference of a given type in the current cell.
+GetFirstRef or GetFirstRefInCell must be called first; the formType,
+cellDepth, and boolean arguments passed to
+GetFirstRef/GetFirstRefInCell are used. This command should only be
+used within a loop that executes within a single frame.</p>
+<p><a name="GetNumRefs"></a><b>GetNumRefs</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>3
+<br>&nbsp;&nbsp;&nbsp;<i><a href="#Form_Type_IDs"><i>form
+type:Integer</i></a></i> <br>&nbsp;&nbsp;&nbsp;<i>cell
+depth:Integer</i> <br>&nbsp;&nbsp;&nbsp;<i>include
+taken refs:Bool</i> <br><b>Return Type:</b>
+Integer<br><b>Opcode:</b> 0x14b1 (5297)<br><b>Condition
+Function:</b> No<br><span style="font-weight: bold;">Introduced
+In: 1</span> <br><span style="font-weight: bold;">Calling
+Convention: </span><a href="#ByReference">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the number of references of a given type in the current cell</p>
+<p><a name="GetFirstRefInCell"></a><b>GetFirstRefInCell</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>4
+<br>&nbsp;&nbsp;&nbsp;cell:Cell <br>&nbsp;&nbsp;&nbsp;<a href="#Form_Type_IDs"><i>form
+type:Integer</i></a> <br>&nbsp;&nbsp;&nbsp;<i>cell
+depth:Integer</i> <br>&nbsp;&nbsp;&nbsp;<i>include
+taken refs:Bool</i> <br><b>Return Type:</b>
+ObjectRef<br><b>Opcode:</b> 0x14b2 (5298)<br><b>Condition
+Function:</b> No<br><span style="font-weight: bold;">Introduced
+In: 1</span> <br><span style="font-weight: bold;">Calling
+Convention: </span><a href="#ByReference">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the first reference of the specified type in the specified cell</p>
+<p><a name="GetNumRefsInCell"></a><b>GetNumRefsInCell</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>4
+<br>&nbsp;&nbsp;&nbsp;cell:Cell <br>&nbsp;&nbsp;&nbsp;<i><a href="#Form_Type_IDs"><i>form
+type:Integer</i></a></i> <br>&nbsp;&nbsp;&nbsp;<i>cell
+depth:Integer</i> <br>&nbsp;&nbsp;&nbsp;<i>include
+taken refs:Bool</i> <br><b>Return Type:</b>
+Integer<br><b>Opcode:</b> 0x14b3 (5299)<br><b>Condition
+Function:</b> No<br><span style="font-weight: bold;">Introduced
+In: 1</span> <br><span style="font-weight: bold;">Calling
+Convention: </span><a href="#ByReference">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the number of references of a given type in the specified cell</p>
+<p><a name="GetUIFloat"></a><b>GetUIFloat</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>1
+<br>&nbsp;&nbsp; traitName:String <br><b>Return
+Type:</b> Float<br><b>Opcode:</b> 0x14b4 (5300)<br><b>Condition
+Function:</b> No<br><span style="font-weight: bold;">Introduced
+In: 1</span> <br><span style="font-weight: bold;">Calling
+Convention: </span><a href="#ByReference">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+Looks up a UI trait by name and returns its numeric value. The trait
+name is of the format "MenuName/ElementName/ElementName/.../TraitName"
+as defined in the XML hierarchy for the desired menu, i.e.
+"MessageMenu\NoGlow_Branch\MM_Title\x"</p>
+<p><a name="SetUIFloat"></a><b>SetUIFloat</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp; traitName:String <br>&nbsp;&nbsp;
+newValue:Float <br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x14b5 (5301)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByReference">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the value of a float UI trait. Trait name is of the format used by
+GetUIFloat.</p>
+<p><a name="SetUIString"></a><b>SetUIString</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>2
+<br>&nbsp;&nbsp; traitName:String <br>&nbsp;&nbsp;
+newValue:String <br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x14b6 (5302)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByReference">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the value of a string UI trait.&nbsp;Trait name is of the
+format used by GetUIFloat.</p>
+<p><a name="ListReplaceNthForm"></a><b>ListReplaceNthForm</b>
+<br><b>Alias:</b> ListReplaceNth<br><b>Parameters:</b>3
+<br>&nbsp;&nbsp;&nbsp;form list:FormList <br>&nbsp;&nbsp;&nbsp;replaceWith:GenericObject
+<br>&nbsp;&nbsp;&nbsp;<i>formIndex:Integer</i>
+<br><b>Return Type:</b> replaced:BaseForm<br><b>Opcode:</b>
+0x14b7 (5303)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByReference">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+replaces the nth form of the list with the specified form. Trait name
+is of the format used by GetUIFloat.</p>
+<p><a name="ListReplaceForm"></a><b>ListReplaceForm</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>3
+<br>&nbsp;&nbsp;&nbsp;form list:FormList <br>&nbsp;&nbsp;&nbsp;replaceWith:GenericObject
+<br>&nbsp;&nbsp;&nbsp;formToReplace:GenericObject<br><b>Return
+Type:</b> index:Integer<br><b>Opcode:</b>
+0x14b8 (5304)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+replaces the specified from with another.</p>
+<p><a name="GetParentWorldspace"></a><b>GetParentWorldspace</b>
+<br><b>Alias:</b> gpw<br><b>Parameters:</b>0
+<br><b>Return Type:</b> BaseForm<br><b>Opcode:</b>
+0x14b9 (5305)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByReference">R</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+returns the parent worldspace of the reference</p>
+<p><a name="PrintActiveTile"></a><b>PrintActiveTile</b>
+<br><b>Alias:</b> none<br><b>Parameters:</b>0
+<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x14ba (5306)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+prints name of highlighted UI component for debug purposes</p><p><a name="SetBaseItemValue"></a><b>SetBaseItemValue</b>
+<br><b>Alias:</b> SetValue<br><b>Parameters:</b>2<br>&nbsp;&nbsp;&nbsp;
+form:InventoryObject<br>&nbsp;&nbsp;&nbsp;
+newValue:Integer<br><b>Return Type:</b> Nothing<br><b>Opcode:</b>
+0x14bb (5307)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+changes the value of the base form passed in.</p><span style="font-family: monospace;"></span><big><span style="font-weight: bold;"></span></big><span style="font-family: monospace;"></span><big><span style="font-weight: bold;"></span></big><span style="font-family: monospace;"></span><big><span style="font-weight: bold;"></span></big><p><a name="SetHealth"></a><b>SetHealth</b> <br><b>Alias:</b>
+SetObjectHealth<br><b>Parameters:</b>2<br>&nbsp;&nbsp;&nbsp;
+newHealth:Integer<br>&nbsp;&nbsp;&nbsp; <span style="font-style: italic;">form:</span><i>GenericObject</i><br><b>Return
+Type:</b> Nothing<br><b>Opcode:</b> 0x14bc
+(5308)<br><b>Condition Function:</b> No<br><span style="font-weight: bold;">Introduced In: 1</span> <br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByEither">E</a><br><span style="font-weight: bold;"></span><b>Description:</b>
+sets the health of the specified base form<span style="font-family: monospace;"></span><big><span style="font-weight: bold;"></span></big><br></p><p><a name="GetFOSEBeta"></a><b>GetFOSEBeta</b> <br><b>Alias:</b>
+none<br><b>Parameters:</b>0
+<br><b>Return Type:</b> Integer<br><b>Opcode:</b>&nbsp;0x14bd
+(5309)<br><b>Condition Function:</b> Yes<br><span style="font-weight: bold;">Introduced In: 1</span><br><span style="font-weight: bold;">Calling Convention: </span><a href="#ByBaseForm">B</a><br><b>Description:</b>
+returns the beta number of the installed version of FOSE. &nbsp;A
+non-beta version of FOSE will return 0.</p>
+<p><br><big><span style="font-weight: bold;"></span></big><span style="font-family: monospace;"></span><big><span style="font-weight: bold;"></span></big><span style="font-family: monospace;"></span><big><span style="font-weight: bold;"><a name="FormatSpecifiers"></a>Format
+Specifiers<br></span></big>&nbsp;&nbsp;&nbsp;
+Some FOSE commands take a <span style="font-family: monospace;">format
+string</span>
+as a parameter. Format strings are actually a collection of arguments
+consisting of a string followed by zero to twenty variables and/or
+numbers. The string specifies how the command should use the rest of
+the arguments to construct a new string. Within the format string,
+percent signs are used to indicate special characters.<br>&nbsp;&nbsp;&nbsp;
+The format specifiers recognized by FOSE commands include all of those
+recognized by vanilla Fallout script commands like MessageBox as well
+as several extended specifiers:<br><span style="font-family: monospace;">&nbsp;&nbsp;&nbsp;
+%a - replaced by the character matching the ASCII code passed as an
+integer.<br></span><span style="font-family: monospace;"></span><span style="font-family: monospace;">&nbsp;&nbsp;&nbsp;
+%e - replaced by nothing.
+Useful for passing an empty string as an argument, as the script
+compiler will not accept an empty string.</span><span style="font-family: monospace;"></span><span style="font-family: monospace;"><br></span><span style="font-family: monospace;">&nbsp;&nbsp;&nbsp;
+</span><span style="font-family: monospace;">%i - is
+replaced by the formID of a reference or object passed in a ref variable<br>&nbsp;&nbsp;&nbsp;
+%k - replaced by a string representing the key associated with a
+DirectInput scan code<br>&nbsp;&nbsp;&nbsp; %n -
+replaced with the name of a reference or object passed in a ref variable<br>&nbsp;&nbsp;&nbsp;
+%p - replaced with a pronoun based on the gender of the object
+parameter passed in a ref variable:<br>&nbsp;&nbsp;&nbsp;
+&nbsp;&nbsp;&nbsp; &nbsp;%po - objective &nbsp;(he,
+she, it)<br>&nbsp;&nbsp;&nbsp;
+&nbsp;&nbsp;&nbsp; &nbsp;%pp - possessive (his, her,
+its)<br>&nbsp;&nbsp;&nbsp;
+&nbsp;&nbsp;&nbsp; &nbsp;%ps - subjective (him, her, it)<br>&nbsp;&nbsp;&nbsp;
+%q - replaced with a double quote character (takes no arguments)<br>&nbsp;&nbsp;&nbsp;
+%r - replaced by a new-line character (takes no arguments)<br></span><span style="font-family: monospace;">&nbsp;&nbsp;&nbsp;
+%v - replaced by the name of an actor value passed as an integer <a href="obse_command_doc.html#Actor_Value_Codes">actor value
+code</a>.<br></span><span style="font-family: monospace;">&nbsp;&nbsp;&nbsp;
+%x - replaced with an integer in hexadecimal format. An optional digit
+from
+0-9 immediately following this specifier indicates the minimum width of
+the displayed value. For example, <span style="font-weight: bold;">MessageEx
+"%x4" 255</span> will display "00FF".</span><br><span style="font-family: monospace;"><span style="font-weight: bold;"></span></span><span style="font-family: monospace;">&nbsp;&nbsp;&nbsp;
+%{ .. %} - Conditionally omits a portion of the format string based on
+a boolean value. The left bracket accepts a variable; if the value of
+the variable is zero, all text up to the right bracket will be ignored,
+and any parameters supplied to format specifiers within the omitted
+substring will be skipped.<br><br></span><span style="font-family: monospace;"></span>&nbsp;&nbsp;&nbsp;
+Additional format specifiers used by the C function printf() may work
+as well. Due to the fact that integer script variables are stored as
+floats, specifiers expecting integers&nbsp;may not display the
+expected output.</p><p><big><span style="font-weight: bold;"><a name="Type_Codes"></a>Type
+Codes</span></big><br style="font-weight: bold;">
+<span style="font-family: monospace;"><span style="font-family: monospace;"><br><a name="Form_Type_IDs"></a>Form Type IDs</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;
+0:&nbsp;&nbsp;&nbsp; None</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;
+1:&nbsp;&nbsp;&nbsp; TES4</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;
+2:&nbsp;&nbsp;&nbsp; Group</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;
+3:&nbsp;&nbsp;&nbsp; GMST</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;
+4:&nbsp;&nbsp;&nbsp; TextureSet</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;
+5:&nbsp;&nbsp;&nbsp; MenuIcon</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;
+6:&nbsp;&nbsp;&nbsp; Global</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;
+7:&nbsp;&nbsp;&nbsp; Class</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;
+8:&nbsp;&nbsp;&nbsp; Faction</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;
+9:&nbsp;&nbsp;&nbsp; HeadPart</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;10:&nbsp;&nbsp;&nbsp;
+Hair</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;11:&nbsp;&nbsp;&nbsp;
+Eyes</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;12:&nbsp;&nbsp;&nbsp;
+Race</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;13:&nbsp;&nbsp;&nbsp;
+Sound</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;14:&nbsp;&nbsp;&nbsp;
+AcousticSpace</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;15:&nbsp;&nbsp;&nbsp;
+Skill</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;16:&nbsp;&nbsp;&nbsp;
+Effect</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;17:&nbsp;&nbsp;&nbsp;
+Script</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;18:&nbsp;&nbsp;&nbsp;
+LandTexture</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;19:&nbsp;&nbsp;&nbsp;
+Enchantment</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;20:&nbsp;&nbsp;&nbsp;
+Spell</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;21:&nbsp;&nbsp;&nbsp;
+Activator</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;22:&nbsp;&nbsp;&nbsp;
+TalkingActivator</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;23:&nbsp;&nbsp;&nbsp;
+Terminal</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;24:&nbsp;&nbsp;&nbsp;
+Armor</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;25:&nbsp;&nbsp;&nbsp;
+Book</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;26:&nbsp;&nbsp;&nbsp;
+Clothing</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;27:&nbsp;&nbsp;&nbsp;
+Container</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;28:&nbsp;&nbsp;&nbsp;
+Door</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;29:&nbsp;&nbsp;&nbsp;
+Ingredient</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;30:&nbsp;&nbsp;&nbsp;
+Light</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;31:&nbsp;&nbsp;&nbsp;
+Misc</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;32:&nbsp;&nbsp;&nbsp;
+Static</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;33:&nbsp;&nbsp;&nbsp;
+StaticCollection</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;34:&nbsp;&nbsp;&nbsp;
+MoveableStatic</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;35:&nbsp;&nbsp;&nbsp;
+PlaceableWater</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;36:&nbsp;&nbsp;&nbsp;
+Grass</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;37:&nbsp;&nbsp;&nbsp;
+Tree</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;38:&nbsp;&nbsp;&nbsp;
+Flora</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;39:&nbsp;&nbsp;&nbsp;
+Furniture</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;40:&nbsp;&nbsp;&nbsp;
+Weapon</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;41:&nbsp;&nbsp;&nbsp;
+Ammo</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;42:&nbsp;&nbsp;&nbsp;
+NPC</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;43:&nbsp;&nbsp;&nbsp;
+Creature</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;44:&nbsp;&nbsp;&nbsp;
+LeveledCreature</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;45:&nbsp;&nbsp;&nbsp;
+LeveledCharacter</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;46:&nbsp;&nbsp;&nbsp;
+Key</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;47:&nbsp;&nbsp;&nbsp;
+AlchemyItem</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;48:&nbsp;&nbsp;&nbsp;
+IdleMarker</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;49:&nbsp;&nbsp;&nbsp;
+Note</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;50:&nbsp;&nbsp;&nbsp;
+ConstructibleObject</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;51:&nbsp;&nbsp;&nbsp;
+Projectile</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;52:&nbsp;&nbsp;&nbsp;
+LeveledItem</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;53:&nbsp;&nbsp;&nbsp;
+Weather</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;54:&nbsp;&nbsp;&nbsp;
+Climate</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;55:&nbsp;&nbsp;&nbsp;
+Region</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;56:&nbsp;&nbsp;&nbsp;
+NAVI</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;57:&nbsp;&nbsp;&nbsp;
+Cell</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;58:&nbsp;&nbsp;&nbsp;
+Reference</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;59:&nbsp;&nbsp;&nbsp;
+ACHR</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;60:&nbsp;&nbsp;&nbsp;
+ACRE</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;61:&nbsp;&nbsp;&nbsp;
+PMIS</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;62:&nbsp;&nbsp;&nbsp;
+PGRE</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;63:&nbsp;&nbsp;&nbsp;
+PBEA</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;64:&nbsp;&nbsp;&nbsp;
+PFLA</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;65:&nbsp;&nbsp;&nbsp;
+WorldSpace</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;66:&nbsp;&nbsp;&nbsp;
+Land</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;67:&nbsp;&nbsp;&nbsp;
+NavMesh</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;68:&nbsp;&nbsp;&nbsp;
+TLOD</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;69:&nbsp;&nbsp;&nbsp;
+DIAL</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;70:&nbsp;&nbsp;&nbsp;
+INFO</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;71:&nbsp;&nbsp;&nbsp;
+Quest</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;72:&nbsp;&nbsp;&nbsp;
+Idle</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;73:&nbsp;&nbsp;&nbsp;
+Package</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;74:&nbsp;&nbsp;&nbsp;
+CombatStyle</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;75:&nbsp;&nbsp;&nbsp;
+LoadScreen</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;76:&nbsp;&nbsp;&nbsp;
+LeveledSpell</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;77:&nbsp;&nbsp;&nbsp;
+ANIO</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;78:&nbsp;&nbsp;&nbsp;
+WaterForm</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;79:&nbsp;&nbsp;&nbsp;
+EffectShader</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;80:&nbsp;&nbsp;&nbsp;
+TOFT</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;81:&nbsp;&nbsp;&nbsp;
+Explosion</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;82:&nbsp;&nbsp;&nbsp;
+Debris</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;83:&nbsp;&nbsp;&nbsp;
+ImageSpace</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;84:&nbsp;&nbsp;&nbsp;
+ImageSpaceModifier</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;85:&nbsp;&nbsp;&nbsp;
+ListForm</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;86:&nbsp;&nbsp;&nbsp;
+Perk</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;87:&nbsp;&nbsp;&nbsp;
+BodyPartData</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;88:&nbsp;&nbsp;&nbsp;
+AddonNode</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;89:&nbsp;&nbsp;&nbsp;
+ActorValueInfo</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;90:&nbsp;&nbsp;&nbsp;
+RadiationStage</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;91:&nbsp;&nbsp;&nbsp;
+CameraShot</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;92:&nbsp;&nbsp;&nbsp;
+CameraPath</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;93:&nbsp;&nbsp;&nbsp;
+VoiceType</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;94:&nbsp;&nbsp;&nbsp;
+ImpactData</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;95:&nbsp;&nbsp;&nbsp;
+ImpactDataSet</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;96:&nbsp;&nbsp;&nbsp;
+ARMA</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;97:&nbsp;&nbsp;&nbsp;
+EncounterZone</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;98:&nbsp;&nbsp;&nbsp;
+Message</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;99:&nbsp;&nbsp;&nbsp;
+Ragdoll</span><br style="font-family: monospace;"><span style="font-family: monospace;">100:&nbsp;&nbsp;&nbsp;
+DOBJ</span><br style="font-family: monospace;"><span style="font-family: monospace;">101:&nbsp;&nbsp;&nbsp;
+LightingTemplate</span><br style="font-family: monospace;"><span style="font-family: monospace;">102:&nbsp;&nbsp;&nbsp;
+SoundFile<br>200:&nbsp;&nbsp;&nbsp; Actor (for ref
+walking only)<br>201:&nbsp;&nbsp;&nbsp; Inventory
+Object (for ref walking only)</span></span></p><p><span style="font-family: monospace;"></span><br style="font-family: monospace;"><br style="font-family: monospace;"><span style="font-family: monospace;"><a name="Weapon_Type"></a>Weapon
+Type</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;0:&nbsp;&nbsp;&nbsp;
+HandToHandMelee<br>&nbsp;1:&nbsp;&nbsp;&nbsp;
+OneHandMelee<br>&nbsp;2:&nbsp;&nbsp;&nbsp;
+TwoHandMelee<br>&nbsp;3:&nbsp;&nbsp;&nbsp;
+OneHandPistol<br>&nbsp;4:&nbsp;&nbsp;&nbsp;
+OneHandPistolEnergy<br>&nbsp;5:&nbsp;&nbsp;&nbsp;
+TwoHandRifle<br>&nbsp;6:&nbsp;&nbsp;&nbsp;
+TwoHandAutomatic<br>&nbsp;7:&nbsp;&nbsp;&nbsp;
+TwoHandRifleEnergy<br>&nbsp;8:&nbsp;&nbsp;&nbsp;
+TwoHandHandle<br>&nbsp;9:&nbsp;&nbsp;&nbsp;
+TwoHandLauncher<br>10:&nbsp;&nbsp;&nbsp;
+OneHandGrenade<br>11:&nbsp;&nbsp;&nbsp; OneHandMine<br>12:&nbsp;&nbsp;&nbsp;
+OneHandLunchboxMine<br><br></span><span style="font-family: monospace;"><a name="Equip_Type"></a>Equip
+Type</span><br style="font-family: monospace;"><br style="font-family: monospace;"><span style="font-family: monospace;"><a name="Equipment_Slot_IDs"></a>Equipment Slot IDs</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;0:</span><span style="font-family: monospace;">&nbsp;&nbsp;&nbsp;
+</span><span style="font-family: monospace;">head</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;1:</span><span style="font-family: monospace;">&nbsp;&nbsp;&nbsp;
+</span><span style="font-family: monospace;">hair</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;2:</span><span style="font-family: monospace;">&nbsp;&nbsp;&nbsp;
+</span><span style="font-family: monospace;">upper
+body</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;3:</span><span style="font-family: monospace;">&nbsp;&nbsp;&nbsp;
+</span><span style="font-family: monospace;">left
+hand</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;4:</span><span style="font-family: monospace;">&nbsp;&nbsp;&nbsp;
+</span><span style="font-family: monospace;">right
+hand</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;5:</span><span style="font-family: monospace;">&nbsp;&nbsp;&nbsp;
+</span><span style="font-family: monospace;">weapon</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;6:</span><span style="font-family: monospace;">&nbsp;&nbsp;&nbsp;
+</span><span style="font-family: monospace;">pip boy</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;7:</span><span style="font-family: monospace;">&nbsp;&nbsp;&nbsp;
+</span><span style="font-family: monospace;">backpack</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;8:</span><span style="font-family: monospace;">&nbsp;&nbsp;&nbsp;
+</span><span style="font-family: monospace;">necklace</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;9:</span><span style="font-family: monospace;">&nbsp;&nbsp;&nbsp;
+</span><span style="font-family: monospace;">headband</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;10:</span><span style="font-family: monospace;">&nbsp;&nbsp;&nbsp;
+</span><span style="font-family: monospace;">hat</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;11:</span><span style="font-family: monospace;">&nbsp;&nbsp;&nbsp;
+</span><span style="font-family: monospace;">eyeglasses</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;12:</span><span style="font-family: monospace;">&nbsp;&nbsp;&nbsp;
+</span><span style="font-family: monospace;">nosering</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;13:&nbsp;&nbsp;&nbsp;
+earrings</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;14:&nbsp;&nbsp;&nbsp;
+mask</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;15:&nbsp;&nbsp;&nbsp;
+choker</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;16:&nbsp;&nbsp;&nbsp;
+mouth object</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;17:&nbsp;&nbsp;&nbsp;
+body addon 1</span><br style="font-family: monospace;">
+<span style="font-family: monospace;"></span><span style="font-family: monospace;">&nbsp;18:&nbsp;&nbsp;&nbsp;
+body addon 2</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;19:&nbsp;&nbsp;&nbsp;
+body addon 3</span><br style="font-family: monospace;">
+<span style="font-family: monospace;"></span><br><span style="font-family: monospace;"><a name="Weapon_Hand_Grips"></a>Weapon Hand Grips</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;&nbsp;0:&nbsp;&nbsp;&nbsp;
+default</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;1:&nbsp;&nbsp;&nbsp;
+hand grip 1</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;2:&nbsp;&nbsp;&nbsp;
+hand grip 2</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;3:&nbsp;&nbsp;&nbsp;
+hand grip 3</span><br style="font-family: monospace;"><br style="font-family: monospace;"><span style="font-family: monospace;"><a name="Attack_Animations"></a>Attack Animations</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;&nbsp;0:&nbsp;&nbsp;&nbsp;
+default</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;1:&nbsp;&nbsp;&nbsp;
+Attack 3</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;2:&nbsp;&nbsp;&nbsp;
+Attack 4</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;3:&nbsp;&nbsp;&nbsp;
+Attack 5</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;4:&nbsp;&nbsp;&nbsp;
+Attack 6</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;5:&nbsp;&nbsp;&nbsp;
+Attack 7</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;6:&nbsp;&nbsp;&nbsp;
+Attack 8</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;7:&nbsp;&nbsp;&nbsp;
+Attack Left</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;8:&nbsp;&nbsp;&nbsp;
+Attack Loop</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;9:&nbsp;&nbsp;&nbsp;
+Attack Right</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;10:&nbsp;&nbsp;&nbsp;
+Attack Spin</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;11:&nbsp;&nbsp;&nbsp;
+Attack Spin 2</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;12:&nbsp;&nbsp;&nbsp;
+Attack Throw</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;13:&nbsp;&nbsp;&nbsp;
+Attack Throw 2</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;14:&nbsp;&nbsp;&nbsp;&nbsp;Attack
+Throw 3</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;15:&nbsp;&nbsp;&nbsp;&nbsp;Attack
+Throw 4</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;16:&nbsp;&nbsp;&nbsp;&nbsp;Attack
+Throw 5</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;17:&nbsp;&nbsp;&nbsp;
+Place Mine</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;18:&nbsp;&nbsp;&nbsp;
+Place Mine 2</span><br style="font-family: monospace;">
+<span style="font-family: monospace;"></span><br><span style="font-family: monospace;"><a name="Reload_Animations"></a>Reload Animations</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;&nbsp;0:&nbsp;&nbsp;&nbsp;
+Reload A</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;1:&nbsp;&nbsp;&nbsp;
+</span><span style="font-family: monospace;">Reload B</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;2:&nbsp;&nbsp;&nbsp;&nbsp;</span><span style="font-family: monospace;">Reload C</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;3:&nbsp;&nbsp;&nbsp;
+</span><span style="font-family: monospace;">Reload D</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;4:&nbsp;&nbsp;&nbsp;&nbsp;</span><span style="font-family: monospace;">Reload E</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;5:&nbsp;&nbsp;&nbsp;
+</span><span style="font-family: monospace;">Reload F</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;6:&nbsp;&nbsp;&nbsp;
+</span><span style="font-family: monospace;">Reload G</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;7:&nbsp;&nbsp;&nbsp;
+</span><span style="font-family: monospace;">Reload H</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;8:&nbsp;&nbsp;&nbsp;
+</span><span style="font-family: monospace;">Reload I</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;&nbsp;9:&nbsp;&nbsp;&nbsp;
+</span><span style="font-family: monospace;">Reload J</span><br style="font-family: monospace;">
+<span style="font-family: monospace;">&nbsp;10:&nbsp;&nbsp;&nbsp;
+</span><span style="font-family: monospace;">Reload K</span><br style="font-family: monospace;">
+<span style="font-family: monospace;"></span><br style="font-family: monospace;"><span style="font-family: monospace;"></span><br style="font-family: monospace;"><span style="font-family: monospace;"><a name="Actor_Value_Codes"></a>Actor Value Codes</span><br style="font-family: monospace;">
+<span style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;0:&nbsp;&nbsp;&nbsp;
+Aggression</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;1:&nbsp;&nbsp;&nbsp;
+Confidence</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;2:&nbsp;&nbsp;&nbsp;
+Energy</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;3:&nbsp;&nbsp;&nbsp;
+Responsibility</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;4:&nbsp;&nbsp;&nbsp;
+Mood</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;5:&nbsp;&nbsp;&nbsp;
+Strength</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;6:&nbsp;&nbsp;&nbsp;
+Perception</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;7:&nbsp;&nbsp;&nbsp;
+Endurance</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;8:&nbsp;&nbsp;&nbsp;
+Charisma</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;9:&nbsp;&nbsp;&nbsp;
+Intelligence</span><br style="font-family: monospace;"><span style="font-family: monospace;">10:&nbsp;&nbsp;&nbsp;
+Agility</span><br style="font-family: monospace;"><span style="font-family: monospace;">11:&nbsp;&nbsp;&nbsp;
+Luck</span><br style="font-family: monospace;"><span style="font-family: monospace;">12:&nbsp;&nbsp;&nbsp;
+ActionPoints</span><br style="font-family: monospace;"><span style="font-family: monospace;">13:&nbsp;&nbsp;&nbsp;
+CarryWeight</span><br style="font-family: monospace;"><span style="font-family: monospace;">14:&nbsp;&nbsp;&nbsp;
+CritChance</span><br style="font-family: monospace;"><span style="font-family: monospace;">15:&nbsp;&nbsp;&nbsp;
+HealRate</span><br style="font-family: monospace;"><span style="font-family: monospace;">16:&nbsp;&nbsp;&nbsp;
+Health</span><br style="font-family: monospace;"><span style="font-family: monospace;">17:&nbsp;&nbsp;&nbsp;
+MeleeDamage</span><br style="font-family: monospace;"><span style="font-family: monospace;">18:&nbsp;&nbsp;&nbsp;
+DamageResistance</span><br style="font-family: monospace;"><span style="font-family: monospace;">19:&nbsp;&nbsp;&nbsp;
+PoisonResistance</span><br style="font-family: monospace;"><span style="font-family: monospace;">20:&nbsp;&nbsp;&nbsp;
+RadResistance</span><br style="font-family: monospace;"><span style="font-family: monospace;">21:&nbsp;&nbsp;&nbsp;
+SpeedMultiplier</span><br style="font-family: monospace;"><span style="font-family: monospace;">22:&nbsp;&nbsp;&nbsp;
+Fatigue</span><br style="font-family: monospace;"><span style="font-family: monospace;">23:&nbsp;&nbsp;&nbsp;
+Karma</span><br style="font-family: monospace;"><span style="font-family: monospace;">24:&nbsp;&nbsp;&nbsp;
+XP</span><br style="font-family: monospace;"><span style="font-family: monospace;">25:&nbsp;&nbsp;&nbsp;
+Head</span><br style="font-family: monospace;"><span style="font-family: monospace;">26:&nbsp;&nbsp;&nbsp;
+Torso</span><br style="font-family: monospace;"><span style="font-family: monospace;">27:&nbsp;&nbsp;&nbsp;
+LeftArm</span><br style="font-family: monospace;"><span style="font-family: monospace;">28:&nbsp;&nbsp;&nbsp;
+RightArm</span><br style="font-family: monospace;"><span style="font-family: monospace;">29:&nbsp;&nbsp;&nbsp;
+LeftLeg</span><br style="font-family: monospace;"><span style="font-family: monospace;">30:&nbsp;&nbsp;&nbsp;
+RightLeg</span><br style="font-family: monospace;"><span style="font-family: monospace;">31:&nbsp;&nbsp;&nbsp;
+Brain</span><br style="font-family: monospace;"><span style="font-family: monospace;">32:&nbsp;&nbsp;&nbsp;
+Barter</span><br style="font-family: monospace;"><span style="font-family: monospace;">33:&nbsp;&nbsp;&nbsp;
+BigGuns</span><br style="font-family: monospace;"><span style="font-family: monospace;">34:&nbsp;&nbsp;&nbsp;
+EnergyWeapons</span><br style="font-family: monospace;"><span style="font-family: monospace;">35:&nbsp;&nbsp;&nbsp;
+Explosives</span><br style="font-family: monospace;"><span style="font-family: monospace;">36:&nbsp;&nbsp;&nbsp;
+Lockpick</span><br style="font-family: monospace;"><span style="font-family: monospace;">37:&nbsp;&nbsp;&nbsp;
+Medicine</span><br style="font-family: monospace;"><span style="font-family: monospace;">38:&nbsp;&nbsp;&nbsp;
+MeleeWeapons</span><br style="font-family: monospace;"><span style="font-family: monospace;">39:&nbsp;&nbsp;&nbsp;
+Repair</span><br style="font-family: monospace;"><span style="font-family: monospace;">40:&nbsp;&nbsp;&nbsp;
+Science</span><br style="font-family: monospace;"><span style="font-family: monospace;">41:&nbsp;&nbsp;&nbsp;
+SmallGuns</span><br style="font-family: monospace;"><span style="font-family: monospace;">42:&nbsp;&nbsp;&nbsp;
+Sneak</span><br style="font-family: monospace;"><span style="font-family: monospace;">43:&nbsp;&nbsp;&nbsp;
+Speech</span><br style="font-family: monospace;"><span style="font-family: monospace;">44:&nbsp;&nbsp;&nbsp;
+Throwing</span><br style="font-family: monospace;"><span style="font-family: monospace;">45:&nbsp;&nbsp;&nbsp;
+Unarmed</span><br style="font-family: monospace;"><span style="font-family: monospace;">46:&nbsp;&nbsp;&nbsp;
+InventoryWeight</span><br style="font-family: monospace;"><span style="font-family: monospace;">47:&nbsp;&nbsp;&nbsp;
+Paralysis</span><br style="font-family: monospace;"><span style="font-family: monospace;">48:&nbsp;&nbsp;&nbsp;
+Invisibility</span><br style="font-family: monospace;"><span style="font-family: monospace;">49:&nbsp;&nbsp;&nbsp;
+Chameleon</span><br style="font-family: monospace;"><span style="font-family: monospace;">50:&nbsp;&nbsp;&nbsp;
+NightEye</span><br style="font-family: monospace;"><span style="font-family: monospace;">51:&nbsp;&nbsp;&nbsp;
+DetectLifeRange</span><br style="font-family: monospace;"><span style="font-family: monospace;">52:&nbsp;&nbsp;&nbsp;
+FireResistance</span><br style="font-family: monospace;"><span style="font-family: monospace;">53:&nbsp;&nbsp;&nbsp;
+WaterBreathing</span><br style="font-family: monospace;"><span style="font-family: monospace;">54:&nbsp;&nbsp;&nbsp;
+RadLevel</span><br style="font-family: monospace;"><span style="font-family: monospace;">55:&nbsp;&nbsp;&nbsp;
+BloodyMess</span><br style="font-family: monospace;"><span style="font-family: monospace;">56:&nbsp;&nbsp;&nbsp;
+UnarmedDamage</span><br style="font-family: monospace;"><span style="font-family: monospace;">57:&nbsp;&nbsp;&nbsp;
+Assistance</span><br style="font-family: monospace;"><span style="font-family: monospace;">60:&nbsp;&nbsp;&nbsp;
+EnergyResistance</span><br style="font-family: monospace;"><span style="font-family: monospace;">61:&nbsp;&nbsp;&nbsp;
+EMPResistance</span><br style="font-family: monospace;"><span style="font-family: monospace;">62:&nbsp;&nbsp;&nbsp;
+Var1Medical</span><br style="font-family: monospace;"><span style="font-family: monospace;">72:&nbsp;&nbsp;&nbsp;
+IgnoreCrippledLimbs</span><br></span><br><span style="font-family: monospace;"><a name="ControlCodes"></a>Control
+Codes<br>0:&nbsp;&nbsp;&nbsp; Forward<br>1:&nbsp;&nbsp;&nbsp;
+Backward<br>2:&nbsp;&nbsp;&nbsp; Left<br>3:&nbsp;&nbsp;&nbsp;
+Right<br>4:&nbsp;&nbsp;&nbsp; Attack<br>5:&nbsp;&nbsp;&nbsp;
+Activate<br>6:&nbsp;&nbsp;&nbsp; Block<br>7:&nbsp;&nbsp;&nbsp;
+Ready Item<br>8:&nbsp;&nbsp;&nbsp; Crouch<br>9:&nbsp;&nbsp;&nbsp;
+Run<br>10:&nbsp;&nbsp; Always Run<br>11:&nbsp;&nbsp;
+Auto-Move<br>12:&nbsp;&nbsp; Jump<br>13:&nbsp;&nbsp;
+TogglePOV<br>14:&nbsp;&nbsp; MenuMode<br>15:&nbsp;&nbsp;
+Rest<br>16:&nbsp;&nbsp; VATS<br>17-24: Hotkeys 1-8<br>25:&nbsp;&nbsp;
+Quicksave<br>26:&nbsp;&nbsp; Quickload<br>27:&nbsp;&nbsp;
+Grab<br><br style="font-family: monospace;"></span>
+<span style="font-family: monospace;"><span style="font-family: monospace;"><a name="DirectX_Scancodes"></a>DirectX Scancodes</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;
+1:&nbsp;&nbsp;&nbsp; Escape</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;
+2:&nbsp;&nbsp;&nbsp; 1</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;
+3:&nbsp;&nbsp;&nbsp; 2</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;
+4:&nbsp;&nbsp;&nbsp; 3</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;
+5:&nbsp;&nbsp;&nbsp; 4</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;
+6:&nbsp;&nbsp;&nbsp; 5</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;
+7:&nbsp;&nbsp;&nbsp; 6</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;
+8:&nbsp;&nbsp;&nbsp; 7</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;
+9:&nbsp;&nbsp;&nbsp; 8</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;10:&nbsp;&nbsp;&nbsp;
+9</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;11:&nbsp;&nbsp;&nbsp;
+0</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;12:&nbsp;&nbsp;&nbsp;
+Minus</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;13:&nbsp;&nbsp;&nbsp;
+Equals</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;14:&nbsp;&nbsp;&nbsp;
+Backspace</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;15:&nbsp;&nbsp;&nbsp;
+Tab</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;16:&nbsp;&nbsp;&nbsp;
+Q</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;17:&nbsp;&nbsp;&nbsp;
+W</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;18:&nbsp;&nbsp;&nbsp;
+E</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;19:&nbsp;&nbsp;&nbsp;
+R</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;20:&nbsp;&nbsp;&nbsp;
+T</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;21:&nbsp;&nbsp;&nbsp;
+Y</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;22:&nbsp;&nbsp;&nbsp;
+U</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;23:&nbsp;&nbsp;&nbsp;
+I</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;24:&nbsp;&nbsp;&nbsp;
+O</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;25:&nbsp;&nbsp;&nbsp;
+P</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;26:&nbsp;&nbsp;&nbsp;
+Left Bracket</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;27:&nbsp;&nbsp;&nbsp;
+Right Bracket</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;28:&nbsp;&nbsp;&nbsp;
+Enter</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;29:&nbsp;&nbsp;&nbsp;
+Left Control</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;30:&nbsp;&nbsp;&nbsp;
+A</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;31:&nbsp;&nbsp;&nbsp;
+S</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;32:&nbsp;&nbsp;&nbsp;
+D</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;33:&nbsp;&nbsp;&nbsp;
+F</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;34:&nbsp;&nbsp;&nbsp;
+G</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;35:&nbsp;&nbsp;&nbsp;
+H</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;36:&nbsp;&nbsp;&nbsp;
+J</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;37:&nbsp;&nbsp;&nbsp;
+K</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;38:&nbsp;&nbsp;&nbsp;
+L</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;39:&nbsp;&nbsp;&nbsp;
+Semicolon</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;40:&nbsp;&nbsp;&nbsp;
+Apostrophe</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;41:&nbsp;&nbsp;&nbsp;
+~ (Console)</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;42:&nbsp;&nbsp;&nbsp;
+Left Shift</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;43:&nbsp;&nbsp;&nbsp;
+Back Slash</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;44:&nbsp;&nbsp;&nbsp;
+Z</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;45:&nbsp;&nbsp;&nbsp;
+X</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;46:&nbsp;&nbsp;&nbsp;
+C</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;47:&nbsp;&nbsp;&nbsp;
+V</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;48:&nbsp;&nbsp;&nbsp;
+B</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;49:&nbsp;&nbsp;&nbsp;
+N</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;50:&nbsp;&nbsp;&nbsp;
+M</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;51:&nbsp;&nbsp;&nbsp;
+Comma</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;52:&nbsp;&nbsp;&nbsp;
+Period</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;53:&nbsp;&nbsp;&nbsp;
+Forward Slash&nbsp; </span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;54:&nbsp;&nbsp;&nbsp;
+Right Shift</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;55:&nbsp;&nbsp;&nbsp;
+NUM*</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;56:&nbsp;&nbsp;&nbsp;
+Left Alt</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;57:&nbsp;&nbsp;&nbsp;
+Spacebar</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;58:&nbsp;&nbsp;&nbsp;
+Caps Lock</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;59:&nbsp;&nbsp;&nbsp;
+F1</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;60:&nbsp;&nbsp;&nbsp;
+F2</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;61:&nbsp;&nbsp;&nbsp;
+F3</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;62:&nbsp;&nbsp;&nbsp;
+F4</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;63:&nbsp;&nbsp;&nbsp;
+F5</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;64:&nbsp;&nbsp;&nbsp;
+F6</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;65:&nbsp;&nbsp;&nbsp;
+F7</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;66:&nbsp;&nbsp;&nbsp;
+F8</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;67:&nbsp;&nbsp;&nbsp;
+F9</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;68:&nbsp;&nbsp;&nbsp;
+F10</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;69:&nbsp;&nbsp;&nbsp;
+Num Lock</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;70:&nbsp;&nbsp;&nbsp;
+Scroll Lock</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;71:&nbsp;&nbsp;&nbsp;
+NUM7</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;72:&nbsp;&nbsp;&nbsp;
+NUM8</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;73:&nbsp;&nbsp;&nbsp;
+NUM9</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;74:&nbsp;&nbsp;&nbsp;
+NUM-</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;75:&nbsp;&nbsp;&nbsp;
+NUM4</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;76:&nbsp;&nbsp;&nbsp;
+NUM5</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;77:&nbsp;&nbsp;&nbsp;
+NUM6</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;78:&nbsp;&nbsp;&nbsp;
+NUM+</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;79:&nbsp;&nbsp;&nbsp;
+NUM1</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;80:&nbsp;&nbsp;&nbsp;
+NUM2</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;81:&nbsp;&nbsp;&nbsp;
+NUM3</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;82:&nbsp;&nbsp;&nbsp;
+NUM0</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;83:&nbsp;&nbsp;&nbsp;
+NUM.</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;87:&nbsp;&nbsp;&nbsp;
+F11</span><br style="font-family: monospace;"><span style="font-family: monospace;">&nbsp;88:&nbsp;&nbsp;&nbsp;
+F12</span><br style="font-family: monospace;"><span style="font-family: monospace;">156:&nbsp;&nbsp;&nbsp;
+NUM Enter</span><br style="font-family: monospace;"><span style="font-family: monospace;">157:&nbsp;&nbsp;&nbsp;
+Right Control</span><br style="font-family: monospace;"><span style="font-family: monospace;">181:&nbsp;&nbsp;&nbsp;
+NUM/</span><br style="font-family: monospace;"><span style="font-family: monospace;">184:&nbsp;&nbsp;&nbsp;
+Right Alt</span><br style="font-family: monospace;"><span style="font-family: monospace;">200:&nbsp;&nbsp;&nbsp;
+Up Arrow</span><br style="font-family: monospace;"><span style="font-family: monospace;">203:&nbsp;&nbsp;&nbsp;
+Left Arrow</span><br style="font-family: monospace;"><span style="font-family: monospace;">205:&nbsp;&nbsp;&nbsp;
+Right Arrow</span><br style="font-family: monospace;"><span style="font-family: monospace;">208:&nbsp;&nbsp;&nbsp;
+Down Arrow</span><br style="font-family: monospace;"><span style="font-family: monospace;">256:&nbsp;&nbsp;&nbsp;
+Left Mouse Button</span><br style="font-family: monospace;"><span style="font-family: monospace;">257:&nbsp;&nbsp;&nbsp;
+Right Mouse Button</span><br style="font-family: monospace;"><span style="font-family: monospace;">258:&nbsp;&nbsp;&nbsp;
+Middle/Wheel Mouse Button</span><br style="font-family: monospace;"><span style="font-family: monospace;">259:&nbsp;&nbsp;&nbsp;
+Mouse Button 3</span><br style="font-family: monospace;"><span style="font-family: monospace;">260:&nbsp;&nbsp;&nbsp;
+Mouse Button 4</span><br style="font-family: monospace;"><span style="font-family: monospace;">261:&nbsp;&nbsp;&nbsp;
+Mouse Button 5</span><br style="font-family: monospace;"><span style="font-family: monospace;">262:&nbsp;&nbsp;&nbsp;
+Mouse Button 6</span><br style="font-family: monospace;"><span style="font-family: monospace;">263:&nbsp;&nbsp;&nbsp;
+Mouse Button 7</span><br style="font-family: monospace;"><span style="font-family: monospace;">264:&nbsp;&nbsp;&nbsp;
+Mouse Wheel Up</span><br style="font-family: monospace;"><span style="font-family: monospace;">265:&nbsp;&nbsp;&nbsp;
+Mouse Wheel Down</span><br style="font-family: monospace;"></span></p>
+</body></html>

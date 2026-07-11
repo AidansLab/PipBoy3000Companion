@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 Aidan Lee-Calamera (aka Aidan's Lab). 
+ * All rights reserved.
+ *
+ * This source code is licensed under the Creative Commons
+ * Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0).
+ *
+ * You are free to share and adapt this code under the following conditions:
+ *  - Attribution: You must give appropriate credit and provide a link to the license.
+ *  - Non-Commercial: You may not use this material for commercial purposes.
+ *  - ShareAlike: If you alter, transform, or build upon this work, you must
+ *    distribute your contributions under the same CC BY-NC-SA 4.0 license.
+ *
+ * You may obtain a full copy of the License text in the LICENSE file in the
+ * root directory of this project repository or online at:
+ * https://creativecommons.org/licenses/by-nc-sa/4.0/
+ */
+
 /**
  * serial-bridge.js
  * 
@@ -25,10 +43,13 @@ const KNOWN_PRODUCTS = [
   '5740', // STM32 Virtual COM Port
 ];
 
-const DEFAULT_BAUD_RATE = 9600;
-const COMMAND_SPACING_MS = 50;       // Min time between commands
+const DEFAULT_BAUD_RATE = 19200;
+const COMMAND_SPACING_MS = 25;       // Min time between commands
+const AUDIO_GUARD_MS = 350;          // Hold commands after device equip/use so audio plays cleanly
 const RESPONSE_TIMEOUT_MS = 3000;    // Timeout waiting for eval response
 const RECONNECT_DELAY_MS = 5000;     // Delay before reconnection attempt
+const PACKET_MAX_ATTEMPTS = 4;       // File-protocol packet: original send + up to 3 retries
+const PACKET_RETRY_DELAY_MS = 200;   // Pause before resending a timed-out/NAK'd packet
 
 export class SerialBridge extends EventEmitter {
   constructor(options = {}) {
@@ -48,6 +69,10 @@ export class SerialBridge extends EventEmitter {
     // File Protocol State
     this.pendingPacketAck = null;
     this.packetTimeout = null;
+
+    // Audio guard: commands are held back after a device-initiated equip/use
+    // so the Espruino's single-threaded JS doesn't block audio timer callbacks.
+    this._audioGuardUntil = 0;
   }
 
   /**
@@ -107,7 +132,7 @@ export class SerialBridge extends EventEmitter {
       return this._openPort(candidates[0].path);
     }
 
-    // Multiple candidates — use the first one but warn
+    // Multiple candidates - use the first one but warn
     this.emit('status', `Multiple candidates found, using ${candidates[0].path}`);
     this.emit('ports-found', candidates);
     return this._openPort(candidates[0].path);
@@ -219,9 +244,10 @@ export class SerialBridge extends EventEmitter {
    *   PIPSYNC:USE:AID:0001519E
    *   PIPSYNC:EQUIP:WEAPONS:0000434F
    *   PIPSYNC:UNEQUIP:APPAREL:000340C8
+   *   PIPSYNC:DROP:AMMO:0000434F:20
    *   PIPSYNC:TORCH:ON / PIPSYNC:TORCH:OFF
-   * when the user uses/equips an item on the device. These are emitted as
-   * 'device-event' so the app can mirror the action in-game.
+   * when the user uses/equips/drops an item on the device. These are emitted
+   * as 'device-event' so the app can mirror the action in-game.
    */
   _scanDeviceEvents(text) {
     this._lineBuffer += text;
@@ -232,12 +258,19 @@ export class SerialBridge extends EventEmitter {
       const line = this._lineBuffer.substring(0, newlineIdx);
       this._lineBuffer = this._lineBuffer.substring(newlineIdx + 1);
 
-      const match = line.match(/PIPSYNC:(USE|EQUIP|UNEQUIP):([A-Z]+):([0-9A-Fa-f]{1,8})/);
+      const match = line.match(
+        /PIPSYNC:(USE|EQUIP|UNEQUIP|DROP):([A-Z]+):([0-9A-Fa-f]{1,8})(?::(\d{1,6}))?/
+      );
       if (match) {
+        const verb = match[1];
         this.emit('device-event', {
-          action: match[1].toLowerCase(),                       // 'use' | 'equip' | 'unequip'
-          category: match[2],                                   // 'AID' | 'APPAREL' | 'WEAPONS'
+          action: verb.toLowerCase(),                           // 'use' | 'equip' | 'unequip' | 'drop'
+          category: match[2],                                   // 'AID' | 'APPAREL' | 'WEAPONS' | ...
           formId: '0x' + match[3].toLowerCase().padStart(8, '0'),
+          // EQUIP: optional condition (0–100) selecting a specific stack instance.
+          condition: verb === 'EQUIP' && match[4] !== undefined ? parseInt(match[4], 10) : undefined,
+          // DROP: how many units to drop.
+          count: verb === 'DROP' && match[4] !== undefined ? parseInt(match[4], 10) : undefined,
         });
         continue;
       }
@@ -263,6 +296,24 @@ export class SerialBridge extends EventEmitter {
   }
 
   /**
+   * Open a brief window during which regular (non-equip) commands are deferred,
+   * letting audio timer callbacks run without the event loop being blocked by
+   * JS command execution. Call this whenever the device triggers a sound.
+   *
+   * The guard is intentionally checked BEFORE enqueuing (in sendCommand), not
+   * inside the mutex. That way equip confirmation commands (sendEquipCommand) can
+   * jump straight to the front of an already-drained queue without waiting.
+   */
+  guardAudio() {
+    this._audioGuardUntil = Date.now() + AUDIO_GUARD_MS;
+  }
+
+  /** True while the post-sound guard window is open (regular commands deferred). */
+  isAudioGuardActive() {
+    return this._audioGuardUntil - Date.now() > 0;
+  }
+
+  /**
    * Serialize all USB REPL traffic so eval() and sendCommand() never interleave.
    */
   _runSerialIO(fn) {
@@ -283,9 +334,33 @@ export class SerialBridge extends EventEmitter {
   }
 
   /**
-   * Send a raw JavaScript command to the Pip-Boy REPL
+   * Send a raw JavaScript command to the Pip-Boy REPL.
+   * Respects the audio guard - waits until the guard window expires before
+   * joining the serial queue so the device is command-free during playback.
    */
   sendCommand(command) {
+    // Pre-sleep outside the mutex so the equip fast-path can still jump the queue.
+    const guardWait = this._audioGuardUntil - Date.now();
+    const enqueue = guardWait > 0
+      ? this._sleep(guardWait).then(() => this._runSerialIO(async () => {
+          await this._writeRaw(`\x10${command}\n`);
+          this.emit('command-sent', command);
+        }))
+      : this._runSerialIO(async () => {
+          await this._writeRaw(`\x10${command}\n`);
+          this.emit('command-sent', command);
+        });
+    return enqueue;
+  }
+
+  /**
+   * Send a high-priority equip/unequip confirmation command.
+   * Bypasses the audio guard so the split appears as soon as the game
+   * round-trip completes (~200 ms) rather than waiting out the full guard.
+   * Pre-click commands drain in ~100 ms (4–6 x 25 ms spacing), so the queue
+   * is typically empty by the time the equip confirmation arrives.
+   */
+  sendEquipCommand(command) {
     return this._runSerialIO(async () => {
       await this._writeRaw(`\x10${command}\n`);
       this.emit('command-sent', command);
@@ -295,14 +370,14 @@ export class SerialBridge extends EventEmitter {
   /**
    * Send a command and wait for a response (like UART.eval)
    */
-  eval(expression) {
+  eval(expression, timeoutMs = RESPONSE_TIMEOUT_MS) {
     return this._runSerialIO(() => new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         if (this.pendingEval) {
           this.pendingEval = null;
           reject(new Error(`Eval timeout for: ${expression}`));
         }
-      }, RESPONSE_TIMEOUT_MS);
+      }, timeoutMs);
 
       this.pendingEval = {
         resolve: (result) => {
@@ -327,6 +402,37 @@ export class SerialBridge extends EventEmitter {
   }
 
   /**
+   * CRC32 of a file's bytes computed ON the device (E.CRC32 - standard
+   * zlib polynomial, native and fast), so verifying an upload costs one
+   * small eval round-trip instead of streaming the whole file back over
+   * serial. Storage reads are memory-mapped flat strings (near-free);
+   * SD (fs) files are read whole, which is fine at this firmware's sizes
+   * (largest file ~16KB) on a freshly reset() device.
+   * Returns null if the file doesn't exist on the device.
+   * @param {string} deviceName
+   * @param {{ fs?: boolean, timeout?: number }} [options] fs:true for SD files
+   * @returns {Promise<number|null>} unsigned 32-bit CRC, or null
+   */
+  async getFileCRC32(deviceName, options = {}) {
+    const name = JSON.stringify(deviceName);
+    const expr = options.fs
+      ? `(()=>{try{var s=require('fs').readFileSync(${name});return s===undefined?null:E.CRC32(s)}catch(e){return null}})()`
+      : `(()=>{var s=require('Storage').read(${name});return s===undefined?null:E.CRC32(s)})()`;
+    const raw = await this.eval(expr, options.timeout);
+    try {
+      return JSON.parse(raw.trim());
+    } catch (_) {
+      // The REPL may prefix boot noise - take the last number/null token.
+      const matches = [...String(raw).matchAll(/\b(\d+|null)\b/g)];
+      if (matches.length === 0) {
+        throw new Error(`Unexpected CRC32 response: ${JSON.stringify(String(raw).slice(0, 120))}`);
+      }
+      const last = matches[matches.length - 1][1];
+      return last === 'null' ? null : parseInt(last, 10);
+    }
+  }
+
+  /**
    * Write raw bytes to the serial port
    */
   _writeRaw(data) {
@@ -346,13 +452,57 @@ export class SerialBridge extends EventEmitter {
   }
 
   /**
-   * Send multiple commands in sequence (batched)
-   * @param {string[]} commands - Array of JavaScript commands
+   * Send an ordered list of commands as few USB writes as possible.
+   *
+   * Each command is framed exactly as sendCommand frames it - `\x10${cmd}\n` -
+   * so the device parses and executes each line identically to the per-command
+   * path; the ONLY difference is that we concatenate the framed lines and write
+   * them together, eliminating the COMMAND_SPACING_MS gap between every command.
+   * Because each line keeps its own \x10 prefix and trailing newline, the device
+   * still executes them as independent REPL lines (an error in one line does not
+   * abort the rest), and the firmware's internal try/catch blocks keep failures
+   * contained.
+   *
+   * Lines are packed into chunks no larger than maxBytes so a single write never
+   * floods the device's USB RX ring buffer; each chunk passes through
+   * _runSerialIO, so spacing is paid once per chunk instead of once per command.
+   *
+   * Ordering is preserved exactly. Callers that need the audio-guard / equip
+   * bypass semantics must check isAudioGuardActive() first; this method is meant
+   * for the common case where the guard is closed and every command may flow
+   * immediately.
    */
-  async sendBatch(commands) {
+  async sendBatch(commands, { maxBytes = 512 } = {}) {
+    if (!commands || commands.length === 0) return;
+
+    // Honor the audio guard once for the whole batch (defensive - callers
+    // normally only batch when the guard is closed).
+    const guardWait = this._audioGuardUntil - Date.now();
+    if (guardWait > 0) await this._sleep(guardWait);
+
+    let chunk = '';
+    let chunkCmds = [];
+    const flush = async () => {
+      if (!chunk) return;
+      const data = chunk;
+      const sent = chunkCmds;
+      chunk = '';
+      chunkCmds = [];
+      await this._runSerialIO(() => this._writeRaw(data));
+      for (const c of sent) this.emit('command-sent', c);
+    };
+
     for (const cmd of commands) {
-      await this.sendCommand(cmd);
+      const line = `\x10${cmd}\n`;
+      // Flush before exceeding the cap, but always allow at least one line per
+      // chunk even if a single command is longer than maxBytes.
+      if (chunk && chunk.length + line.length > maxBytes) {
+        await flush();
+      }
+      chunk += line;
+      chunkCmds.push(cmd);
     }
+    await flush();
   }
 
   /**
@@ -558,7 +708,7 @@ export class SerialBridge extends EventEmitter {
     const header = Buffer.from([16, 1, (flags >> 8) & 0xFF, flags & 0xFF]); // DLE, SOH, flags high, flags low
     const packet = Buffer.concat([header, payloadBuffer]);
 
-    return new Promise((resolve, reject) => {
+    const sendOnce = () => new Promise((resolve, reject) => {
       if (!options.noACK) {
         this.pendingPacketAck = { resolve, reject };
         this.packetTimeout = setTimeout(() => {
@@ -579,6 +729,26 @@ export class SerialBridge extends EventEmitter {
         reject(err);
       });
     });
+
+    // The device ACKs/NAKs per packet with no sequence numbers, so a lost ACK
+    // and a lost packet look identical from here - retrying risks the device
+    // having already applied a packet whose ACK just didn't make it back.
+    // That's a real but narrow window (one packet's worth of bytes on an
+    // otherwise-open connection); failing the whole upload on every transient
+    // drop is the more common and more visible failure mode, so we retry.
+    let lastErr;
+    for (let attempt = 1; attempt <= PACKET_MAX_ATTEMPTS; attempt++) {
+      try {
+        return await sendOnce();
+      } catch (err) {
+        lastErr = err;
+        if (attempt < PACKET_MAX_ATTEMPTS) {
+          this.emit('status', `File-transfer packet failed (${err.message}), retrying ${attempt}/${PACKET_MAX_ATTEMPTS - 1}...`);
+          await this._sleep(PACKET_RETRY_DELAY_MS);
+        }
+      }
+    }
+    throw new Error(`${lastErr.message} (after ${PACKET_MAX_ATTEMPTS} attempts)`);
   }
 
   /**

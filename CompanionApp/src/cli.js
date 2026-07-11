@@ -1,3 +1,21 @@
+
+/*
+ * Copyright (c) 2026 Aidan Lee-Calamera (aka Aidan's Lab). 
+ * All rights reserved.
+ *
+ * This source code is licensed under the Creative Commons
+ * Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0).
+ *
+ * You are free to share and adapt this code under the following conditions:
+ *  - Attribution: You must give appropriate credit and provide a link to the license.
+ *  - Non-Commercial: You may not use this material for commercial purposes.
+ *  - ShareAlike: If you alter, transform, or build upon this work, you must
+ *    distribute your contributions under the same CC BY-NC-SA 4.0 license.
+ *
+ * You may obtain a full copy of the License text in the LICENSE file in the
+ * root directory of this project repository or online at:
+ * https://creativecommons.org/licenses/by-nc-sa/4.0/
+ */
 /**
  * cli.js
  * 
@@ -11,11 +29,18 @@
  */
 
 import { createInterface } from 'readline';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import { SerialBridge } from './serial-bridge.js';
 import { SyncEngine } from './sync-engine.js';
 import { PipeClient } from './pipe-client.js';
 import { FormIdMapper, formatGameFormId } from './form-id-mapper.js';
 import { PRESYNC_RESTORE_HINT, COMPANION_PATCH_REQUIRED_MSG } from './app-core.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const pkg = JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf8'));
 
 // ─── ANSI Color Helpers ────────────────────────────────────────────────────────
 const C = {
@@ -91,7 +116,7 @@ function printBanner() {
   ║   ██║     ██║██║           ██████╔╝╚██████╔╝   ██║                    ║
   ║   ╚═╝     ╚═╝╚═╝           ╚═════╝  ╚═════╝    ╚═╝                    ║
   ║                                                                       ║
-  ║   ${C.bold}3000 — LIVE SYNC COMPANION${C.pipGreen}                                          ║
+  ║   ${C.bold}3000 - LIVE SYNC COMPANION v${pkg.version}${C.pipGreen}                                    ║
   ║   ${C.dim}Fallout 3 & New Vegas Edition${C.pipGreen}                                       ║
   ║                                                                       ║
   ╚═══════════════════════════════════════════════════════════════════════╝${C.reset}
@@ -223,7 +248,7 @@ async function main() {
     logCmd(cmd);
   });
 
-  // Pip-Boy → game: user used/equipped an item on the device
+  // Pip-Boy -> game: user used/equipped an item on the device
   bridge.on('device-event', async (evt) => {
     if (evt.action === 'restore') {
       await syncEngine.notifyPresyncRestored();
@@ -243,7 +268,7 @@ async function main() {
       }
       if (pipeClient.connected) {
         pipeClient.send(evt.state ? 'TORCH ON' : 'TORCH OFF');
-        logSync(`Pip-Boy → game: flashlight ${evt.state ? 'on' : 'off'}`);
+        logSync(`Pip-Boy -> game: flashlight ${evt.state ? 'on' : 'off'}`);
       } else {
         logWarn('Pip-Boy flashlight toggle ignored (game not connected)');
       }
@@ -254,22 +279,37 @@ async function main() {
     const gameFormId = mapper.resolveToGame(evt.formId, gameMode);
     const pipeFormId = formatGameFormId(gameFormId);
 
-    // An AID use already decremented the device's local count — make sure the
+    // An AID use already decremented the device's local count - make sure the
     // sync engine doesn't echo the game's matching decrement back to it
     if (evt.action === 'use') {
       syncEngine.notifyDeviceConsumed(pipeFormId);
-    } else if (evt.action === 'equip') {
-      syncEngine.notifyDeviceEquipped(pipeFormId);
-    } else if (evt.action === 'unequip') {
-      syncEngine.notifyDeviceUnequipped(pipeFormId);
     }
+    // Give the device a command-free window so audio timer callbacks aren't
+    // blocked by incoming serial commands while a sound is playing.
+    if (evt.action === 'equip' || evt.action === 'unequip' || evt.action === 'use') {
+      bridge.guardAudio();
+    }
+    // notifyDeviceEquipped/Unequipped intentionally not called: the plugin
+    // always includes both worn and bagged copies in the inventory total, so
+    // equip/unequip never produces a net count change in the snapshot and no
+    // credit is needed. A stale credit would falsely suppress a real drop of
+    // the remainder copy after a split-stack equip.
 
     if (pipeClient.connected) {
-      pipeClient.send(`${evt.action.toUpperCase()} ${pipeFormId}`);
+      let pipeCmd = `${evt.action.toUpperCase()} ${pipeFormId}`;
+      // Carry the selected condition so the game equips the exact stack instance.
+      if (
+        evt.action === 'equip' &&
+        evt.condition !== undefined &&
+        Number.isFinite(evt.condition)
+      ) {
+        pipeCmd += ` ${evt.condition}`;
+      }
+      pipeClient.send(pipeCmd);
       if (pipeFormId.toLowerCase() !== String(evt.formId).toLowerCase()) {
-        logSync(`Pip-Boy → game: ${evt.action} ${evt.category} ${evt.formId} → ${pipeFormId}`);
+        logSync(`Pip-Boy -> game: ${evt.action} ${evt.category} ${evt.formId} -> ${pipeFormId}`);
       } else {
-        logSync(`Pip-Boy → game: ${evt.action} ${evt.category} ${pipeFormId}`);
+        logSync(`Pip-Boy -> game: ${evt.action} ${evt.category} ${pipeFormId}`);
       }
     } else {
       logWarn(`Pip-Boy ${evt.action} ${evt.category} ${gameFormId} ignored (game not connected)`);
@@ -430,7 +470,7 @@ ${C.bold}Item Database:${C.reset}
             for (const p of ports) {
               const isPipBoy = p.vendorId?.toLowerCase() === '0483';
               const marker = isPipBoy ? ` ${C.pipGreen}← likely Pip-Boy${C.reset}` : '';
-              console.log(`  ${C.cyan}${p.path}${C.reset} — ${p.manufacturer || 'Unknown'}${marker}`);
+              console.log(`  ${C.cyan}${p.path}${C.reset} - ${p.manufacturer || 'Unknown'}${marker}`);
             }
             console.log('');
           }
@@ -511,7 +551,7 @@ ${C.bold}Item Database:${C.reset}
           } else {
             try {
               const result = await bridge.eval(argStr);
-              console.log(`${C.green}→${C.reset} ${result}`);
+              console.log(`${C.green}->${C.reset} ${result}`);
             } catch (err) {
               logError(`Eval failed: ${err.message}`);
             }

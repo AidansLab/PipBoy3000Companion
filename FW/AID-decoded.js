@@ -1,5 +1,10 @@
 (function (params) {
   params || (params = {});
+  // Bleak Venom (vanilla FNV) shows its own in-game Yes/No confirmation on
+  // use, which can be declined - using it from the Pip-Boy has no way to
+  // know that answer, so the device would show it consumed regardless.
+  // Blocked outright while connected; only reachable via the game's own
+  // inventory menu, where the real dialog and its answer are unambiguous.
   const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/AID.DAT`),
     inv = new InvFile(`INV/${NV ? 'NV' : 'F3'}/AID.INV`, { idOrder: db.ids }),
     imgs = E.openFile(`DATA/${NV ? 'NV' : 'F3'}/AID.IMG`, 'r'),
@@ -43,12 +48,61 @@
           '' !== effectStr &&
             Pip.renderBlock(210, 220, 252, 'EFFECTS', effectStr),
           imgs.seek(item.io));
-        const img = imgs.read(item.il);
-        h.drawImage(img, 340, 116, { rotate: 0 });
+        try {
+          const img = imgs.read(item.il);
+          h.drawImage(img, 340, 116, { rotate: 0 });
+        } catch (e) {
+          debug(`Error drawing image for Aid item: ${e}`);
+        }
       },
       onClick: (n) => {
-        const it = inv.get(n),
-          item = db.getId(it.id);
+        const it = inv.get(n);
+        if (!it) return;
+        const item = db.getId(it.id);
+        // When connected to the game, prevent consuming items that can have no
+        // effect in their current state, mirroring the game's own block logic.
+        if (cmode) {
+          // Bleak Venom: in-game only - see the comment at the top of this file.
+          if (it.id === 0x001613d0) return;
+          // HP-restoring items (stimpaks, food…) are blocked when HP is full.
+          const curHp = player.getav('hp');
+          if (curHp !== undefined) {
+            const info = player.getinfo();
+            if (info.maxHP > 0 && curHp >= info.maxHP &&
+                item.ef && item.ef.some(e => e.indexOf('HP') >= 0)) {
+              return;
+            }
+          }
+          // Limb-fixing items (Doctor's Bag) are blocked when no limb is
+          // crippled (condition == 0).
+          if (item.ef && item.ef.some(e => /cripple|limb/i.test(e))) {
+            const limbAvs = [
+              'leftattackcondition', 'rightattackcondition',
+              'leftmobilitycondition', 'rightmobilitycondition',
+              'perceptioncondition', 'endurancecondition'
+            ];
+            const anyCrippled = limbAvs.some(av => {
+              const v = player.getav(av);
+              return v !== undefined && v <= 0;
+            });
+            if (!anyCrippled) return;
+          }
+          // Weapon Repair Kits are blocked when nothing is equipped or the
+          // equipped weapon is already at full condition (mirrors in-game use).
+          const isWeaponRepairKit =
+            (item.txt && /weapon repair kit/i.test(item.txt)) ||
+            (item.ef && item.ef.some((e) =>
+              /weapon/i.test(e) &&
+              /cnd|condition|repair/i.test(e) &&
+              !/limb|cripple/i.test(e)
+            ));
+          if (isWeaponRepairKit) {
+            const eq = player.getav('equippedWeap');
+            if (eq === undefined || !eq) return;
+            const eqCnd = player.getav('equippedWeapCnd');
+            if (eqCnd !== undefined && eqCnd >= 99) return;
+          }
+        }
         // Notify the companion app (if listening on USB) that this item was
         // consumed, so it can mirror the action in-game.
         console.log('PIPSYNC:USE:AID:' + Pip.formatId(it.id));
@@ -57,30 +111,49 @@
             const wt = parseFloat(item.wt);
             player.player.invWt[`INV/${NV ? 'NV' : 'F3'}/AID.INV`] -= wt;
           } catch (e) {}
-        ((player.modified = !0),
+        if (
+          ((player.modified = !0),
           item.fx && Pip.audioStart(`SOUND/FX/AID/${item.fx}.WAV`),
-          item.efd > 0 &&
-            (player.effects || (player.effects = {}),
-            (player.effects[it.id] = {
-              txt: item.eft || item.txt,
-              ef: item.ef,
-              d: item.efd
-            }),
-            debug(`EFFECTS: ${item.txt} added (${item.efd}s)`),
-            setTimeout(
-              function (N) {
-                (delete player.effects[N],
-                  debug(`EFFECTS: ${item.txt} expired`),
-                  player.emit('effects'));
-              },
-              1000 * item.efd,
-              it.id
-            )),
+          item.ef)
+        ) {
+          const hpRestore = /^HP \+(\d+)/;
+          item.ef.forEach((e) => {
+            const m = e.match(hpRestore);
+            if (m) {
+              debug(`AID: Used "${item.txt}" to restore ${e}`);
+              try {
+                player.heal(parseInt(m[1]));
+              } catch (e2) {
+                Pip.log(`heal failed for ${it.id}: ${e}: ${e2}`);
+              }
+            }
+          });
+        }
+        (item.efd > 0 &&
+          (player.effects || (player.effects = {}),
+          (player.effects[it.id] = {
+            txt: item.eft || item.txt,
+            ef: item.ef,
+            d: item.efd
+          }),
+          debug(`EFFECTS: ${item.txt} added (${item.efd}s)`),
+          setTimeout(
+            function (N) {
+              (delete player.effects[N],
+                debug(`EFFECTS: ${item.txt} expired`),
+                player.emit('effects'));
+            },
+            1000 * item.efd,
+            it.id
+          )),
           Pip.renderHeader());
       },
       onLongClick: (n) => {
-        if (typeof cmode !== 'undefined' && cmode) return;
         const it = inv.get(n);
+        if (cmode) {
+          Pip.companionDropItem('AID', inv, n, it);
+          return;
+        }
         (Pip.playSound('TAB'),
           setTimeout(
             () =>

@@ -7,11 +7,11 @@
   // equipped weapon can use (ammoUsable) and which is loaded right now
   // (ammoActive). We mark the active one, dim the ones the weapon can't use,
   // and only let usable ammo be selected.
-  const isCmode = () => typeof cmode !== 'undefined' && cmode;
+  const isCmode = () => cmode;
   let active = player.getav('ammoActive'),
     usable = player.getav('ammoUsable') || [];
   const getEquippedWeap = () => player.getav('equippedweap') || 0;
-  // Match in-game: no weapon, grenade, or melee → all ammo greyed out. Only a
+  // Match in-game: no weapon, grenade, or melee -> all ammo greyed out. Only a
   // gun with a non-empty ammoUsable list allows selecting matching ammo types.
   const isUsable = (id) => {
     if (!isCmode()) return !0;
@@ -38,8 +38,12 @@
       (Pip.renderBlock(296, 192, 80, 'WG', item.wt || '--'),
         Pip.renderBlock(382, 192, 80, 'VAL', item.val || '--'),
         imgs.seek(item.io));
-      const img = imgs.read(item.il);
-      h.drawImage(img, 340, 114, { rotate: 0 });
+      try {
+        const img = imgs.read(item.il);
+        h.drawImage(img, 340, 114, { rotate: 0 });
+      } catch (e) {
+        debug(`Error drawing image for Ammo item: ${e}`);
+      }
     },
     onClick: (n) => {
       if (!isCmode()) return;
@@ -61,8 +65,11 @@
         console.log('PIPSYNC:EQUIP:AMMO:' + Pip.formatId(it.id)));
     },
     onLongClick: (n) => {
-      if (isCmode()) return;
       const it = inv.get(n);
+      if (isCmode()) {
+        Pip.companionDropItem('AMMO', inv, n, it);
+        return;
+      }
       (Pip.playSound('TAB'),
         setTimeout(
           () =>
