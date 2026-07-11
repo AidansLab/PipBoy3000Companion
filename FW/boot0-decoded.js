@@ -560,8 +560,14 @@
   global._damCache = null;
 
   function damInvFile() {
-    var m = NV ? 'NV' : 'F3';
-    return new InvFile('INV/' + m + '/' + m + '_DAM.INV');
+    var m = NV ? 'NV' : 'F3',
+      path = 'INV/' + m + '/' + m + '_DAM.INV';
+    if (!require('fs').statSync(path)) {
+      try {
+        require('fs').writeFileSync(path, '');
+      } catch (e) {}
+    }
+    return new InvFile(path);
   }
 
   // Apply one (id, cnd, dam) entry to an already-open DAM InvFile and mirror

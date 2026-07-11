@@ -23,6 +23,11 @@
     // the fast path.
     const m = {};
     try {
+      if (!require('fs').statSync(damFile)) {
+        try {
+          require('fs').writeFileSync(damFile, '');
+        } catch (e) {}
+      }
       const di = new InvFile(damFile);
       for (let i = 0; i < di.count; i++) {
         const e = di.get(i);

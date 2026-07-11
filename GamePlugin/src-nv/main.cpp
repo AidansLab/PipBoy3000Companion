@@ -63,9 +63,8 @@
 #define PLUGIN_NAME "FalloutPipBoySync"
 #define PLUGIN_VERSION 32
 
-// Write FalloutPipBoySync.log beside this DLL (Data/NVSE/Plugins/).
-// TEMP: flipped on to chase the torch-off-while-Pip-Boy-open bug via
-// TORCH-DIAG log lines - flip back to 0 once root-caused.
+// Write FalloutPipBoySync.log beside this DLL (Data/NVSE/Plugins/). Flip to 1
+// to enable PipBoyLog output (e.g. the TORCH-DIAG lines) for a debug session.
 #ifndef PIPBOY_VERBOSE_LOG
 #define PIPBOY_VERBOSE_LOG 0
 #endif
