@@ -133,7 +133,7 @@
       if (null == item.es) return;
       const cndAware = cndMode();
       // The remainder row (part=1) shares the same (id, cnd) as the equipped
-      // row but must never unequip — clicking it should equip that copy.
+      // row but must never unequip - clicking it should equip that copy.
       const isUnequip =
         v.part !== 1 &&
         active[item.es] === it.id &&

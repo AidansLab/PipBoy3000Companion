@@ -1,7 +1,7 @@
 (function (params) {
   params || (params = {});
   // Bleak Venom (vanilla FNV) shows its own in-game Yes/No confirmation on
-  // use, which can be declined — using it from the Pip-Boy has no way to
+  // use, which can be declined - using it from the Pip-Boy has no way to
   // know that answer, so the device would show it consumed regardless.
   // Blocked outright while connected; only reachable via the game's own
   // inventory menu, where the real dialog and its answer are unambiguous.
@@ -62,7 +62,7 @@
         // When connected to the game, prevent consuming items that can have no
         // effect in their current state, mirroring the game's own block logic.
         if (cmode) {
-          // Bleak Venom: in-game only — see the comment at the top of this file.
+          // Bleak Venom: in-game only - see the comment at the top of this file.
           if (it.id === 0x001613d0) return;
           // HP-restoring items (stimpaks, food…) are blocked when HP is full.
           const curHp = player.getav('hp');

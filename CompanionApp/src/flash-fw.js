@@ -1,9 +1,27 @@
+/*
+ * Copyright (c) 2026 Aidan Lee-Calamera (aka Aidan's Lab). 
+ * All rights reserved.
+ *
+ * This source code is licensed under the Creative Commons
+ * Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0).
+ *
+ * You are free to share and adapt this code under the following conditions:
+ *  - Attribution: You must give appropriate credit and provide a link to the license.
+ *  - Non-Commercial: You may not use this material for commercial purposes.
+ *  - ShareAlike: If you alter, transform, or build upon this work, you must
+ *    distribute your contributions under the same CC BY-NC-SA 4.0 license.
+ *
+ * You may obtain a full copy of the License text in the LICENSE file in the
+ * root directory of this project repository or online at:
+ * https://creativecommons.org/licenses/by-nc-sa/4.0/
+ */
+
 /**
  * flash-fw.js
  *
  * Deploy companion changes to the Pip-Boy over USB serial:
- *   - Menu scripts → SD card JS/*.JS (filesystem)
- *   - Core FW patches → Storage .boot0 (runs on boot, stock FW.JS unchanged)
+ *   - Menu scripts -> SD card JS/*.JS (filesystem)
+ *   - Core FW patches -> Storage .boot0 (runs on boot, stock FW.JS unchanged)
  */
 
 import fs from 'fs';
@@ -12,14 +30,14 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/** Espruino Storage boot patch — overrides stock FW methods on boot */
+/** Espruino Storage boot patch - overrides stock FW methods on boot */
 export const BOOT0_FIRMWARE = {
   local: 'FW Build/.boot0',
   device: '.boot0',
   storage: true,
 };
 
-/** Built menu scripts — every .JS in FW Build/ except FW.JS → JS/<name> on SD */
+/** Built menu scripts - every .JS in FW Build/ except FW.JS -> JS/<name> on SD */
 export const MENU_FIRMWARE_DIR = 'FW Build';
 
 const MENU_SKIP = new Set(['FW.JS']);
@@ -27,7 +45,7 @@ const MENU_SKIP = new Set(['FW.JS']);
 /** Re-upload-and-reverify attempts per file if the CRC32 doesn't match. */
 const UPLOAD_VERIFY_MAX_ATTEMPTS = 3;
 
-// Standard CRC-32 (zlib polynomial), matching the device's E.CRC32 — local
+// Standard CRC-32 (zlib polynomial), matching the device's E.CRC32 - local
 // table-based implementation rather than node:zlib's crc32, which only
 // exists from Node 20.15+ while package.json supports >=18.
 const CRC32_TABLE = (() => {
@@ -86,14 +104,14 @@ export function buildFirmwareFileList(fwDir) {
     });
   }
 
-  // Boot patch last — writing Storage boot scripts mid-upload can reload hooks.
+  // Boot patch last - writing Storage boot scripts mid-upload can reload hooks.
   entries.push({ ...BOOT0_FIRMWARE });
 
   return entries;
 }
 
 /**
- * Menu IDs (without .JS) included in this upload — for reloading an open menu.
+ * Menu IDs (without .JS) included in this upload - for reloading an open menu.
  * @param {string} fwDir
  * @returns {string[]}
  */
@@ -166,7 +184,7 @@ export async function flashFirmware(bridge, options = {}) {
 
       const content = fs.readFileSync(localPath);
       const dest = entry.storage ? 'Storage' : 'SD';
-      log('info', `→ ${entry.device} (${dest}, ${(content.length / 1024).toFixed(1)} KB)`);
+      log('info', `-> ${entry.device} (${dest}, ${(content.length / 1024).toFixed(1)} KB)`);
 
       const packetTimeout = entry.storage || content.length > 12000 ? 12000 : 8000;
       const sendOptions = {
@@ -180,7 +198,7 @@ export async function flashFirmware(bridge, options = {}) {
       };
 
       // Every uploaded file is verified by comparing a locally computed
-      // CRC32 against the device's E.CRC32 of what actually landed — one
+      // CRC32 against the device's E.CRC32 of what actually landed - one
       // small eval round-trip per file, catching truncated/corrupted
       // uploads that per-packet ACKs alone can miss (they carry no
       // checksum, and a lost ACK can duplicate a chunk on retry).
@@ -216,7 +234,7 @@ export async function flashFirmware(bridge, options = {}) {
         throw new Error(
           `${entry.device} could not be verified after ${UPLOAD_VERIFY_MAX_ATTEMPTS} attempts (${lastProblem}). ` +
           (entry.storage
-            ? `Do NOT reboot or power-cycle the Pip-Boy — the currently running firmware is unaffected until the ` +
+            ? `Do NOT reboot or power-cycle the Pip-Boy - the currently running firmware is unaffected until the ` +
               `next boot, but Storage now holds a possibly-corrupt patch. Reconnect and try uploading again.`
             : `Check the USB cable/connection and try uploading again.`)
         );

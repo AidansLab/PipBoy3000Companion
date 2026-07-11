@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 Aidan Lee-Calamera (aka Aidan's Lab). 
+ * All rights reserved.
+ *
+ * This source code is licensed under the Creative Commons
+ * Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0).
+ *
+ * You are free to share and adapt this code under the following conditions:
+ *  - Attribution: You must give appropriate credit and provide a link to the license.
+ *  - Non-Commercial: You may not use this material for commercial purposes.
+ *  - ShareAlike: If you alter, transform, or build upon this work, you must
+ *    distribute your contributions under the same CC BY-NC-SA 4.0 license.
+ *
+ * You may obtain a full copy of the License text in the LICENSE file in the
+ * root directory of this project repository or online at:
+ * https://creativecommons.org/licenses/by-nc-sa/4.0/
+ */
+
 /**
  * serial-bridge.js
  * 
@@ -114,7 +132,7 @@ export class SerialBridge extends EventEmitter {
       return this._openPort(candidates[0].path);
     }
 
-    // Multiple candidates — use the first one but warn
+    // Multiple candidates - use the first one but warn
     this.emit('status', `Multiple candidates found, using ${candidates[0].path}`);
     this.emit('ports-found', candidates);
     return this._openPort(candidates[0].path);
@@ -317,7 +335,7 @@ export class SerialBridge extends EventEmitter {
 
   /**
    * Send a raw JavaScript command to the Pip-Boy REPL.
-   * Respects the audio guard — waits until the guard window expires before
+   * Respects the audio guard - waits until the guard window expires before
    * joining the serial queue so the device is command-free during playback.
    */
   sendCommand(command) {
@@ -339,7 +357,7 @@ export class SerialBridge extends EventEmitter {
    * Send a high-priority equip/unequip confirmation command.
    * Bypasses the audio guard so the split appears as soon as the game
    * round-trip completes (~200 ms) rather than waiting out the full guard.
-   * Pre-click commands drain in ~100 ms (4–6 × 25 ms spacing), so the queue
+   * Pre-click commands drain in ~100 ms (4–6 x 25 ms spacing), so the queue
    * is typically empty by the time the equip confirmation arrives.
    */
   sendEquipCommand(command) {
@@ -384,7 +402,7 @@ export class SerialBridge extends EventEmitter {
   }
 
   /**
-   * CRC32 of a file's bytes computed ON the device (E.CRC32 — standard
+   * CRC32 of a file's bytes computed ON the device (E.CRC32 - standard
    * zlib polynomial, native and fast), so verifying an upload costs one
    * small eval round-trip instead of streaming the whole file back over
    * serial. Storage reads are memory-mapped flat strings (near-free);
@@ -404,7 +422,7 @@ export class SerialBridge extends EventEmitter {
     try {
       return JSON.parse(raw.trim());
     } catch (_) {
-      // The REPL may prefix boot noise — take the last number/null token.
+      // The REPL may prefix boot noise - take the last number/null token.
       const matches = [...String(raw).matchAll(/\b(\d+|null)\b/g)];
       if (matches.length === 0) {
         throw new Error(`Unexpected CRC32 response: ${JSON.stringify(String(raw).slice(0, 120))}`);
@@ -436,7 +454,7 @@ export class SerialBridge extends EventEmitter {
   /**
    * Send an ordered list of commands as few USB writes as possible.
    *
-   * Each command is framed exactly as sendCommand frames it — `\x10${cmd}\n` —
+   * Each command is framed exactly as sendCommand frames it - `\x10${cmd}\n` -
    * so the device parses and executes each line identically to the per-command
    * path; the ONLY difference is that we concatenate the framed lines and write
    * them together, eliminating the COMMAND_SPACING_MS gap between every command.
@@ -457,7 +475,7 @@ export class SerialBridge extends EventEmitter {
   async sendBatch(commands, { maxBytes = 512 } = {}) {
     if (!commands || commands.length === 0) return;
 
-    // Honor the audio guard once for the whole batch (defensive — callers
+    // Honor the audio guard once for the whole batch (defensive - callers
     // normally only batch when the guard is closed).
     const guardWait = this._audioGuardUntil - Date.now();
     if (guardWait > 0) await this._sleep(guardWait);
@@ -713,7 +731,7 @@ export class SerialBridge extends EventEmitter {
     });
 
     // The device ACKs/NAKs per packet with no sequence numbers, so a lost ACK
-    // and a lost packet look identical from here — retrying risks the device
+    // and a lost packet look identical from here - retrying risks the device
     // having already applied a packet whose ACK just didn't make it back.
     // That's a real but narrow window (one packet's worth of bytes on an
     // otherwise-open connection); failing the whole upload on every transient

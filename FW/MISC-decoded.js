@@ -43,14 +43,14 @@
       const item = n < appn ? apps[n] : db.getId(inv.get(n - appn).id);
       // Launched via boot0's Pip.launchApp (not inline here) so the pending
       // callback doesn't keep this whole menu's closure (db/inv/imgs/apps/
-      // scroller) reachable while the holotape's own script is evaluated —
+      // scroller) reachable while the holotape's own script is evaluated -
       // see the comment on Pip.launchApp for why that matters.
       item.exec && Pip.launchApp(item.exec);
     },
     onLongClick: (n) => {
       const it = n < appn ? void 0 : inv.get(n - appn);
       if (cmode) {
-        // App rows (holotapes) aren't inventory items — nothing to drop.
+        // App rows (holotapes) aren't inventory items - nothing to drop.
         if (n < appn) return;
         Pip.companionDropItem('MISC', inv, n - appn, it);
         return;

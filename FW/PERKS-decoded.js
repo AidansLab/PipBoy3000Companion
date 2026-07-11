@@ -63,7 +63,7 @@
         } catch (e) {
           debug(`Error drawing image for Perks item: ${e}`);
         }
-        // 1.1.5: image first, text after — a tall perk image could paint
+        // 1.1.5: image first, text after - a tall perk image could paint
         // over the header drawn inside the same clip region.
         (h.setClipRect(0, 0, 480, 320),
           Pip.renderBlock(255, 193, 210, '', ''),
@@ -128,7 +128,7 @@
   return (
     (active = buildOwnedScroller()),
     (inv.onLoaded = (i) => {
-      // 1.1.5: only update the count in owned mode — the edit scroller lists
+      // 1.1.5: only update the count in owned mode - the edit scroller lists
       // the full catalog, and clamping it to inv.count hid most of the list.
       active && (owned && active.updateItemCount(i.count), active.render());
     }),

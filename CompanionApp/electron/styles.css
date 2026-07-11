@@ -1,4 +1,22 @@
-/* Fallout 3 — classic green Pip-Boy */
+/*
+ * Copyright (c) 2026 Aidan Lee-Calamera (aka Aidan's Lab). 
+ * All rights reserved.
+ *
+ * This source code is licensed under the Creative Commons
+ * Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0).
+ *
+ * You are free to share and adapt this code under the following conditions:
+ *  - Attribution: You must give appropriate credit and provide a link to the license.
+ *  - Non-Commercial: You may not use this material for commercial purposes.
+ *  - ShareAlike: If you alter, transform, or build upon this work, you must
+ *    distribute your contributions under the same CC BY-NC-SA 4.0 license.
+ *
+ * You may obtain a full copy of the License text in the LICENSE file in the
+ * root directory of this project repository or online at:
+ * https://creativecommons.org/licenses/by-nc-sa/4.0/
+ */
+
+/* Fallout 3 - classic green Pip-Boy */
 :root,
 [data-theme="f3"] {
   --bg: #0a120a;
@@ -14,7 +32,7 @@
   --warn: #ffb000;
 }
 
-/* Fallout: New Vegas — amber Pip-Boy */
+/* Fallout: New Vegas - amber Pip-Boy */
 [data-theme="fnv"] {
   --bg: #100c08;
   --panel: #1a1208;
@@ -42,7 +60,17 @@ html, body {
   transition: background-color 0.25s ease, color 0.25s ease;
 }
 
+/* The window itself never scrolls - only the console (.console) does. Body
+   is a flex column so .main gets exactly the space under the header, however
+   tall the header actually renders (no hardcoded header height). */
+body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .header {
+  flex-shrink: 0;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -80,7 +108,7 @@ html, body {
   align-items: center;
 }
 
-/* Read-only indicators — flat dot + label, not button-like */
+/* Read-only indicators - flat dot + label, not button-like */
 .status-item {
   display: inline-flex;
   align-items: center;
@@ -115,7 +143,8 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
-  height: calc(100vh - 70px);
+  flex: 1;
+  min-height: 0;
   padding: 0.8rem 1rem 1rem;
 }
 

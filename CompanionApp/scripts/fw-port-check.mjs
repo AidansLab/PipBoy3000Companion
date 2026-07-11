@@ -1,6 +1,24 @@
 #!/usr/bin/env node
+/*
+ * Copyright (c) 2026 Aidan Lee-Calamera (aka Aidan's Lab). 
+ * All rights reserved.
+ *
+ * This source code is licensed under the Creative Commons
+ * Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0).
+ *
+ * You are free to share and adapt this code under the following conditions:
+ *  - Attribution: You must give appropriate credit and provide a link to the license.
+ *  - Non-Commercial: You may not use this material for commercial purposes.
+ *  - ShareAlike: If you alter, transform, or build upon this work, you must
+ *    distribute your contributions under the same CC BY-NC-SA 4.0 license.
+ *
+ * You may obtain a full copy of the License text in the LICENSE file in the
+ * root directory of this project repository or online at:
+ * https://creativecommons.org/licenses/by-nc-sa/4.0/
+ */
+
 /**
- * fw-port-check.mjs — screens a new Pip-Boy OS release against our patched FW.
+ * fw-port-check.mjs - screens a new Pip-Boy OS release against our patched FW.
  *
  * Usage:  node scripts/fw-port-check.mjs <newStockDir> [prevStockDir]
  *   e.g.  node scripts/fw-port-check.mjs ../FW/1.1.6 ../FW/1.1.5
@@ -14,11 +32,11 @@
  *
  * 1. FW-decoded.js (kept as pristine stock in FW/): plain-diffed against the
  *    new stock. Changed lines are scanned for the stock symbols boot0
- *    monkey-patches — any hit means a boot0 patch target moved and needs a
- *    human look. No hits + small diff ⇒ boot0 ports as-is.
+ *    monkey-patches - any hit means a boot0 patch target moved and needs a
+ *    human look. No hits + small diff -> boot0 ports as-is.
  *
  * 2. Menus, stock-vs-stock (preferred): when a previous stock dir exists,
- *    each menu is plain-diffed against it — both sides are unmodified stock,
+ *    each menu is plain-diffed against it - both sides are unmodified stock,
  *    so every real change shows up verbatim, including numeric-only tweaks
  *    that no literal heuristic can see (the 1.1.5 condition-bar shading
  *    change was exactly that). Each printed hunk must be hand-ported into
@@ -26,7 +44,7 @@
  *
  * 3. Menus, literal fallback (no previous stock dir): compares the SET of
  *    string literals per file against OUR menus. Survives mangling, but is
- *    blind to numeric/structural changes — treat a clean result as "probably
+ *    blind to numeric/structural changes - treat a clean result as "probably
  *    untouched", not proof.
  */
 
@@ -122,7 +140,7 @@ if (!prevDir) {
 }
 console.log(prevDir
   ? `Previous stock baseline: ${prevDir} (menus diffed stock-vs-stock)`
-  : 'No previous stock dir found — menus fall back to the literal-set check (blind to numeric-only changes).');
+  : 'No previous stock dir found - menus fall back to the literal-set check (blind to numeric-only changes).');
 
 let actionNeeded = false;
 
@@ -130,7 +148,7 @@ let actionNeeded = false;
 const oldFw = fs.readFileSync(path.join(FW_DIR, 'FW-decoded.js'), 'utf8');
 const newFw = fs.readFileSync(path.join(newDir, 'FW-decoded.js'), 'utf8');
 if (oldFw === newFw) {
-  console.log('FW.JS: identical — boot0 ports as-is.');
+  console.log('FW.JS: identical - boot0 ports as-is.');
 } else {
   const lines = changedLines(oldFw, newFw);
   console.log(`FW.JS: ${lines.length} changed/added lines.`);
@@ -160,7 +178,7 @@ for (const m of MENUS) {
     if (prevStock === newStock) { console.log(`${m}: ✓ identical to previous stock`); continue; }
     const lines = changedLines(prevStock, newStock);
     actionNeeded = true;
-    console.log(`${m}: ⚠ ${lines.length} changed/added lines vs previous stock — port each into our menu:`);
+    console.log(`${m}: ⚠ ${lines.length} changed/added lines vs previous stock - port each into our menu:`);
     for (const line of lines) console.log(`    ${line.trimEnd()}`);
     continue;
   }
@@ -175,7 +193,7 @@ for (const m of MENUS) {
     console.log(`${m}: ⚠ stock-only literals (likely OS change to port):`);
     for (const s of stockOnly) console.log(`    ${JSON.stringify(s)}`);
   } else {
-    console.log(`${m}: ✓ clean (literal check only — numeric-only changes not detectable)`);
+    console.log(`${m}: ✓ clean (literal check only - numeric-only changes not detectable)`);
   }
 }
 

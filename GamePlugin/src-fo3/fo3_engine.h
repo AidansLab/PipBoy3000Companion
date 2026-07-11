@@ -1,44 +1,23 @@
+/*
+ * Copyright (c) 2026 Aidan Lee-Calamera (aka Aidan's Lab). 
+ * All rights reserved.
+ *
+ * This source code is licensed under the Creative Commons
+ * Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0).
+ *
+ * You are free to share and adapt this code under the following conditions:
+ *  - Attribution: You must give appropriate credit and provide a link to the license.
+ *  - Non-Commercial: You may not use this material for commercial purposes.
+ *  - ShareAlike: If you alter, transform, or build upon this work, you must
+ *    distribute your contributions under the same CC BY-NC-SA 4.0 license.
+ *
+ * You may obtain a full copy of the License text in the LICENSE file in the
+ * root directory of this project repository or online at:
+ * https://creativecommons.org/licenses/by-nc-sa/4.0/
+ */
+
 /**
- * fo3_engine.h — Fallout 3 engine glue for the Pip-Boy sync plugin (FOSE).
- *
- * The xNVSE plugin leans on two NVSE conveniences that FOSE does not provide:
- *   1. Script::RunScriptLine2 — compile-and-run a script line (FOSE declares
- *      a console RunScriptLine interface but never registers it: the block in
- *      PluginManager.cpp is `#if 0 // not yet supported`).
- *   2. kMessage_MainGameLoop — a per-frame main-thread callback. FOSE has no
- *      plugin-facing messaging interface at all (see main.cpp's g_gameLoaded).
- *
- * Replacements, built only from data published in the FOSE SDK:
- *
- *   Script lines → direct dispatch into the game's OWN command handlers. The
- *   vanilla console and script command tables are static CommandInfo arrays at
- *   addresses published per-version in FOSE's CommandTable.cpp (for 1.7:
- *   console 0x00F52B70..0x00F54B50, script 0x00F54B78..0x00F5A438). Commands
- *   are located BY NAME at runtime — no per-command address guessing — and
- *   invoked with a hand-built argument buffer in the engine's compiled-arg
- *   format ('n'+SInt32 int literal, 'z'+double literal, 'r'+UInt16 index into
- *   the calling script's ref list; UInt16 arg count prefix). The format was
- *   verified against the vanilla-format parser in xNVSE's GameAPI.cpp
- *   (v_ExtractArgsEx / ExtractFloat), which reads this same engine encoding.
- *   Form arguments are carried by a stack-built fake Script whose layout
- *   (refs tList @0x44, sizeof 0x54) is STATIC_ASSERTed by the SDK; ref
- *   variables use varIdx=0 so RefVariable::Resolve() leaves the pre-set form
- *   pointer untouched even with a NULL event list.
- *
- *   Reads (perk rank, active-spell checks) → CommandInfo::eval, the
- *   "arg already extracted" handler used for dialog conditions:
- *   eval(thisObj, arg1, arg2, &result). No arg buffer needed at all.
- *
- *   Main-thread pump → a WM_TIMER TIMERPROC on the game's main window. The
- *   game's main thread owns the window and dispatches its messages (the
- *   vanilla console executes commands from this same pump via WM_CHAR), so
- *   the callback runs in a context equivalent to console command execution.
- *   Uses zero engine addresses.
- *
- *   Player control lock → PlayerCharacter::disabledControlFlags (offset
- *   0x5DC, STATIC_ASSERTed in the SDK, flag enum included). Only bits we set
- *   are cleared on unlock, preserving other mods' flags — the same guarantee
- *   xNVSE's DisablePlayerControlsAltEx provided on the NV side.
+ * fo3_engine.h - Fallout 3 engine glue for the Pip-Boy sync plugin (FOSE).
  */
 
 #pragma once
@@ -148,7 +127,7 @@ static bool CallGameCommand(CommandInfo *info, TESObjectREFR *thisObj,
     return false;
   if (numArgs > kMaxGameCommandArgs)
     return false;
-  // Never pass more args than the command declares — optional trailing params
+  // Never pass more args than the command declares - optional trailing params
   // are simply omitted, matching what the script compiler emits.
   if (numArgs > info->numParams)
     numArgs = info->numParams;
@@ -190,7 +169,7 @@ static bool CallGameCommand(CommandInfo *info, TESObjectREFR *thisObj,
       if (!args[i].formVal)
         return false;
       refVars[numRefs].form = args[i].formVal;
-      refVars[numRefs].varIdx = 0; // 0 ⇒ RefVariable::Resolve keeps `form`
+      refVars[numRefs].varIdx = 0; // 0 = RefVariable::Resolve keeps `form`
       numRefs++;
       argBuf[off++] = 'r';
       *(UInt16 *)(argBuf + off) = (UInt16)numRefs; // ref indices are 1-based
@@ -222,7 +201,7 @@ static bool CallGameCommand(CommandInfo *info, TESObjectREFR *thisObj,
   return ok;
 }
 
-// Invoke a command's condition-evaluation handler (no arg buffer — args are
+// Invoke a command's condition-evaluation handler (no arg buffer - args are
 // passed pre-extracted). Used for reads: HasPerk rank, IsSpellTarget, etc.
 static bool EvalGameCommand(CommandInfo *info, TESObjectREFR *thisObj,
                             void *arg1, void *arg2, double *outResult) {
@@ -236,10 +215,10 @@ static bool EvalGameCommand(CommandInfo *info, TESObjectREFR *thisObj,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// NATIVE ENGINE CALLS (direct address, thiscall — bypasses the CallGameCommand
+// NATIVE ENGINE CALLS (direct address, thiscall - bypasses the CallGameCommand
 // simulation above entirely). CallGameCommand's hand-built compiled-argument
 // buffer reliably dispatches zero-argument commands but fails 100% of the time
-// on any command invoked with an argument (int, float, or form ref alike —
+// on any command invoked with an argument (int, float, or form ref alike -
 // confirmed via device logs across ToggleFlyCam, SetUFOCamSpeedMult, EquipItem,
 // UnequipItem), and FOSE has no RunScriptLine-equivalent to fall back on
 // (PluginManager.cpp registers it behind `#if 0 // not yet supported`, in the
@@ -248,7 +227,7 @@ static bool EvalGameCommand(CommandInfo *info, TESObjectREFR *thisObj,
 // path at all, so they sidestep the bug.
 //
 // kAddr_ActorEquipItemAlt is reverse-engineered data from Command Extender, a
-// long-shipped, widely-used FO3 plugin — not a guess. Confirmed targeting the
+// long-shipped, widely-used FO3 plugin - not a guess. Confirmed targeting the
 // same exact build this project does: Command Extender's own
 // g_menuVisibility constant (0x011793DB) matches FOSE's FALLOUT_VERSION_1_7
 // address exactly, and its loader hashes explicitly name "1.7.0.3" variants.
@@ -256,7 +235,7 @@ static bool EvalGameCommand(CommandInfo *info, TESObjectREFR *thisObj,
 // cross-references on s_Actor_EquipItem/s_Actor_UnequipItem (see main.cpp).
 //
 // Diagnostic caveat: a `true` return from CallGameCommand means only that the
-// handler ran — vanilla Cmd_*_Execute handlers return true even when their
+// handler ran - vanilla Cmd_*_Execute handlers return true even when their
 // internal ExtractArgs fails (verified in Command Extender's sources), so an
 // argument-form dispatch can log "ok" while silently doing nothing. Only the
 // zero-argument dispatch class is trusted; everything needing arguments goes
@@ -284,7 +263,7 @@ __forceinline T_Ret CdeclCall(UInt32 _addr, Args... args) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// PLAYER CONTROL LOCK (direct flag writes — the AltEx-style "don't clobber
+// PLAYER CONTROL LOCK (direct flag writes - the AltEx-style "don't clobber
 // other mods" guarantee: only bits *we* turned on get turned back off)
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -349,7 +328,7 @@ static BOOL CALLBACK FO3FindGameWindowProc(HWND hwnd, LPARAM lparam) {
 }
 
 // Try to attach the pump. Safe to call repeatedly (e.g. from the pipe thread)
-// until it succeeds — the game window doesn't exist during plugin load.
+// until it succeeds - the game window doesn't exist during plugin load.
 static bool FO3TryInstallMainThreadPump(FO3PumpCallback cb, UINT intervalMs) {
   if (g_pumpTimerId)
     return true;
@@ -360,7 +339,7 @@ static bool FO3TryInstallMainThreadPump(FO3PumpCallback cb, UINT intervalMs) {
   g_pumpCallback = cb;
   g_gameWindow = hwnd;
   // Timer messages are delivered to (and the TIMERPROC runs on) the thread
-  // that owns the window — the game's main thread — regardless of which
+  // that owns the window - the game's main thread - regardless of which
   // thread calls SetTimer.
   g_pumpTimerId = SetTimer(hwnd, 0x50495042 /* 'PIPB' */, intervalMs,
                            FO3PumpTimerProc);

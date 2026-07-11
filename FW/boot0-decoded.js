@@ -1,5 +1,5 @@
 /**
- * Companion boot patch — stored in Espruino Storage as .boot0
+ * Companion boot patch - stored in Espruino Storage as .boot0
  *
  * Runs before FW.JS on the SD card and patches stock Pip-OS once Player/Pip exist.
  * Menu scripts (JS/*.JS) are deployed separately; stock FW.JS is left untouched.
@@ -71,8 +71,8 @@
   // Mirrors the in-game Pip-Boy's own drop behavior: a stack of 5 or fewer
   // drops one at a time per press (same as the quantity prompt it'd show for
   // a small stack); a stack larger than 5 drops in full in one press.
-  // Hung off Pip (not a bare top-level function) so the menu scripts — each
-  // eval'd in their own separate scope, not nested inside this closure — can
+  // Hung off Pip (not a bare top-level function) so the menu scripts - each
+  // eval'd in their own separate scope, not nested inside this closure - can
   // reach it, the same way they already reach Pip.launchApp.
   Pip.companionDropItem = function (category, inv, index, it) {
     if (!it) return;
@@ -87,12 +87,12 @@
     }
     // Stock's scroller dispatcher only auto-renders after onClick, not
     // onLongClick (see the "e.onLongClick && i && e.onLongClick(...)" branch
-    // in FW.JS with no following render call) — without this the row's count
+    // in FW.JS with no following render call) - without this the row's count
     // stays stale on screen despite the InvFile already being updated.
     refreshInvMenu(inv);
   };
 
-  // Normalizer for skill name matching in syncskills — hoisted so it isn't
+  // Normalizer for skill name matching in syncskills - hoisted so it isn't
   // re-created on every syncskills call.
   const nm = function (s) {
     return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -108,8 +108,7 @@
       // inside the menu's onClick closes over the whole menu working set 
       // (db/inv/imgs/apps/scroller) and keeps it reachable while the 
       // holotape parses, which is the OOM this helper exists to avoid. 
-      // Here the callback closes over only execPath. Fallback keeps 
-      // holotapes working on pre-1.1.5 stock.
+      // Here the callback closes over only execPath.
       if (typeof Pip.loadHolotape === 'function') {
         Pip.loadHolotape(execPath);
         return;
@@ -118,7 +117,7 @@
   };
 
   // STATUS (STATS > Status) has CND / RAD / CLK / ENG tabs. Knob2 on CND edits
-  // limb condition — block that in cmode so game sync stays authoritative. CLK
+  // limb condition - block that in cmode so game sync stays authoritative. CLK
   // uses knob2 for global brightness (manual § CLK) and must keep working.
   let companionStatusTab = 0;
   function companionResetStatusTab() {
@@ -531,7 +530,7 @@
         const inv = onMenu
           ? Pip.inv
           : new InvFile(`INV/${NV ? 'NV' : 'F3'}/${v}.INV`, { idOrder: dbIds });
-        // Suppress per-row onLoaded renders while removing this id's old rows —
+        // Suppress per-row onLoaded renders while removing this id's old rows -
         // see removeitemsbulk for why.
         const savedOnLoaded = inv.onLoaded;
         if (onMenu) inv.onLoaded = void 0;
@@ -554,8 +553,8 @@
     return !1;
   };
 
-  // ── Weapon DAM (display damage) sync ──────────────────────────────────────
-  // The companion computes the game's dynamic weapon damage (base × skill ×
+  // --- Weapon DAM (display damage) sync ---
+  // The companion computes the game's dynamic weapon damage (base x skill x
   // condition) and mirrors it here one (formId, condition) entry at a time, in a
   // side InvFile keyed exactly like the inventory stacks.
   global._damCache = null;
@@ -979,7 +978,7 @@
       // updateDtDr: those only run while the APPAREL menu is the one
       // currently open, but this function is what every game-driven sync
       // (initial full sync AND every later equip change) calls regardless of
-      // which menu — or none — is on screen. Left to the menu alone, DT/DR
+      // which menu - or none - is on screen. Left to the menu alone, DT/DR
       // stayed stuck at 0 after the first sync until the player happened to
       // equip/unequip something from the Pip-Boy itself.
       var total = 0;
@@ -1131,7 +1130,7 @@
           const rows = _header.call(this);
           // XP is NOT gated on cmode: once the game has pushed a real XP it
           // persists in PLAYER.JSON, and the stock header otherwise replaces
-          // it with a decorative date-based fake (xpNext * dayOfMonth/32 —
+          // it with a decorative date-based fake (xpNext * dayOfMonth/32 -
           // see stock FW's STATS header), which would make the value visibly
           // "revert" the moment the companion disconnects. AP stays
           // cmode-gated: it's ephemeral game state, meaningless offline.

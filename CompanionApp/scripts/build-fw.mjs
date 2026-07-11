@@ -1,15 +1,33 @@
 #!/usr/bin/env node
+/*
+ * Copyright (c) 2026 Aidan Lee-Calamera (aka Aidan's Lab). 
+ * All rights reserved.
+ *
+ * This source code is licensed under the Creative Commons
+ * Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0).
+ *
+ * You are free to share and adapt this code under the following conditions:
+ *  - Attribution: You must give appropriate credit and provide a link to the license.
+ *  - Non-Commercial: You may not use this material for commercial purposes.
+ *  - ShareAlike: If you alter, transform, or build upon this work, you must
+ *    distribute your contributions under the same CC BY-NC-SA 4.0 license.
+ *
+ * You may obtain a full copy of the License text in the LICENSE file in the
+ * root directory of this project repository or online at:
+ * https://creativecommons.org/licenses/by-nc-sa/4.0/
+ */
+
 /**
  * Build Pip-Boy companion files from FW/*-decoded.js into FW/FW Build/
  *
- *   boot0-decoded.js → FW Build/.boot0   (Storage boot patch; patches stock FW.JS)
- *   *-decoded.js     → FW Build/*.JS      (menu scripts → SD JS/)
- *   FW-decoded.js    — not built (stock FW.JS on device is unchanged)
+ *   boot0-decoded.js -> FW Build/.boot0   (Storage boot patch; patches stock FW.JS)
+ *   *-decoded.js     -> FW Build/*.JS      (menu scripts -> SD JS/)
+ *   FW-decoded.js    - not built (stock FW.JS on device is unchanged)
  *
- * Pipeline: optional Terser minify/mangle → Espruino pretokenise.
+ * Pipeline: optional Terser minify/mangle -> Espruino pretokenise.
  *
  * Espruino's built-in Esprima minifier (MINIFICATION_LEVEL=ESPRIMA) cannot
- * handle ES6+ menu source — it emits empty output. Terser runs first when
+ * handle ES6+ menu source - it emits empty output. Terser runs first when
  * BUILD_MINIFY is true; BUILD_MANGLE controls Terser identifier shortening.
  */
 
@@ -53,7 +71,7 @@ function initEspruinoTools() {
 }
 
 function applyBuildConfig(Espruino) {
-  // Espruino Minify plugin is not used — Terser handles ES6 source first.
+  // Espruino Minify plugin is not used - Terser handles ES6 source first.
   Object.assign(Espruino.Config, {
     MINIFICATION_LEVEL: '',
     MODULE_MINIFICATION_LEVEL: '',
@@ -69,20 +87,20 @@ async function minifyCode(code, name) {
   const before = code.length;
   const result = await terserMinify(code, {
     ecma: 2020,
-    // Menu files are `(function (params) { ... });` — not invoked here.
+    // Menu files are `(function (params) { ... });` - not invoked here.
     // Terser compress treats them as dead code and drops the whole file.
     compress: false,
     mangle: BUILD_MANGLE,
     format: { comments: false },
   });
   if (result.error) {
-    throw new Error(`${name}: terser failed — ${result.error}`);
+    throw new Error(`${name}: terser failed - ${result.error}`);
   }
   const minified = result.code;
   if (!minified?.length || minified.length < before * 0.05) {
-    throw new Error(`${name}: terser produced unusable output (${before} → ${minified?.length ?? 0} bytes)`);
+    throw new Error(`${name}: terser produced unusable output (${before} -> ${minified?.length ?? 0} bytes)`);
   }
-  console.log(`  minify ${name}: ${before} → ${minified.length} bytes (mangle=${BUILD_MANGLE})`);
+  console.log(`  minify ${name}: ${before} -> ${minified.length} bytes (mangle=${BUILD_MANGLE})`);
   return minified;
 }
 
@@ -96,7 +114,7 @@ function pretokeniseCode(Espruino, code, name) {
   if (!tokenised.length) {
     throw new Error(`${name}: pretokenise produced empty output`);
   }
-  console.log(`  tokenise ${name}: ${before} → ${tokenised.length} bytes`);
+  console.log(`  tokenise ${name}: ${before} -> ${tokenised.length} bytes`);
   return tokenised;
 }
 
@@ -140,7 +158,7 @@ async function main() {
   const Espruino = await initEspruinoTools();
   applyBuildConfig(Espruino);
 
-  console.log(`Building ${sources.length} firmware file(s) → ${fwBuildDir}`);
+  console.log(`Building ${sources.length} firmware file(s) -> ${fwBuildDir}`);
   console.log(
     `Settings: minify=${BUILD_MINIFY ? 'terser' : 'off'}, mangle=${BUILD_MINIFY && BUILD_MANGLE}, pretokenise=always`
   );
@@ -151,7 +169,7 @@ async function main() {
     const outPath = path.join(fwBuildDir, outName);
     const source = fs.readFileSync(sourcePath, 'utf8');
 
-    console.log(`${sourceName} → FW Build/${outName}`);
+    console.log(`${sourceName} -> FW Build/${outName}`);
     const built = await buildFile(Espruino, source, outName);
     fs.writeFileSync(outPath, built, 'binary');
   }

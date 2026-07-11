@@ -11,7 +11,7 @@
   let active = player.getav('ammoActive'),
     usable = player.getav('ammoUsable') || [];
   const getEquippedWeap = () => player.getav('equippedweap') || 0;
-  // Match in-game: no weapon, grenade, or melee → all ammo greyed out. Only a
+  // Match in-game: no weapon, grenade, or melee -> all ammo greyed out. Only a
   // gun with a non-empty ammoUsable list allows selecting matching ammo types.
   const isUsable = (id) => {
     if (!isCmode()) return !0;

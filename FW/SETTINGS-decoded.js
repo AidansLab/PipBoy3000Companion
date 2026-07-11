@@ -192,7 +192,7 @@
       })));
   }
   // ── Pre-sync backup/restore (companion feature) ──────────────────────────
-  // Perks and Skills are now InvFile-backed (INV/{m}/PERKS.INV, SKILLS.INV —
+  // Perks and Skills are now InvFile-backed (INV/{m}/PERKS.INV, SKILLS.INV -
   // same shape as the item categories), so they fold straight into the
   // generic presyncCats INV backup/restore loop below instead of needing
   // their own JSON read/write special case.

@@ -125,8 +125,24 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 # Set output name (no "lib" prefix)
 set_target_properties(${PROJECT_NAME} PROPERTIES
     PREFIX ""
-    OUTPUT_NAME "FalloutPipBoySyncNV"
+    OUTPUT_NAME "Pip-Boy Sync NV By Aidan's Lab"
     SUFFIX ".dll"
+)
+
+# Release zip with the mod-manager layout (paths relative to Data/):
+#   nvse/plugins/<OUTPUT_NAME>.dll
+# Staged then zipped with cmake -E tar so no external zip tool is needed.
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_CURRENT_BINARY_DIR}/zip-nv/nvse/plugins"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/zip-nv/nvse/plugins"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:${PROJECT_NAME}>"
+            "${CMAKE_CURRENT_BINARY_DIR}/zip-nv/nvse/plugins/"
+    COMMAND ${CMAKE_COMMAND} -E tar cf
+            "${CMAKE_CURRENT_BINARY_DIR}/$<TARGET_FILE_BASE_NAME:${PROJECT_NAME}>.zip"
+            --format=zip -- nvse
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/zip-nv"
+    COMMENT "Packaging NV release zip (nvse/plugins/ layout, staging dir cleaned first)"
 )
 
 endif() # HAVE_XNVSE
@@ -188,10 +204,26 @@ target_link_libraries(FalloutPipBoySyncFO3 PRIVATE
 
 set_target_properties(FalloutPipBoySyncFO3 PROPERTIES
     PREFIX ""
-    OUTPUT_NAME "FalloutPipBoySyncF3"
+    OUTPUT_NAME "Pip-Boy Sync F3 By Aidan's Lab"
     SUFFIX ".dll"
     CXX_STANDARD 14
     CXX_STANDARD_REQUIRED ON
+)
+
+# Release zip with the mod-manager layout (paths relative to Data/):
+#   fose/plugins/<OUTPUT_NAME>.dll
+# Staged then zipped with cmake -E tar so no external zip tool is needed.
+add_custom_command(TARGET FalloutPipBoySyncFO3 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_CURRENT_BINARY_DIR}/zip-fo3/fose/plugins"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/zip-fo3/fose/plugins"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:FalloutPipBoySyncFO3>"
+            "${CMAKE_CURRENT_BINARY_DIR}/zip-fo3/fose/plugins/"
+    COMMAND ${CMAKE_COMMAND} -E tar cf
+            "${CMAKE_CURRENT_BINARY_DIR}/$<TARGET_FILE_BASE_NAME:FalloutPipBoySyncFO3>.zip"
+            --format=zip -- fose
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/zip-fo3"
+    COMMENT "Packaging FO3 release zip (fose/plugins/ layout, staging dir cleaned first)"
 )
 
 endif() # HAVE_FOSE

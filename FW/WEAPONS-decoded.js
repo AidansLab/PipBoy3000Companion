@@ -156,7 +156,7 @@
         item = db.getId(it.id),
         cndAware = cndMode(),
         // The remainder row (part=1) shares the same (id, cnd) as the equipped
-        // row but must never unequip — clicking it should equip that copy.
+        // row but must never unequip - clicking it should equip that copy.
         isActive =
           v.part !== 1 && active === it.id && (!cndAware || activeCnd === it.cnd);
       if (isActive) {
@@ -173,7 +173,7 @@
         // Suppress the split until the game confirms equippedWeapWhole, but
         // only when switching to a genuinely different weapon. If the same
         // (id, cnd) is already equipped (remainder-row click), equippedWeapWhole
-        // cannot have changed — no flash is possible and no suppression needed.
+        // cannot have changed - no flash is possible and no suppression needed.
         // Setting the flag in that case would leave it stuck (the snapshot never
         // changes, so refreshEquip is never sent and the split never returns).
         virtEquipPending = prevId !== it.id ||
@@ -217,7 +217,7 @@
       if (virt.length !== prevLen) scroller.render({ listOnly: !0 });
     } else if (action === 'render') scroller.render(arg);
     else if (action === 'damrefresh') {
-      // DAM values changed (degradation/skill) — re-read and repaint the rows.
+      // DAM values changed (degradation/skill) - re-read and repaint the rows.
       damMap = loadDamMap();
       scroller.render({ listOnly: !1 });
     } else if (action === 'refresh') {

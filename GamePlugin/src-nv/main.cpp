@@ -1,24 +1,27 @@
+/*
+ * Copyright (c) 2026 Aidan Lee-Calamera (aka Aidan's Lab). 
+ * All rights reserved.
+ *
+ * This source code is licensed under the Creative Commons
+ * Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0).
+ *
+ * You are free to share and adapt this code under the following conditions:
+ *  - Attribution: You must give appropriate credit and provide a link to the license.
+ *  - Non-Commercial: You may not use this material for commercial purposes.
+ *  - ShareAlike: If you alter, transform, or build upon this work, you must
+ *    distribute your contributions under the same CC BY-NC-SA 4.0 license.
+ *
+ * You may obtain a full copy of the License text in the LICENSE file in the
+ * root directory of this project repository or online at:
+ * https://creativecommons.org/licenses/by-nc-sa/4.0/
+ */
+
 /**
- * main.cpp — xNVSE Plugin for Fallout New Vegas Pip-Boy 3000 Sync
+ * main.cpp - xNVSE Plugin for Fallout New Vegas Pip-Boy 3000 Sync
  * 
  * This plugin hooks into Fallout: New Vegas via xNVSE to read the player's
  * stats and inventory, then writes JSON snapshots to a Windows Named Pipe
  * for the companion app to consume.
- * 
- * BUILD REQUIREMENTS:
- * - Visual Studio 2019 or 2022 with C++ Desktop Development workload
- * - xNVSE SDK: https://github.com/xNVSE/NVSE
- * - Target platform: x86 (32-bit) — Fallout NV is 32-bit
- * 
- * BUILD STEPS:
- * 1. Clone xNVSE: git clone https://github.com/xNVSE/NVSE.git
- * 2. Open this project in Visual Studio
- * 3. Set include paths to point to the xNVSE source (nvse/ directory)
- * 4. Build as Release x86
- * 5. Copy the resulting .dll to <FNV>/Data/NVSE/Plugins/
- * 
- * The plugin creates a Named Pipe at: \\.\pipe\FalloutPipBoySync
- * The companion app connects to this pipe to receive player data.
  */
 
 #include <algorithm>
@@ -61,8 +64,10 @@
 #define PLUGIN_VERSION 32
 
 // Write FalloutPipBoySync.log beside this DLL (Data/NVSE/Plugins/).
+// TEMP: flipped on to chase the torch-off-while-Pip-Boy-open bug via
+// TORCH-DIAG log lines - flip back to 0 once root-caused.
 #ifndef PIPBOY_VERBOSE_LOG
-#define PIPBOY_VERBOSE_LOG 1
+#define PIPBOY_VERBOSE_LOG 0
 #endif
 
 // How often to snapshot player state (in milliseconds). Lower = less delay
@@ -139,72 +144,39 @@ static DWORD g_lastSnapshotTime = 0;
 static std::atomic<bool> g_saveLoadPending(false);
 static std::atomic<bool> g_mainMenuPending(false);
 
-// Set by the companion app (SYNC_LOCK / SYNC_UNLOCK) while it performs the
+// Set by the companion app (SYNC_LOCK/SYNC_UNLOCK) while it performs the
 // initial Pip-Boy sync. Disables player controls, freezes the game clock, and
-// shows a "please wait" message so nothing can move or act mid-sync.
+// shows a syncing pop up so nothing can move or act mid-sync.
 // Reconciled on the main thread in MainGameLoop; auto-cleared if the
 // companion disconnects so the player is never left stuck.
 static std::atomic<bool> g_syncLockRequested(false);
 
 // Commands received from the companion app (Pip-Boy initiated actions).
-// Queued by the pipe thread, executed on the main thread in MainGameLoop —
+// Queued by the pipe thread, executed on the main thread in MainGameLoop -
 // calling game functions from a background thread is unsafe.
 static std::mutex g_commandMutex;
 static std::vector<std::string> g_commandQueue;
 
 static NVSEScriptInterface *g_scriptInterface = nullptr;
 
-// xNVSE per-plugin control disable — does not corrupt vanilla
-// DisablePlayerControls stacks used by mods such as MrShersh Functional
-// Backpack. Bitmask 125 = movement | pipboy | fighting | POV |
-// rollover | sneak. (Looking is handled separately via vanilla command)
+// xNVSE per-plugin control disable - does not corrupt vanilla
+// DisablePlayerControls stacks used by other mods.
+// Bitmask 125 = movement | pipboy | fighting | POV | rollover | sneak.
 static const char *kSyncDisableControlsCmd = "DisablePlayerControlsAltEx 125";
 static const char *kSyncEnableControlsCmd = "EnablePlayerControlsAltEx 125";
 
-// Freezes the world without opening any menu, so our injected HUD overlay and
-// the plugin's own MainGameLoop hook (which drives command execution and the
-// overlay itself) keep running normally — a true engine pause (e.g. the ESC
-// menu) would stop those too.
-//
-// SetGlobalTimeMultiplier replaces the earlier "TFC 1" + "SetUFOCamSpeedMult
-// 0" combo (matching the FO3 plugin, which moved to this for a different
-// reason — TFC's argument form hit a CallGameCommand bug that doesn't apply
-// here, since NV's RunScriptLine2 executes full script lines including
-// arguments correctly). The win for NV specifically: TFC hands WASD/mouse to
-// a separate free-camera flight controller that reads raw input directly,
-// bypassing kSyncDisableControlsCmd entirely — SetUFOCamSpeedMult 0 was only
-// ever a patch over that leak. SetGlobalTimeMultiplier never detaches the
-// camera in the first place, so there's no separate input path to plug.
-//
-// Two OTHER alternatives were tried and rejected before TFC (see commit
-// history): "tai" (Toggle AI) only blocks NEW AI decisions — an NPC already
-// walking a path kept walking it to completion — and SetGameSpeed scales
-// animation/physics/projectile timing but doesn't touch AI package evaluation
-// or in-progress movement, same failure. SetGlobalTimeMultiplier avoids both:
-// it scales the actual game clock that AI package re-evaluation timers read,
-// not just the animation/physics timestep — confirmed in-game to stop NPCs
-// in place, including mid-path.
+// Freezes the world.
 static const char *kSyncFreezeWorldCmd = "SetGlobalTimeMultiplier 0.00001 1";
 static const char *kSyncUnfreezeWorldCmd = "SetGlobalTimeMultiplier 1 1";
 
 // Extra height (game units) added to each device-dropped item's spawn
-// position, measured from the GROUND at the item's own (x, y) — matching how
-// vanilla drops sit relative to the ground, not the player. The engine's
-// internal drop placement (inside the RemoveItem-drop path — it takes no
-// position arguments) measured out at up to ~26 units BELOW the player's
-// feet on slopes/stairs (DROP-DIAG logs), leaving items clipped into the
-// ground. RemoveItem returns the newly created world reference before its
-// 3D/havok is loaded (loading is queued), so fixing posZ right then means
-// the model and physics spawn at the corrected height and the item
-// free-falls the last bit naturally. Tune here.
+// position, measured from the GROUND at the item's own position (x, y).
 static const float kDropZOffset = 50.0f;
 
-// TES::GetTerrainHeight — exterior terrain height at (x, y). The TES
-// singleton (*(TES**)0x11DEA10) and the 0x4572E0 call both come from JIP LN
-// NVSE's SDK (nvse/GameData.h), the same long-shipped source the DropAlt
-// port below is based on. Returns false in interiors (no LAND record there —
-// "ground" is arbitrary collision geometry the engine's own placement
-// already handles), in which case the caller keeps the engine-chosen Z.
+// TES::GetTerrainHeight - exterior terrain height at (x, y).
+// Returns false in interiors (no LAND record there - "ground" is arbitrary
+// collision geometry the engine's own placement already handles), in which
+// case the caller keeps the engine-chosen Z.
 static bool GetTerrainHeightAt(float x, float y, float *outZ) {
   void *tes = *(void **)0x11DEA10;
   if (!tes)
@@ -285,9 +257,6 @@ static void PipBoyLogSnapshotOut(const std::string &snapshot) {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MENU / MOD COMPATIBILITY HELPERS
-// Functional Backpack uses the vanilla container menu — player inventory snapshots
-// run live during container UI so the physical Pip-Boy stays in sync. Other mod
-// gameplay menus (barter, repair, etc.) still pause snapshots.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 static UInt32 GetOpenMenuMask() {
@@ -404,7 +373,7 @@ static int GetWornConditionPct(PlayerCharacter *player, TESForm *baseForm) {
           return GetInventoryItemConditionPct(baseForm, xdl);
       }
     }
-    break; // found the form's entry; no worn list ⇒ pristine worn item (100)
+    break; // found the form's entry; no worn list = pristine worn item (100)
   }
   return 100;
 }
@@ -470,13 +439,13 @@ static float GetExplosiveWeaponBaseDamage(TESObjectWEAP *weap,
   return 0.0f;
 }
 
-// Displayed weapon DAM, mirroring the game: Dam = (impact + explosion) × Skill
-// × Cond, with a post-multiply Bonus for melee/thrown (STR × 0.5) and unarmed
-// ((Unarmed/20)+0.5).  attackDmg.damage stores the total damage across all
-// projectiles; the game's "4.9×7" shotgun display is cosmetic only.  For
-// non-melee types the explosion chain is probed and added (grenade/launcher
-// weapons); ordinary firearms resolve to 0 there and are unchanged.  Returns 0
-// when base damage cannot be resolved so the Pip-Boy keeps its DAT value.
+// Displayed weapon DAM, mirroring the game: Dam = (impact + explosion) x Skill
+// x Cond, with a post-multiply Bonus for melee/thrown (STR x 0.5) and unarmed
+// ((Unarmed/20)+0.5). attackDmg.damage stores the total damage across all
+// projectiles. For non-melee types the explosion chain is probed and added
+// (grenade/launcher weapons); ordinary firearms resolve to 0 there and are
+// unchanged. Returns 0 when base damage cannot be resolved so the Pip-Boy
+// keeps its DAT value.
 static int ComputeWeaponDisplayDamage(PlayerCharacter *player,
                                       TESObjectWEAP *weap, int conditionPct) {
   if (!weap)
@@ -490,23 +459,14 @@ static int ComputeWeaponDisplayDamage(PlayerCharacter *player,
   //   6 TwoHandAutomatic, 7 TwoHandRifleEnergy, 8 TwoHandHandle,
   //   9 TwoHandLauncher, 10 OneHandGrenade, 11 OneHandMine,
   //   12 OneHandLunchboxMine, 13 OneHandThrown (NV spears).
-
-  // Base always starts with the weapon's direct impact damage.
-  // attackDmg.damage already stores the TOTAL damage across all projectiles
-  // (the game Pip-Boy "4.9×7" display is purely cosmetic formatting of the
-  // same total — no multiplication is needed here).
-  // For all non-melee types also probe the projectile/ammo chain for explosion
-  // damage (handles grenades, launchers, and mod weapons with explosive ammo
-  // regardless of their type code; ordinary firearms return 0 here since bullet
-  // projectiles have no explosionForm).
   float base = (float)weap->attackDmg.damage;
   if (wtype > 2)
     base += GetExplosiveWeaponBaseDamage(weap, player);
   if (base <= 0.0f)
     return 0;
 
-  // weaponSkill is the ActorValue code (Guns / Energy Weapons / Melee / Unarmed
-  // …) the engine uses for this weapon. Fn_03 is the effective AV.
+  // weaponSkill is the ActorValue code (Guns/Energy Weapons/Melee/Unarmed…)
+  // the engine uses for this weapon. Fn_03 is the effective AV.
   float skill = 100.0f;
   if (player)
     skill = player->avOwner.Fn_03(weap->weaponSkill);
@@ -525,13 +485,13 @@ static int ComputeWeaponDisplayDamage(PlayerCharacter *player,
   if (condMult > 1.0f)
     condMult = 1.0f;
 
-  // Pip-Boy display: Dam = Dmg × Skill × Cond (+ Bonus for melee/unarmed/thrown).
+  // Pip-Boy display: Dam = Dmg x Skill x Cond (+ Bonus for melee/unarmed/thrown).
   // Bonus is added AFTER the multipliers. For melee the engine rounds the
-  // skill×condition product, then adds the Melee Damage bonus as a truncated
-  // integer (e.g. core 9.5→10, bonus 2.5→2, total 12). Applying truncate or
+  // skill x condition product, then adds the Melee Damage bonus as a truncated
+  // integer (e.g. core 9.5->10, bonus 2.5->2, total 12). Applying truncate or
   // round to the combined float alone breaks one weapon or the other.
   // Thrown weapons (type 13, OneHandThrown) also receive the MeleeDamage AV
-  // bonus in the Pip-Boy display, mirroring observed in-game behaviour.
+  // bonus in the Pip-Boy display, mirroring in-game behaviour.
   const float core = base * skillMult * condMult;
 
   if (player && (wtype == TESObjectWEAP::kWeapType_OneHandMelee ||
@@ -725,12 +685,11 @@ static int ComputePipRepTier(int fame, int infamy, int goodThr, int badThr,
   return 5; // Neutral
 }
 
-// Reading reputation costs 13 factions × 5 NVSE script-expression evaluations,
-// far too heavy to repeat on every snapshot for a value that changes rarely. Re-evaluate at most every FACTION_REFRESH_INTERVAL_MS and reuse the
-// cached results in between; the cache is invalidated on save load / new game
-// so a different character never shows stale rep. Snapshot diffing is
-// unaffected — cached values keep unchanged snapshots byte-identical.
-// Main-thread only (BuildPlayerSnapshot and MessageHandler both run there).
+// Reading reputation costs 13 factions x 5 NVSE script-expression evaluations,
+// far too heavy to repeat on every snapshot for a value that changes rarely.
+// Re-evaluate at most every FACTION_REFRESH_INTERVAL_MS and reuse the
+// cached results in between. The cache is invalidated on save load / new game
+// so a different character never shows stale rep.
 #define FACTION_REFRESH_INTERVAL_MS 3000
 
 static const size_t kFactionRepCount =
@@ -773,7 +732,7 @@ static void RefreshFactionRepState() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// JSON HELPER (Minimal — no external dependencies)
+// JSON HELPER (Minimal - no external dependencies)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 class JsonBuilder {
@@ -912,8 +871,7 @@ static const char *GetFormTypeString(UInt8 typeID) {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // PIP-BOY LIGHT (in-game flashlight)
-// Same approach as JIP LN NVSE TogglePipBoyLight: check whether the PipBoyLight
-// spell effect is active on the player.
+// Check whether the PipBoyLight spell effect is active on the player.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 static bool IsPipBoyLightOn(PlayerCharacter *player) {
@@ -931,103 +889,62 @@ static bool IsPipBoyLightOn(PlayerCharacter *player) {
 static SpellItem *GetPipBoyLightSpell() { return *(SpellItem **)0x11C358C; }
 
 #if defined(_M_IX86)
-// Globals for the asm toggle — do NOT read turnON from the stack inside the
-// naked function; calling it from __try shifts the frame and breaks OFF (UI
-// refresh was re-enabling the light with a garbage edx value).
+// Globals for the toggle (read by all three functions below; pipboyManager
+// has no parameter slot in the original signatures, so it's threaded through
+// here same as before).
 static UInt32 s_turnONForToggle = 0;
 static void *s_pipboyManagerForToggle = nullptr;
 
-// Engine-native Pip-Boy light toggle — copied from JIP LN NVSE
-// TogglePipBoyLight.
-__declspec(naked) static void __fastcall EngineTogglePipBoyLight(
-    PlayerCharacter *thePlayer, SpellItem *pipBoyLight, UInt32 turnON) {
-  __asm {
-    push 0
-    cmp dword ptr s_turnONForToggle, 0
-    jz turnOFF
-    push edx
-    add ecx, 0x88
-    mov eax, [ecx]
-    call dword ptr [eax]
-    jmp finish
-  turnOFF:
-    push 0
-    add edx, 0x18
-    push edx
-    add ecx, 0x94
-    mov eax, 0x824400
-    call eax
-  finish:
-    mov ecx, dword ptr s_pipboyManagerForToggle
-    mov edx, dword ptr s_turnONForToggle
-    push 1
-    push edx
-    push 0
-    push ecx
-    push 1
-    push edx
-    push 1
-    mov eax, 0x7FA310
-    call eax
-    pop ecx
-    mov eax, 0x7FA310
-    call eax
-    ret 4
+// Engine-native Pip-Boy light toggle/sync.
+static void EngineTogglePipBoyLight(PlayerCharacter *thePlayer,
+                                     SpellItem *pipBoyLight, UInt32 turnON) {
+  if (turnON) {
+    void *magicCaster = &thePlayer->magicCaster;
+    void **vtbl = *(void ***)magicCaster;
+    using CastFn = void(__thiscall *)(void *, SpellItem *, UInt32);
+    ((CastFn)vtbl[0])(magicCaster, pipBoyLight, 0);
+  } else {
+    ThisStdCall<void>(0x824400, &thePlayer->magicTarget,
+                       &pipBoyLight->magicItem, (UInt32)0, (UInt32)0);
+  }
+
+  ThisStdCall<void>(0x7FA310, s_pipboyManagerForToggle, (UInt32)1, turnON,
+                     (UInt32)1, s_pipboyManagerForToggle, (UInt32)0, turnON);
+  ThisStdCall<void>(0x7FA310, (void *)1);
+}
+
+// Apply or remove the PipBoyLight spell only (same ON/OFF branch as above,
+// without the FOPipboyManager sync tail).
+static void EngineApplyPipBoyLightEffectOnly(PlayerCharacter *thePlayer,
+                                              SpellItem *pipBoyLight,
+                                              UInt32 turnON) {
+  if (turnON) {
+    void *magicCaster = &thePlayer->magicCaster;
+    void **vtbl = *(void ***)magicCaster;
+    using CastFn = void(__thiscall *)(void *, SpellItem *, UInt32);
+    ((CastFn)vtbl[0])(magicCaster, pipBoyLight, 0);
+  } else {
+    ThisStdCall<void>(0x824400, &thePlayer->magicTarget,
+                       &pipBoyLight->magicItem, (UInt32)0, (UInt32)0);
   }
 }
 
-// Apply or remove the PipBoyLight spell only — no FOPipboyManager UI update
-// (0x7FA310), which drives the green mesh glow while the Pip-Boy menu is open.
-__declspec(naked) static void __fastcall EngineApplyPipBoyLightEffectOnly(
-    PlayerCharacter *thePlayer, SpellItem *pipBoyLight, UInt32 turnON) {
-  __asm {
-    push 0
-    cmp dword ptr s_turnONForToggle, 0
-    jz turnOFF
-    push edx
-    add ecx, 0x88
-    mov eax, [ecx]
-    call dword ptr [eax]
-    ret 4
-  turnOFF:
-    push 0
-    add edx, 0x18
-    push edx
-    add ecx, 0x94
-    mov eax, 0x824400
-    call eax
-    ret 4
-  }
-}
-
-// FOPipboyManager light UI only (0x7FA310) — spell effect is unchanged.
-__declspec(naked) static void EngineSyncPipBoyManagerLightOnly() {
-  __asm {
-    mov ecx, dword ptr s_pipboyManagerForToggle
-    mov edx, dword ptr s_turnONForToggle
-    push 1
-    push edx
-    push 0
-    push ecx
-    push 1
-    push edx
-    push 1
-    mov eax, 0x7FA310
-    call eax
-    pop ecx
-    mov eax, 0x7FA310
-    call eax
-    ret
-  }
+// FOPipboyManager light UI only (0x7FA310).
+static void EngineSyncPipBoyManagerLightOnly() {
+  ThisStdCall<void>(0x7FA310, s_pipboyManagerForToggle, (UInt32)1,
+                     s_turnONForToggle, (UInt32)1, s_pipboyManagerForToggle,
+                     (UInt32)0, s_turnONForToggle);
+  ThisStdCall<void>(0x7FA310, (void *)1);
 }
 #endif
 
 // Companion torch intent (physical Pip-Boy ITEMS shortcut). Spell-only toggles
-// while the in-game Pip-Boy UI is on screen skip the manager UI; reconcile on close.
+// while the in-game Pip-Boy UI is on screen skip the manager UI, reconcile on close.
 static bool g_companionTorchDesired = false;
 static bool g_pipBoyChromeSession = false;
 static bool g_pipBoyTorchUiWasActive = false;
 static bool g_lastObservedTorchOn = false;
+static bool g_companionTorchPending = false;
 
 // True while the Pip-Boy 3D chrome is visible (tabs or Repair/Mod from Pip-Boy).
 static bool IsPipBoyTorchUiActive() {
@@ -1074,7 +991,7 @@ static void SetPipBoyLightScriptFallback(PlayerCharacter *player, bool wantOn) {
   }
 }
 
-// Spell effect only — skip TogglePipBoyLight (that also updates Pip-Boy UI glow).
+// Spell effect only, skip TogglePipBoyLight.
 static void SetPipBoyLightSpellOnlyFallback(PlayerCharacter *player, bool wantOn) {
   if (!player)
     return;
@@ -1142,15 +1059,29 @@ static void SetPipBoyLight(PlayerCharacter *player, bool wantOn,
   if ((IsPipBoyLightOn(player) ? 1u : 0u) == turnON)
     return;
 
+  // From here we're committed to changing the state. Effect removal is
+  // queued (and while the Pip-Boy menu pauses gameplay, never processed
+  // until it closes), so IsPipBoyLightOn() may keep reading the stale
+  // pre-toggle value indefinitely - mark the change as in-flight so the
+  // main-loop observer doesn't mistake those stale reads for a user toggle
+  // and overwrite g_companionTorchDesired (see the observer block).
+  g_companionTorchPending = true;
+
   if (suppressPipBoyGlow) {
 #if defined(_M_IX86)
     ApplyPipBoyLightEffectOnly(player, pipBoyLight, wantOn);
 #else
     SetPipBoyLightSpellOnlyFallback(player, wantOn);
 #endif
-    if ((IsPipBoyLightOn(player) ? 1u : 0u) != turnON)
+    const bool afterNative = IsPipBoyLightOn(player);
+    PipBoyLog("TORCH-DIAG", "suppressPipBoyGlow wantOn=%d afterNative=%d",
+              wantOn ? 1 : 0, afterNative ? 1 : 0);
+    if ((afterNative ? 1u : 0u) != turnON) {
       SetPipBoyLightSpellOnlyFallback(player, wantOn);
-    // OFF clears the green mesh glow; ON stays spell-only (manager ON causes glow).
+      PipBoyLog("TORCH-DIAG", "suppressPipBoyGlow afterScriptFallback=%d",
+                IsPipBoyLightOn(player) ? 1 : 0);
+    }
+    // OFF clears the green mesh glow, ON stays spell-only.
     if (!wantOn)
       SyncPipBoyManagerLight(false);
     PipBoyLog("TORCH", "%s (spell only, Pip-Boy menu open)",
@@ -1174,7 +1105,6 @@ static void SetPipBoyLight(PlayerCharacter *player, bool wantOn,
   SetPipBoyLightScriptFallback(player, wantOn);
 #endif
 
-  // Belt-and-suspenders if the engine path did not reach the desired state.
   if ((IsPipBoyLightOn(player) ? 1u : 0u) != turnON)
     SetPipBoyLightScriptFallback(player, wantOn);
 
@@ -1196,6 +1126,14 @@ static void ReconcileCompanionTorchAfterPipBoyClose() {
   InterfaceManager *im = InterfaceManager::GetSingleton();
   if (!im || !im->pipboyManager)
     return;
+
+  // Same reasoning as SetPipBoyLight: the toggles below may not be readable
+  // via IsPipBoyLightOn() for another frame - keep the observer from
+  // mistaking that lag for a user-initiated change.
+  g_companionTorchPending = true;
+
+  PipBoyLog("TORCH-DIAG", "reconcile enter desired=%d beforeAny=%d",
+            g_companionTorchDesired ? 1 : 0, IsPipBoyLightOn(player) ? 1 : 0);
 
   if (g_companionTorchDesired) {
 #if defined(_M_IX86)
@@ -1225,8 +1163,14 @@ static void ReconcileCompanionTorchAfterPipBoyClose() {
 #else
     SetPipBoyLight(player, false, false);
 #endif
-    if (IsPipBoyLightOn(player))
+    const bool afterNative = IsPipBoyLightOn(player);
+    PipBoyLog("TORCH-DIAG", "reconcile OFF afterNative=%d",
+              afterNative ? 1 : 0);
+    if (afterNative) {
       SetPipBoyLightScriptFallback(player, false);
+      PipBoyLog("TORCH-DIAG", "reconcile OFF afterScriptFallback=%d",
+                IsPipBoyLightOn(player) ? 1 : 0);
+    }
     PipBoyLog("TORCH", "reconciled OFF after Pip-Boy menu close");
     }
 }
@@ -1244,14 +1188,14 @@ std::string BuildPlayerSnapshot() {
     JsonBuilder json;
     json.beginObject();
 
-    // Game identifier
-  // NOTE: no timestamp field — the snapshot must be byte-identical when the
+  // Game identifier
+  // NOTE: no timestamp field - the snapshot must be byte-identical when the
   // player state hasn't changed, so the pipe thread can skip redundant sends.
     json.keyStr("game", "FNV");
 
-  // Load order — runtime mod index to plugin filename. The companion app uses
-  // this to remap form IDs to the Pip-Boy's fixed plugin offsets (e.g. GRA at
-  // 0x08) which do not follow the player's live load order.
+  // Load order, runtime mod index to plugin filename. The companion app uses
+  // this to remap form IDs to the Pip-Boy's fixed plugin offsets
+  // which do not follow the player's live load order.
   json.key("loadOrder");
   json.beginArray();
   {
@@ -1273,7 +1217,7 @@ std::string BuildPlayerSnapshot() {
   }
   json.endArray();
 
-    // ─── Player attributes ─────────────────────────────────────────────
+    // --- Player attributes ---
     json.key("player");
     json.beginObject();
     {
@@ -1288,39 +1232,32 @@ std::string BuildPlayerSnapshot() {
         json.keyInt("level", player->avOwner.Fn_0A());
 
         // Hit Points
-    // hp is emitted as a whole number: FNV heals in fractional ticks
-    // (e.g. +0.1/sec regen), and emitting decimals would make every tick
-    // look like a changed snapshot, spamming the pipe and serial link.
-    // Rounded UP to match the game HUD, which displays ceil(health)
-    // (you survive at 0.4 HP showing "1", never "0").
+        // hp is emitted as a whole number: FNV heals in fractional ticks
+        // (e.g. +0.1/sec regen), and emitting decimals would make every tick
+        // look like a changed snapshot, spamming the pipe and serial link.
+        // Rounded UP to match the game HUD, which displays ceil(health)
         float maxHP = player->avOwner.Fn_01(kAV_Health);
         float curHP = player->avOwner.Fn_03(kAV_Health);
-    json.keyInt("hp", (int)ceilf(curHP));
+        json.keyInt("hp", (int)ceilf(curHP));
         json.keyFloat("maxHP", maxHP);
 
-    // Action Points — floor to match game HUD; fractional regen ignored for
-    // sync.
+        // Action Points - floor to match game HUD, fractional regen ignored for sync.
         float maxAP = player->avOwner.Fn_01(kAV_ActionPoints);
         float curAP = player->avOwner.Fn_03(kAV_ActionPoints);
-    json.keyInt("ap", (int)floorf(curAP));
-    json.keyInt("maxAP", (int)(maxAP + 0.5f));
+        json.keyInt("ap", (int)floorf(curAP));
+        json.keyInt("maxAP", (int)(maxAP + 0.5f));
 
-        // Carry Weight
-    // maxWg is the max carry weight AV (includes Strong Back / implants /
-    // buffs).
+        // Carry Weight, maxWg is the max carry weight AV (includes Strong Back/buffs).
         float maxWg = player->avOwner.Fn_01(kAV_CarryWeight);
-    json.keyInt("maxWg", (int)(maxWg + 0.5f));
-    // wg is the player's actual carried inventory weight, taken straight from
-    // the engine (AV 46). Truncated (floor) to match the in-game HUD display.
-    float curWg = player->avOwner.Fn_03(kAV_InventoryWeight);
-    json.keyInt("wg", (int)floorf(curWg));
+        json.keyInt("maxWg", (int)(maxWg + 0.5f));
+        // wg is the player's actual carried inventory weight,
+        // taken straight from the engine (AV 46).
+        float curWg = player->avOwner.Fn_03(kAV_InventoryWeight);
+        json.keyInt("wg", (int)floorf(curWg));
 
         // Karma
         float karma = player->avOwner.Fn_03(kAV_Karma);
         json.keyFloat("karma", karma);
-
-    // Faction reputation (FNV Pip-Boy GENERAL screen) — served from the
-    // throttled cache; see RefreshFactionRepState.
     {
       const DWORD now = GetTickCount();
       if (!g_factionStateValid ||
@@ -1345,7 +1282,7 @@ std::string BuildPlayerSnapshot() {
     }
     json.endArray();
 
-        // Limb Conditions (0-100 percentage)
+    // Limb Conditions (0-100 percentage)
     json.keyFloat("perceptioncondition",
                   player->avOwner.Fn_03(kAV_PerceptionCondition));
     json.keyFloat("endurancecondition",
@@ -1359,17 +1296,15 @@ std::string BuildPlayerSnapshot() {
     json.keyFloat("rightmobilitycondition",
                   player->avOwner.Fn_03(kAV_RightMobilityCondition));
 
-    // Pip-Boy flashlight (hold Pip-Boy key / toggle hotkey in-game)
+    // Pip-Boy flashlight (hold Pip-Boy key/toggle hotkey in-game)
     json.key("torch");
     json.valueBool(IsPipBoyLightOn(player));
 
-    // XP — AV 24; read with Fn_03 (current/modified value). Only pushed to the
-    // device on first sync, save-load, and level-up (not every incremental tick)
-    // so the sync engine gates transmission; the plugin just always emits it.
+    // XP - AV 24; read with Fn_03 (current/modified value). Only pushed to the
+    // device on first sync, save-load, and level-up.
     json.keyInt("xp", (int)player->avOwner.Fn_03(kAV_XP));
 
-    // S.P.E.C.I.A.L. — effective values (GetActorValue), includes equipment
-    // modifiers such as Metal Armor's AGILITY -1. Fn_01 is base only.
+    // S.P.E.C.I.A.L. - effective values (GetActorValue), includes equipment modifiers.
         json.key("special");
         json.beginObject();
         {
@@ -1383,7 +1318,7 @@ std::string BuildPlayerSnapshot() {
         }
         json.endObject();
 
-    // Skills — effective values (GetActorValue), includes equipment bonuses.
+    // Skills - effective values (GetActorValue), includes equipment bonuses.
         json.key("skills");
         json.beginObject();
         {
@@ -1404,25 +1339,25 @@ std::string BuildPlayerSnapshot() {
         }
         json.endObject();
 
-    // ─── Equipped items (integer form IDs for Pip-Boy sync) ──────────
+    // --- Equipped items (integer form IDs for Pip-Boy sync) ---
     TESObjectWEAP *eqWeapon = player->GetEquippedWeapon();
     json.keyInt("equippedweap", eqWeapon ? (int)eqWeapon->refID : 0);
 
-    // Condition of the equipped weapon stack — lets the Pip-Boy flag only the
+    // Condition of the equipped weapon stack - lets the Pip-Boy flag only the
     // matching condition row as equipped when several conditions of one weapon
     // are carried at once.
     int equippedWeapCnd = eqWeapon ? GetWornConditionPct(player, eqWeapon) : 100;
     json.keyInt("equippedweapcnd", equippedWeapCnd);
 
-    // Thrown weapons ready the whole stack, so the Pip-Boy keeps them as one
-    // row; all other weapons equip a single copy and the list splits it off.
+    // Thrown weapons equip the whole stack, so the Pip-Boy keeps them as one
+    // row, all other weapons equip a single copy and the list splits it off.
     json.keyBool("equippedweapwhole", eqWeapon && IsThrownWeapon(eqWeapon));
 
-    // ─── Weapon ammo (for Pip-Boy ammo selection) ────────────────────
+    // --- Weapon ammo (for Pip-Boy ammo selection) ---
     // A weapon's ammo is a BGSAmmoForm whose inner form is either a single
     // TESAmmo or a BGSListForm of several TESAmmo (e.g. the 10mm pistol can
-    // take standard / JHP / hand load). "current" is the ammo actually loaded
-    // right now; "usable" is every ammo type the equipped weapon accepts. The
+    // take standard/HP/hand load). "current" is the ammo actually loaded
+    // right now, "usable" is every ammo type the equipped weapon accepts. The
     // Pip-Boy uses these to restrict selection and dim unusable ammo.
     json.key("weaponammo");
     json.beginObject();
@@ -1479,8 +1414,8 @@ std::string BuildPlayerSnapshot() {
     }
     json.endArray();
 
-    // Conditions parallel to "equippedapparel" (same iteration order + dedup),
-    // so the Pip-Boy can flag only the worn condition row of each apparel form.
+    // Conditions parallel to "equippedapparel", so the Pip-Boy
+    // can flag only the worn condition row of each apparel form.
     json.key("equippedapparelcnd");
     json.beginArray();
     {
@@ -1505,10 +1440,10 @@ std::string BuildPlayerSnapshot() {
     }
     json.endObject();
 
-    // ─── Inventory ─────────────────────────────────────────────────────
-  // Stackable weapons (e.g. throwing spears) may occupy multiple container
-  // entries after equipping (worn stack + bag stack). Sum by formId so sync
-  // sees the true total count instead of whichever entry happened to be last.
+    // --- Inventory ---
+    // Stackable weapons (e.g. throwing spears) may occupy multiple container
+    // entries after equipping (worn stack + bag stack). Sum by formId so sync
+    // sees the true total count instead of whichever entry happened to be last.
     json.key("inventory");
     json.beginArray();
     {
@@ -1548,7 +1483,7 @@ std::string BuildPlayerSnapshot() {
         // but instances of differing condition live as separate ExtraDataLists in
         // its extendData (each optionally carrying an ExtraCount for how many
         // share that data). Split the total across those per-condition sub-stacks
-        // so the Pip-Boy lists them apart; any remainder are pristine,
+        // so the Pip-Boy lists them apart, any remainder are pristine,
         // full-condition items that carry no extra data.
         int remaining = count;
                 if (entry->extendData) {
@@ -1610,7 +1545,7 @@ std::string BuildPlayerSnapshot() {
     }
     json.endArray();
 
-    // ─── Perks ─────────────────────────────────────────────────────────
+    // --- Perks ---
     json.key("perks");
     json.beginArray();
     {
@@ -1640,14 +1575,13 @@ std::string BuildPlayerSnapshot() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // PIP-BOY UI REFRESH
 // Direct EquipItem/UnequipItem calls update game data but do not repaint the
-// open Pip-Boy menus. Mirror JIP LN NVSE's RefreshItemListBox (used by the
-// RefreshItemsList script command) so item counts and the HP header update
-// immediately without switching tabs.
+// open Pip-Boy menus. Item counts and the HP header update immediately
+// without switching tabs.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 static void RefreshPipBoyUI() {
   if (InterfaceManager::IsMenuVisible(kMenuType_Inventory)) {
-    // InventoryMenu::Refresh — rebuilds the item list
+    // InventoryMenu::Refresh - rebuilds the item list
     CdeclCall(0x782A90);
     // HP shown in the Pip-Boy chrome is sourced from stats menu data; refresh
     // it even while the ITEMS tab is active (tab-switching did this implicitly)
@@ -1666,43 +1600,33 @@ static void RefreshPipBoyUI() {
 // VANILLA EQUIP COMMANDS
 // Direct Actor::EquipItem() does not run the full worn-item pipeline that the
 // in-game Pip-Boy uses, so in-game equips won't conflict and the model won't
-// update. Route through the game's own equipitem / unequipitem script commands
+// update. Route through the game's own equipitem/unequipitem script commands
 // (same path as the console and GECK) via Script::RunScriptLine2.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 static bool RunVanillaItemCommand(PlayerCharacter *player, TESForm *form,
                                   bool equip) {
   std::stringstream ss;
-  // Run with player as thisObj — same as an actor script calling EquipItem
+  // Run with player as thisObj - same as an actor script calling EquipItem
   ss << (equip ? "EquipItem " : "UnequipItem ") << std::hex << std::uppercase
      << std::setfill('0') << std::setw(8) << form->refID;
   return Script::RunScriptLine2(ss.str().c_str(), player, true);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// PIP-BOY COMMAND EXECUTION
-// Executes a command line received from the companion app. Lines look like:
-//   "USE 0x0001519e"      — consume an aid item (EquipItem on an ingestible)
-//   "EQUIP 0x0000434f"    — equip a weapon/apparel
-//   "UNEQUIP 0x000340c8"  — unequip a weapon/apparel
-//   "TORCH ON" / "TORCH OFF" — toggle the in-game Pip-Boy flashlight
-// MUST be called from the main game thread.
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════════════════════════
 // INITIAL-SYNC LOCK
-// While the companion app runs the initial sync it sends SYNC_LOCK; we disable
+// While the companion app runs the initial sync it sends SYNC_LOCK, we disable
 // the player's controls and inject a custom HUD XML overlay until SYNC_UNLOCK
 // (or disconnect). Must run on the main game thread.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// Engine Tile::ReadXML via temp file — same fallback path JIP LN NVSE uses.
+// Engine Tile::ReadXML via temp file.
 static const UInt32 kTileReadXMLAddr = 0x00A01B00;
 static const char *kSyncWaitTempXmlFile = "pipboy_sync_temp.xml";
 static char s_hudInjectionParentPath[] = "HUDMainMenu/HUDMainMenu";
 
 // GetMenuComponentTile mutates the path (writes NULs over '/' separators).
-// Never pass string literals — use a stack copy each call.
+// Never pass string literals - use a stack copy each call.
 static Tile *GetMenuComponentTileCopy(const char *path) {
   if (!path || !path[0])
     return nullptr;
@@ -1713,7 +1637,7 @@ static Tile *GetMenuComponentTileCopy(const char *path) {
 }
 
 // Inject on menuRoot so screen-relative coordinates are correct (HUDMainMenu
-// is offset/scaled). Text with &center; anchors on x — set x to parent/2.
+// is offset/scaled). Text with &center; anchors on x - set x to parent/2.
 static const char kSyncWaitOverlayXml[] =
     "<rect name=\"PipBoySyncWait\">"
     "<visible> &true; </visible>"
@@ -1857,7 +1781,7 @@ static void RefreshHudAfterSyncUnlock() {
     return;
   // DisablePlayerControlsAltEx (movement flag) forces
   // kHUDState_PlayerDisabledControls. Re-enabling via script does not always
-  // recalculate visibility — Tab/Pip-Boy does.
+  // recalculate visibility - Tab/Pip-Boy does.
   HUDMainMenu::UpdateVisibilityState(HUDMainMenu::kHUDState_RECALCULATE);
   PipBoyLog("SYNC", "HUD visibility recalculated");
 }
@@ -1878,7 +1802,7 @@ static void ResetSyncLockState(bool reenableControls) {
     g_syncControlsDisabled = false;
     RequestHudRefreshAfterSyncUnlock();
   }
-  // Safety net matching g_syncControlsDisabled above — a save/load or exit
+  // Safety net matching g_syncControlsDisabled above - a save/load or exit
   // mid-lock (e.g. companion crashed during sync) must not leave the world
   // permanently frozen.
   if (reenableControls && g_syncWorldFrozen) {
@@ -1955,7 +1879,7 @@ static void ApplySyncLock(bool wantLock) {
 
     if (!g_syncControlsDisabled) {
       // Disable movement, Pip-Boy, fighting, POV switch, looking, rollover and
-      // sneaking — a full "cutscene" style lock so nothing can be done.
+      // sneaking - a full lock so nothing can be done.
       Script::RunScriptLine2(kSyncDisableControlsCmd, player, true);
       // xNVSE's DisablePlayerControlsAltEx misses the camera hook, so the mouse
       // can still move the camera. We apply the vanilla command ONLY for the
@@ -1965,7 +1889,7 @@ static void ApplySyncLock(bool wantLock) {
       g_syncControlsDisabled = true;
     }
     if (!g_syncWorldFrozen) {
-      // Freeze NPCs/projectiles/physics too — player controls alone still let
+      // Freeze NPCs/projectiles/physics too - player controls alone still let
       // the world move around a player who can't react to it.
       Script::RunScriptLine2(kSyncFreezeWorldCmd, player, true);
       PipBoyLog("SYNC", "Lock ON: issued %s", kSyncFreezeWorldCmd);
@@ -2019,12 +1943,7 @@ static int GetItemCountForEquip(PlayerCharacter *player, UInt32 targetFormId) {
 }
 
 // Total owned count of a form: base-container count plus the
-// container-changes delta — C++ port of JIP LN NVSE's GetFormCount
-// (nvse/GameObjects.cpp asm), which its DropAlt uses. GetItemCountForEquip
-// above ignores the base container and skips negative deltas, which is fine
-// for "does the player carry one to equip" but not for "how many can drop":
-// items granted by the base NPC record have countDelta 0 (or negative after
-// partial drops) with the real count living in the base container list.
+// container-changes delta.
 static SInt32 GetTotalFormCount(PlayerCharacter *player, TESForm *form) {
   if (!player || !form)
     return 0;
@@ -2046,7 +1965,7 @@ static SInt32 GetTotalFormCount(PlayerCharacter *player, TESForm *form) {
           : NULL;
   if (entry) {
     if (total != 0) {
-      // Leveled-item entries leave the base count untouched (JIP parity).
+      // Leveled-item entries leave the base count untouched.
       if (!entry->HasExtraLeveledItem()) {
         total += entry->countDelta;
         if (total < 0)
@@ -2073,10 +1992,7 @@ static bool IsThrownWeapon(TESForm *form) {
 
 // Locate the specific carried instance of `baseForm` whose condition matches
 // `wantCnd`, so a Pip-Boy equip targets the row the user actually selected
-// instead of the engine's default (highest-condition) match. Degraded instances
-// carry their own ExtraDataList; pristine, full-condition items carry none, so a
-// 100% request with no matching list resolves to NULL (engine equips a bare
-// item). `found` is false only when no instance of that condition exists.
+// instead of the engine's default (highest-condition) match.
 static ExtraDataList *FindStackByCondition(PlayerCharacter *player,
                                            TESForm *baseForm, int wantCnd,
                                            bool *found) {
@@ -2126,7 +2042,7 @@ static ExtraDataList *FindStackByCondition(PlayerCharacter *player,
     *found = true;
     return wornMatch;
   }
-  // Remaining items carry no extra data → pristine, full condition.
+  // Remaining items carry no extra data = pristine, full condition.
   if (wantCnd >= 100 && remaining > 0) {
     *found = true;
     return nullptr;
@@ -2176,7 +2092,7 @@ static void ExecutePipBoyCommand(const std::string &line) {
   if (verb == "USE" || verb == "EQUIP") {
     int countToEquip = GetItemCountForEquip(player, formId);
     if (countToEquip <= 0) {
-      PipBoyLog("CMD-IN", "%s rejected — item %08X not in player inventory",
+      PipBoyLog("CMD-IN", "%s rejected - item %08X not in player inventory",
                 verb.c_str(), formId);
       return;
     }
@@ -2194,8 +2110,7 @@ static void ExecutePipBoyCommand(const std::string &line) {
       g_lastEquipTime = now;
     }
     if (verb == "EQUIP" && countToEquip > 1 && IsThrownWeapon(form)) {
-      // Thrown weapons: equip the whole stack so the player can throw all of
-      // them (no 1-vs-(N-1) split).
+      // Thrown weapons: equip the whole stack.
       player->EquipItem(form, countToEquip, NULL, 1, false, 1);
     } else if (verb == "EQUIP" && countToEquip > 1 && wantCnd >= 0) {
       // Several instances of one form differ by condition. Equip the exact
@@ -2219,31 +2134,10 @@ static void ExecutePipBoyCommand(const std::string &line) {
     if (!RunVanillaItemCommand(player, form, false))
       player->UnequipItem(form, 1, NULL, 1, false, 1);
   } else if (verb == "DROP") {
-    // wantCnd doubles as the drop count here (same "second space-separated
-    // token" parse used for EQUIP's condition) — the device already decided
-    // 1 vs. the whole stack (Pip.companionDropItem in boot0) and sent that
-    // count.
-    //
-    // Native port of JIP LN NVSE's DropAlt (Cmd_DropAlt_Execute,
-    // functions_jip/jip_fn_inventory.h), single-form case. Vanilla Drop was
-    // making items intermittently vanish; DropAlt exists precisely to work
-    // around those engine bugs and does so by never using the vanilla Drop
-    // path at all — it calls the TESObjectREFR::RemoveItem virtual with the
-    // drop flag set, with two crucial behaviors vanilla Drop lacks:
-    //  - scripted item instances get their ExtraCount stripped and drop as
-    //    single references (a scripted stack dropped whole is a known vanish
-    //    case);
-    //  - only thrown weapons and non-armor stack into one world reference;
-    //    guns and armor drop one reference per unit.
-    // The RemoveItem virtual + argument layout come from xNVSE's own
-    // GameObjects.h/InventoryReference.cpp (the SDK itself calls it), so no
-    // raw address is involved. keepOwner=1 matches DropAlt's default (drops
-    // stay owned by the player — no accidental "stealing your own item
-    // back" flags).
     int dropCount = wantCnd > 0 ? wantCnd : 1;
     SInt32 total = GetTotalFormCount(player, form);
     if (total < 1) {
-      PipBoyLog("CMD-IN", "DROP rejected — item %08X not in player inventory",
+      PipBoyLog("CMD-IN", "DROP rejected - item %08X not in player inventory",
                 formId);
       return;
     }
@@ -2264,20 +2158,6 @@ static void ExecutePipBoyCommand(const std::string &line) {
         (cc && cc->data && cc->data->objList)
             ? cc->data->objList->FindForItem(form)
             : nullptr;
-
-    // RemoveItem returns the world reference it just created for the dropped
-    // item (vtable decl in both xNVSE's and JIP's SDK; JIP simply discards
-    // it). Its 3D model + havok body are QUEUED, not yet loaded, at that
-    // moment — so fixing posZ here moves where they will spawn, with none of
-    // the drawbacks of repositioning after the fact (no 3D reload flicker, no
-    // physics loss, no teleporting into walls: X/Y stay wherever the engine's
-    // own placement chose). Height is kDropZOffset above the GROUND at the
-    // item's own (x, y) when terrain height is available and higher than the
-    // engine-chosen Z (the uphill-slope clipping case); the max() keeps
-    // engine Z when the item sits on a structure ABOVE the terrain (bridge,
-    // building floor in an exterior worldspace) — terrain height there would
-    // bury it under the floor. Each ref is raised once (the set guards
-    // against the engine handing back the same ref for consecutive units).
     std::set<UInt32> raisedRefs;
     auto raiseDropRef = [&raisedRefs](TESObjectREFR *dropped) {
       if (!dropped || !raisedRefs.insert(dropped->refID).second)
@@ -2290,8 +2170,8 @@ static void ExecutePipBoyCommand(const std::string &line) {
     };
 
     if (entry && entry->extendData) {
-      // Per-instance extra data (condition, script state, worn history…)
-      // must ride along with the dropped reference — always re-read the
+      // Per-instance extra data (condition, script state)
+      // must ride along with the dropped reference - always re-read the
       // FIRST node: each RemoveItem consumes it and the list shifts up.
       ExtraDataList *xData;
       while (total > 0 && entry->extendData &&
@@ -2301,7 +2181,7 @@ static void ExecutePipBoyCommand(const std::string &line) {
         if (xCount && xCount->count > 1) {
           subCount = xCount->count;
           if (hasScript && xData->GetByType(kExtraData_Script)) {
-            // Scripted stack: strip the count and drop a single instance —
+            // Scripted stack: strip the count and drop a single instance -
             // dropping a scripted stack whole is a known vanish case.
             xData->RemoveByType(kExtraData_Count);
             subCount = 1;
@@ -2327,31 +2207,6 @@ static void ExecutePipBoyCommand(const std::string &line) {
       raiseDropRef(
           player->RemoveItem(form, NULL, subCount, 1, 1, NULL, 0, 0, 1, 0));
       total -= subCount;
-    }
-
-    // TEMP DIAGNOSTIC (remove once disappearing drops are confirmed fixed):
-    // log where each world ref of this form sits right after the drop.
-    if (player->parentCell) {
-      int matchCount = 0;
-      for (tList<TESObjectREFR>::Iterator it =
-               player->parentCell->objectList.Begin();
-           !it.End(); ++it) {
-        TESObjectREFR *ref = it.Get();
-        if (!ref || !ref->baseForm || ref->baseForm->refID != formId)
-          continue;
-        matchCount++;
-        PipBoyLog("DROP-DIAG",
-                  "match #%d refID=%08X pos=(%.1f,%.1f,%.1f) "
-                  "deltaFromPlayer=(%.1f,%.1f,%.1f) deleted=%d",
-                  matchCount, ref->refID, ref->posX, ref->posY, ref->posZ,
-                  ref->posX - player->posX, ref->posY - player->posY,
-                  ref->posZ - player->posZ, ref->IsDeleted() ? 1 : 0);
-      }
-      if (matchCount == 0)
-        PipBoyLog("DROP-DIAG",
-                  "no world reference of form %08X found in player's cell "
-                  "right after drop",
-                  formId);
     }
   }
 
@@ -2379,7 +2234,7 @@ void PipeServerThread() {
         );
 
         if (hPipe == INVALID_HANDLE_VALUE) {
-      PipBoyLog("PIPE", "CreateNamedPipe failed, retrying");
+            PipBoyLog("PIPE", "CreateNamedPipe failed, retrying");
             Sleep(5000);
             continue;
         }
@@ -2392,7 +2247,7 @@ void PipeServerThread() {
 
         if (connected) {
       PipBoyLog("PIPE", "Client connected");
-      // Client connected — push snapshots until disconnected.
+      // Client connected - push snapshots until disconnected.
       // Poll frequently but only write when the snapshot actually changed,
       // so the companion app hears about changes within ~PIPE_POLL_INTERVAL_MS
       // instead of waiting out a fixed broadcast interval.
@@ -2439,7 +2294,7 @@ void PipeServerThread() {
         // Drain any incoming commands (non-blocking peek + read)
         DWORD bytesAvailable = 0;
         if (!PeekNamedPipe(hPipe, NULL, 0, NULL, &bytesAvailable, NULL)) {
-          break; // Pipe broken — client disconnected
+          break; // Pipe broken - client disconnected
         }
         if (bytesAvailable > 0) {
           char buf[1024];
@@ -2474,7 +2329,7 @@ void PipeServerThread() {
       }
     }
 
-    // Companion disconnected — drop any sync lock so the player isn't left with
+    // Companion disconnected - drop any sync lock so the player isn't left with
     // disabled controls if the app closed mid-sync. The main loop re-enables
     // them on the next frame.
     g_syncLockRequested = false;
@@ -2485,8 +2340,6 @@ void PipeServerThread() {
     }
   PipBoyLog("PIPE", "Pipe server thread stopped");
 }
-
-// (SnapshotThread removed, polling moved to MainGameLoop hook)
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // NVSE MESSAGE HANDLER
@@ -2595,14 +2448,31 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
         }
       }
 
-      // In-game flashlight toggles (hotkey / Pip-Boy menu) — keep companion
-      // intent aligned so snapshots reflect actual game state after user turns
-      // the light off/on outside the physical Pip-Boy shortcut.
+      // In-game flashlight toggles (hotkey), including while the Pip-Boy UI
+      // is open - keep companion intent aligned so snapshots reflect actual
+      // game state, and so ReconcileCompanionTorchAfterPipBoyClose() doesn't
+      // stomp a toggle the user just made from inside the Pip-Boy.
+      //
+      // While a companion-initiated toggle is still propagating
+      // (g_companionTorchPending), IsPipBoyLightOn() is not trustworthy:
+      // effect removal is queued, and the Pip-Boy menu pauses gameplay so the
+      // queue doesn't drain until the menu closes - the stale pre-toggle
+      // state can persist for the menu's whole lifetime, not one frame.
+      // Overwriting g_companionTorchDesired from those reads is what made a
+      // device-side OFF (with the menu open) turn itself back ON at menu
+      // close. Observation resumes the moment the engine state converges on
+      // the desired value; only then do genuine user toggles flow through
+      // again.
       {
         PlayerCharacter *player = PlayerCharacter::GetSingleton();
-        if (player && !IsPipBoyTorchUiActive()) {
+        if (player) {
           const bool torchOn = IsPipBoyLightOn(player);
-          if (torchOn != g_lastObservedTorchOn) {
+          if (g_companionTorchPending) {
+            if (torchOn == g_companionTorchDesired) {
+              g_companionTorchPending = false;
+              g_lastObservedTorchOn = torchOn;
+            }
+          } else if (torchOn != g_lastObservedTorchOn) {
             g_companionTorchDesired = torchOn;
             g_lastObservedTorchOn = torchOn;
           }
@@ -2655,7 +2525,7 @@ __declspec(dllexport) bool NVSEPlugin_Query(const NVSEInterface *nvse,
         return false;
     }
 
-    // Version check — require xNVSE 6.x+
+    // Version check - require xNVSE 6.x+
     if (nvse->nvseVersion < 0x06000000) {
         return false;
     }
@@ -2664,8 +2534,8 @@ __declspec(dllexport) bool NVSEPlugin_Query(const NVSEInterface *nvse,
 }
 
 /**
- * Called by xNVSE after successful query. This is where we set up
- * our hooks, start background threads, and register for messages.
+ * Called by xNVSE after successful query. Set up
+ * hooks, start background threads, and register for messages.
  */
 __declspec(dllexport) bool NVSEPlugin_Load(NVSEInterface *nvse) {
     g_nvse = nvse;
@@ -2681,7 +2551,7 @@ __declspec(dllexport) bool NVSEPlugin_Load(NVSEInterface *nvse) {
                                  MessageHandler);
     }
 
-  // Script interface is required for GetReputation / GetReputationThreshold.
+  // Script interface is required for GetReputation/GetReputationThreshold.
   g_scriptInterface =
       (NVSEScriptInterface *)nvse->QueryInterface(kInterface_Script);
 
@@ -2693,7 +2563,7 @@ __declspec(dllexport) bool NVSEPlugin_Load(NVSEInterface *nvse) {
     return true;
 }
 
-} // extern "C"
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // DLL ENTRY POINT
@@ -2715,7 +2585,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpReserved) {
         g_logFile = nullptr;
       }
     }
-            break;
+        break;
     }
     return TRUE;
 }

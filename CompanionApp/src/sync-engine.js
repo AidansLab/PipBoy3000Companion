@@ -1,3 +1,21 @@
+/*
+ * Copyright (c) 2026 Aidan Lee-Calamera (aka Aidan's Lab). 
+ * All rights reserved.
+ *
+ * This source code is licensed under the Creative Commons
+ * Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0).
+ *
+ * You are free to share and adapt this code under the following conditions:
+ *  - Attribution: You must give appropriate credit and provide a link to the license.
+ *  - Non-Commercial: You may not use this material for commercial purposes.
+ *  - ShareAlike: If you alter, transform, or build upon this work, you must
+ *    distribute your contributions under the same CC BY-NC-SA 4.0 license.
+ *
+ * You may obtain a full copy of the License text in the LICENSE file in the
+ * root directory of this project repository or online at:
+ * https://creativecommons.org/licenses/by-nc-sa/4.0/
+ */
+
 /**
  * sync-engine.js
  * 
@@ -20,7 +38,7 @@ const MAX_INVENTORY_DELTA = 50;       // If more than this many items change, do
 // Matches the game plugin's SNAPSHOT_INTERVAL_MS so a second change lands right after that poll.
 const SYNC_DEBOUNCE_MS = 150;
 
-// player.setav markers for S.P.E.C.I.A.L. — refreshed softly on the SPECIAL tab.
+// player.setav markers for S.P.E.C.I.A.L. - refreshed softly on the SPECIAL tab.
 const SPECIAL_SETAV_MARKERS = [
   "player.setav('strength'",
   "player.setav('perception'",
@@ -41,10 +59,10 @@ const HP_HEADER_SOFT_REFRESH_CMD = 'player.renderheader();';
 
 // AP recharges/drains continuously in real time, which without chunking means
 // a device write on almost every snapshot. Only push once AP has moved this
-// many points from the last value actually sent — see _diffAP.
+// many points from the last value actually sent - see _diffAP.
 const AP_SYNC_CHUNK = 5;
 
-// Caps/Wg/HP in the ITEMS chrome — header only, no tab rebuild.
+// Caps/Wg/HP in the ITEMS chrome - header only, no tab rebuild.
 const ITEMS_HEADER_SOFT_REFRESH_CMD = 'player.renderheader(!0);';
 
 /** Full menu rebuild for STATS sub-tabs except GENERAL/SPECIAL/SKILLS (soft refresh). */
@@ -52,13 +70,13 @@ const STATS_TAB_FULL_REFRESH_CMD =
   `if(typeof Pip!=='undefined'&&Pip.CURRENT&&Pip.MODE===0&&Pip.changeMenu&&` +
   `Pip.CURRENT.id!=='GENERAL'&&Pip.CURRENT.id!=='SPECIAL'&&Pip.CURRENT.id!=='SKILLS')Pip.changeMenu();`;
 
-/** Used after full sync — inventory tabs still get changeMenu; STATS uses soft where possible. */
+/** Used after full sync - inventory tabs still get changeMenu; STATS uses soft where possible. */
 const FULL_SYNC_UI_REFRESH_CMD = 'player.fullsyncrefresh();';
 
 const INVENTORY_CATEGORIES = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
 
 // Perks and Skills are InvFile-backed on the device now (INV/{m}/PERKS.INV,
-// SKILLS.INV — same shape as the item categories), so pre-sync backup/restore
+// SKILLS.INV - same shape as the item categories), so pre-sync backup/restore
 // treats them as two more INV categories instead of separate JSON files.
 const PRESYNC_CATEGORIES = [...INVENTORY_CATEGORIES, 'PERKS', 'SKILLS'];
 
@@ -67,7 +85,7 @@ const PRESYNC_CATEGORIES = [...INVENTORY_CATEGORIES, 'PERKS', 'SKILLS'];
 // the device opens and flash-writes the file once per batch instead of once
 // per entry.
 // Entries per setdams command. Each `[id,cnd,dam],` triple is ~16 chars and the
-// serial bridge packs lines into 512-byte chunks — 24 keeps a full command
+// serial bridge packs lines into 512-byte chunks - 24 keeps a full command
 // safely inside one chunk so it never floods the device's USB RX buffer.
 const MAX_DAM_BATCH = 24;
 // Same rationale as MAX_DAM_BATCH, for player.additemsbulk()/removeitemsbulk()
@@ -101,14 +119,14 @@ export class SyncEngine extends EventEmitter {
     // we expect to see echoed back in an upcoming game snapshot.
     // gameFormId (lowercase) -> { count, time }
     this._deviceConsumed = new Map();
-    // Device-initiated equip/unequip — suppress bag-count echoes (equip moves 1
+    // Device-initiated equip/unequip - suppress bag-count echoes (equip moves 1
     // to worn without reducing total owned; unequip returns 1 to bag).
     // gameFormId (lowercase) -> { action: 'equip'|'unequip', count, time }
     this._deviceEquipPending = new Map();
-    // Device-initiated torch toggles — don't let a stale game snapshot turn the LED off.
+    // Device-initiated torch toggles - don't let a stale game snapshot turn the LED off.
     this._deviceTorchPending = null;
     this._resyncEquipAfterInventory = false;
-    // Last AP value actually pushed to the device — see _diffAP. Reset
+    // Last AP value actually pushed to the device - see _diffAP. Reset
     // alongside previousState so a full resync always pushes the current AP.
     this._lastSentAp = undefined;
     // Bumped on save load / forced resync. A snapshot that began processing
@@ -249,7 +267,7 @@ export class SyncEngine extends EventEmitter {
     if (!this.enabled || !this.bridge.connected) return;
     if (this._processingSnapshot) {
       // The game only sends snapshots when something changed, so we can't just
-      // drop this one — park it (keeping only the newest) and process it as
+      // drop this one - park it (keeping only the newest) and process it as
       // soon as the current batch finishes.
       this._pendingSnapshot = snapshot;
       return;
@@ -269,7 +287,7 @@ export class SyncEngine extends EventEmitter {
       if (loadOrderChanged && this.previousState) {
         this.previousState = null;
         this._lastSentAp = undefined;
-        this.emit('status', 'Load order updated — forcing full resync');
+        this.emit('status', 'Load order updated - forcing full resync');
       }
     }
 
@@ -292,7 +310,7 @@ export class SyncEngine extends EventEmitter {
       if (isFullSync && this.gameMode === 'FNV' && !this._getFactions(snapshot).length) {
         this.emit(
           'warning',
-          'Game plugin did not send faction data — rebuild FalloutPipBoySync.dll (v6+) and restart the game'
+          'Game plugin did not send faction data - rebuild FalloutPipBoySync.dll (v6+) and restart the game'
         );
       }
 
@@ -321,7 +339,7 @@ export class SyncEngine extends EventEmitter {
           if (catsArray.length > 0) {
             commands.push(`player.sortandrefreshinv([${catsArray}])`);
           }
-          // Caps and carry weight live in the ITEMS header — only refresh on inventory tabs.
+          // Caps and carry weight live in the ITEMS header - only refresh on inventory tabs.
           commands.push(ITEMS_HEADER_SOFT_REFRESH_CMD);
         }
 
@@ -358,7 +376,7 @@ export class SyncEngine extends EventEmitter {
         } else {
           // Common case (game-driven sync, no sound playing): send the whole
           // ordered list as a batch. The device receives the exact same framed
-          // lines, just without the 25ms inter-command spacing — collapsing a
+          // lines, just without the 25ms inter-command spacing - collapsing a
           // typical 6–10 command sync from ~150–250ms of pure spacing to one or
           // two writes. Equip vs regular distinction is irrelevant here since the
           // guard is closed and everything may flow immediately.
@@ -366,7 +384,7 @@ export class SyncEngine extends EventEmitter {
           this.stats.commandsSent += commands.length;
         }
 
-        // SYNC-DISABLED: player.sync() — inventory menus flush .INV on page exit
+        // SYNC-DISABLED: player.sync() - inventory menus flush .INV on page exit
         // const now = Date.now();
         // if (now - this.lastSyncFlush >= SYNC_FLUSH_INTERVAL_MS) {
         //   await this.bridge.sendCommand('player.sync()');
@@ -418,7 +436,7 @@ export class SyncEngine extends EventEmitter {
     const prev = this.previousState;
 
     if (!prev) {
-      // First snapshot — do a full sync
+      // First snapshot - do a full sync
       return this._generateFullSync(snapshot);
     }
 
@@ -428,7 +446,7 @@ export class SyncEngine extends EventEmitter {
 
     if (!this._inventorySyncPaused) {
       // Simple scalar attributes
-      // 'hp' is the game's true health pool (kAV_Health) — the Pip-Boy firmware
+      // 'hp' is the game's true health pool (kAV_Health) - the Pip-Boy firmware
       // uses it directly instead of averaging limb conditions when present.
       // maxHP is NOT synced: the Pip-Boy derives it correctly from endurance/level.
       const scalarAttrs = ['name', 'level', 'hp', 'karma', 'perceptioncondition', 'endurancecondition', 'leftattackcondition', 'rightattackcondition', 'leftmobilitycondition', 'rightmobilitycondition'];
@@ -448,7 +466,7 @@ export class SyncEngine extends EventEmitter {
           if (attr === 'level') {
             commands.push(`player.setlevel(${player.level})`);
             // Also push XP on level-up so the display reflects the new total.
-            // setav() only marks the player object modified — sync() is what
+            // setav() only marks the player object modified - sync() is what
             // actually flushes it to PLAYER.JSON, so without it XP sits
             // unpersisted until some unrelated action (equip, settings edit)
             // happens to call sync() next.
@@ -481,7 +499,7 @@ export class SyncEngine extends EventEmitter {
 
     }
 
-    // Carry weight + AP — game-authoritative; always sync (not gated on inventory pause)
+    // Carry weight + AP - game-authoritative; always sync (not gated on inventory pause)
     commands.push(...this._diffWeight(player, prevPlayer));
     commands.push(...this._diffAP(player, prevPlayer));
 
@@ -498,7 +516,7 @@ export class SyncEngine extends EventEmitter {
     // must come after so the device sees the correct post-removal state).
     if (!this._inventorySyncPaused) {
       if (this._resyncEquipAfterInventory) {
-        // Inventory removed items — push inventory first, then re-authorise equip
+        // Inventory removed items - push inventory first, then re-authorise equip
         this._resyncEquipAfterInventory = false;
         commands.push(...invCommands);
         commands.push(...this._buildAuthoritativeEquipCommands(player, prevPlayer));
@@ -512,11 +530,11 @@ export class SyncEngine extends EventEmitter {
       commands.push(...invCommands);
     }
 
-    // Weapon DAM (skill/condition-adjusted) — mirror per-stack deltas. Self-gated
+    // Weapon DAM (skill/condition-adjusted) - mirror per-stack deltas. Self-gated
     // on inventory pause; placed after inventory so the rows it annotates exist.
     commands.push(...this._diffWeaponDamage(snapshot.inventory || [], prev.inventory || []));
 
-    // Weapon ammo — ephemeral UI state; always sync (not gated on inventory pause)
+    // Weapon ammo - ephemeral UI state; always sync (not gated on inventory pause)
     commands.push(...this._diffWeaponAmmo(player, prevPlayer));
 
     if (!this._inventorySyncPaused) {
@@ -532,10 +550,10 @@ export class SyncEngine extends EventEmitter {
       commands.push(...this._diffSkills(player, prevPlayer));
     }
 
-    // Faction reputation — always sync (not gated on inventory pause)
+    // Faction reputation - always sync (not gated on inventory pause)
     commands.push(...this._diffFactions(this._getFactions(snapshot), this._getFactions(prev)));
 
-    // Pip-Boy flashlight LED — game → device only (independent of inventory pause)
+    // Pip-Boy flashlight LED - game -> device only (independent of inventory pause)
     if (
       this.torchSyncEnabled &&
       player.torch !== undefined &&
@@ -602,7 +620,7 @@ export class SyncEngine extends EventEmitter {
         commands.push(`player.setlevel(${player.level})`);
       }
 
-      // XP — pushed on first sync and save-loads (full syncs only). sync()
+      // XP - pushed on first sync and save-loads (full syncs only). sync()
       // flushes it to PLAYER.JSON immediately rather than leaving it
       // unpersisted until an unrelated action happens to call sync() later.
       if (player.xp !== undefined) {
@@ -611,7 +629,7 @@ export class SyncEngine extends EventEmitter {
       }
 
       // Set all scalar attributes (hp = true health pool from the game;
-      // maxHP is omitted — the Pip-Boy calculates it itself)
+      // maxHP is omitted - the Pip-Boy calculates it itself)
       const attrs = ['hp', 'karma', 'perceptioncondition', 'endurancecondition', 'leftattackcondition', 'rightattackcondition', 'leftmobilitycondition', 'rightmobilitycondition'];
       for (const attr of attrs) {
         if (player[attr] !== undefined) {
@@ -629,20 +647,20 @@ export class SyncEngine extends EventEmitter {
         }
       }
 
-      // Carry weight — game-authoritative (see _diffWeight)
+      // Carry weight - game-authoritative (see _diffWeight)
       commands.push(...this._diffWeight(player, {}));
 
-      // Skills — stored in INV/*/SKILLS.INV (not player.setav)
+      // Skills - stored in INV/*/SKILLS.INV (not player.setav)
       if (player.skills) {
         const skillCmd = this._buildSyncSkillsCommand(player.skills);
         if (skillCmd) commands.push(skillCmd);
       }
 
       // Reconcile every category to exactly this snapshot's contents (device
-      // diffs in place — see setitemsbulk_begin/chunk/end), rather than
+      // diffs in place - see setitemsbulk_begin/chunk/end), rather than
       // clearing every category's file and readding, so a full sync only
       // flash-writes categories whose contents actually changed. Every
-      // category runs even if empty in this snapshot — that's what removes
+      // category runs even if empty in this snapshot - that's what removes
       // stale rows from a category the player emptied out.
       const inventory = snapshot.inventory || [];
       const addBatches = new Map(); // cat -> [formId,count,cnd][]
@@ -671,21 +689,21 @@ export class SyncEngine extends EventEmitter {
       // SYNC-DISABLED: calculateInvWeight() writes every .INV file
       // commands.push('player.calculateInvWeight()');
 
-      // Equipped items — after inventory is populated
+      // Equipped items - after inventory is populated
       commands.push(...this._diffEquipped(player, {}, true));
     }
 
-    // Action Points — always sync on full sync
+    // Action Points - always sync on full sync
     commands.push(...this._diffAP(player, {}));
 
-    // Weapon ammo — ephemeral UI state for AMMO tab dimming/selection
+    // Weapon ammo - ephemeral UI state for AMMO tab dimming/selection
     commands.push(...this._diffWeaponAmmo(player, {}, true));
 
     if (!this._inventorySyncPaused) {
       // Reconcile PERKS.INV to exactly this set in one pass (setperksbulk),
       // instead of clearing it to empty and rebuilding it from scratch. A
       // clear+rebuild rewrites the file at a different size on every full
-      // sync even when the perk list hasn't changed at all — three separate
+      // sync even when the perk list hasn't changed at all - three separate
       // device crashes were traced to a PERKS.INV write during exactly this
       // clear-then-regrow sequence, so this now only touches rows that
       // actually changed (and skips the flash write entirely if nothing did).
@@ -700,7 +718,7 @@ export class SyncEngine extends EventEmitter {
       commands.push(this._buildSetPerksBulkCommand(perkFormIds));
     }
 
-    // Faction reputation — always sync (not gated on inventory pause)
+    // Faction reputation - always sync (not gated on inventory pause)
     const factions = this._getFactions(snapshot);
     if (factions.length) {
       const factionCmd = this._buildSyncFactionsCommand(factions);
@@ -739,7 +757,7 @@ export class SyncEngine extends EventEmitter {
 
   /**
    * User equipped an item on the Pip-Boy. The game moves one unit to the worn
-   * slot but total owned is unchanged — do not mirror a bag-count drop on device.
+   * slot but total owned is unchanged - do not mirror a bag-count drop on device.
    */
   notifyDeviceEquipped(gameFormId) {
     const key = String(gameFormId).toLowerCase();
@@ -752,7 +770,7 @@ export class SyncEngine extends EventEmitter {
 
   /**
    * User unequipped on the Pip-Boy. The game returns one unit to the bag but
-   * total owned is unchanged — do not mirror a bag-count rise on device.
+   * total owned is unchanged - do not mirror a bag-count rise on device.
    */
   notifyDeviceUnequipped(gameFormId) {
     const key = String(gameFormId).toLowerCase();
@@ -764,7 +782,7 @@ export class SyncEngine extends EventEmitter {
   }
 
   /**
-   * User toggled the torch on the physical Pip-Boy. Ignore game→device torch
+   * User toggled the torch on the physical Pip-Boy. Ignore game->device torch
    * sync that disagrees until the game catches up or the window expires.
    */
   notifyDeviceTorch(on) {
@@ -790,7 +808,7 @@ export class SyncEngine extends EventEmitter {
   }
 
   /**
-   * Pip-Boy restored pre-sync data (only possible when cmode is off — companion
+   * Pip-Boy restored pre-sync data (only possible when cmode is off - companion
    * app disconnected). Pause game sync until resync; firmware already cleared PRESYNC.
    */
   async notifyPresyncRestored() {
@@ -895,19 +913,19 @@ export class SyncEngine extends EventEmitter {
       previousMap.set(this._inventoryStackKey(item), item);
     }
 
-    // Check for too many changes — might indicate a save load or major event
+    // Check for too many changes - might indicate a save load or major event
     const addedIds = [...currentMap.keys()].filter(id => !previousMap.has(id));
     const removedIds = [...previousMap.keys()].filter(id => !currentMap.has(id));
 
     // Adds/removes are grouped per category and flushed as additemsbulk/
     // removeitemsbulk commands at the end, so N items changing in the same
     // category cost the device one flash write instead of N (flash writes are
-    // by far the slowest device operation — this is what made full syncs and
+    // by far the slowest device operation - this is what made full syncs and
     // multi-item pickups visibly lag behind the commands being sent).
     const addBatches = new Map(); // cat -> [formId,count,cnd][]
     const removeBatches = new Map(); // cat -> [formId,qty,cnd|undefined][]
     const queueAdd = (cat, formId, count, condition) => {
-      // No Pip-Boy category (e.g. books/keys) — the device has no file to add
+      // No Pip-Boy category (e.g. books/keys) - the device has no file to add
       // this to under any category, so there is nothing useful to send.
       if (!cat) return;
       const list = addBatches.get(cat) || addBatches.set(cat, []).get(cat);
@@ -934,7 +952,7 @@ export class SyncEngine extends EventEmitter {
     };
 
     if (addedIds.length + removedIds.length > MAX_INVENTORY_DELTA) {
-      // Too many changes — reconcile every category to the current snapshot
+      // Too many changes - reconcile every category to the current snapshot
       // (device diffs in place) rather than clearing and readding everything.
       this.emit('status', 'Large inventory change detected, performing full reset');
       this._lastChangedCategories = new Set(['AID','AMMO','APPAREL','MISC','WEAPONS']);
@@ -957,7 +975,7 @@ export class SyncEngine extends EventEmitter {
     // Representing that as add(newCond)+remove(oldCond) is fragile: if the remove
     // half is lost or the device already moved past that condition, a stale row
     // is orphaned and shows as a duplicate. Instead authoritatively rebuild just
-    // that form's rows from the current snapshot — atomic, and self-heals any
+    // that form's rows from the current snapshot - atomic, and self-heals any
     // pre-existing orphan. Pure adds/removals stay on the incremental path so
     // device equip/use credits keep working.
     const rebuildForms = new Set();
@@ -976,7 +994,7 @@ export class SyncEngine extends EventEmitter {
         a && b && a.size === b.size && [...a].every((v) => b.has(v));
       for (const [gameFormId, curSet] of curConds) {
         const prevSet = prevConds.get(gameFormId);
-        if (!prevSet) continue; // pure add — handled incrementally
+        if (!prevSet) continue; // pure add - handled incrementally
         if (sameSet(curSet, prevSet)) continue; // only counts changed, if anything
         if (this._resolveFormId(gameFormId) === null) continue;
         rebuildForms.add(gameFormId);
@@ -1249,7 +1267,7 @@ export class SyncEngine extends EventEmitter {
     const normalized = this._normalizeFactions(factions);
     if (normalized.length === 0) return null;
 
-    // Only send discovered factions — the firmware skips undiscovered ones
+    // Only send discovered factions - the firmware skips undiscovered ones
     // anyway. Sending the full list (13+ NV factions) can OOM the device.
     const discovered = normalized.filter((f) => f.discovered);
 
@@ -1264,7 +1282,7 @@ export class SyncEngine extends EventEmitter {
         curVis.some((n, i) => n !== prevVis[i]);
     }
 
-    // If nothing is discovered yet, nothing to write — return null to skip the
+    // If nothing is discovered yet, nothing to write - return null to skip the
     // command entirely (avoids writing empty REP.JSON which clears the UI).
     if (discovered.length === 0) return null;
 
@@ -1320,16 +1338,16 @@ export class SyncEngine extends EventEmitter {
   }
 
   /**
-   * Generate action-point commands from game → Pip-Boy.
+   * Generate action-point commands from game -> Pip-Boy.
    * Stock firmware shows maxAP/maxAP in the STATS header; boot0 overrides when
    * cmode is on. Values are ephemeral (!1) and refreshed via renderHeader.
    *
    * curAp is chunked against the last value actually sent (this._lastSentAp),
-   * not the raw delta since last snapshot — AP recharges/drains continuously,
+   * not the raw delta since last snapshot - AP recharges/drains continuously,
    * so an un-chunked diff would push on nearly every snapshot. Empty (0) and
    * full (curMaxAp) always push immediately regardless of chunk size, so the
    * display never sits visibly wrong at either end just because the last step
-   * into it was smaller than a chunk — this also sidesteps maxAP not being a
+   * into it was smaller than a chunk - this also sidesteps maxAP not being a
    * multiple of AP_SYNC_CHUNK, since chunking is relative to the last-sent
    * value rather than fixed absolute boundaries.
    */
@@ -1364,7 +1382,7 @@ export class SyncEngine extends EventEmitter {
   }
 
   /**
-   * Generate carry-weight commands from game → Pip-Boy.
+   * Generate carry-weight commands from game -> Pip-Boy.
    *
    * The current weight (`wg`) and max weight (`maxWg`) are copied directly from
    * the game and stored as ephemeral player values (persist = !1) so they never
@@ -1416,8 +1434,8 @@ export class SyncEngine extends EventEmitter {
       `player.setav('equippedWeap', ${weapon}, !0, !0);player.setav('equippedWeapCnd', ${weapCnd}, !1);player.setav('equippedWeapWhole', ${weapWhole}, !1);${REFRESH_EQUIP_CMD}`
     );
     // equipapparel re-reads APPAREL.DAT from flash AND triggers its own
-    // refreshequip() (a second full render). For the common case — a weapon's
-    // condition degrading — apparel is unchanged, so re-asserting it is pure
+    // refreshequip() (a second full render). For the common case - a weapon's
+    // condition degrading - apparel is unchanged, so re-asserting it is pure
     // waste: it doubles the render count and adds a flash read for nothing. Only
     // send it when the equipped apparel set actually changed. The weapon line
     // above already provides the single authoritative render.
@@ -1430,10 +1448,10 @@ export class SyncEngine extends EventEmitter {
   }
 
   /**
-   * Generate equip/unequip commands from game → Pip-Boy equipped state.
+   * Generate equip/unequip commands from game -> Pip-Boy equipped state.
    * Apparel slots are resolved on-device via APPAREL.DAT (item.es).
    */
-  // force=true always emits both commands regardless of the diff — used for
+  // force=true always emits both commands regardless of the diff - used for
   // full syncs, where prevPlayer is {} and "equipped nothing" would otherwise
   // look identical to "no change from an unknown prior device state" and get
   // skipped, leaving a stale equip from before the sync stuck on the device.
@@ -1494,8 +1512,8 @@ export class SyncEngine extends EventEmitter {
 
   /**
    * Push the equipped weapon's ammo state to the device for ammo selection:
-   *   ammoActive — the ammo currently loaded (so AMMO.JS can mark it equipped)
-   *   ammoUsable — every ammo form the weapon accepts (others are dimmed and
+   *   ammoActive - the ammo currently loaded (so AMMO.JS can mark it equipped)
+   *   ammoUsable - every ammo form the weapon accepts (others are dimmed and
    *                cannot be selected)
    * Both are stored ephemerally (!1) so they never persist to PLAYER.JSON. When
    * the AMMO tab is open, re-read + re-render it so the change shows immediately.
@@ -1663,10 +1681,10 @@ export class SyncEngine extends EventEmitter {
   /**
    * Full-sync reconciliation for one category: entries is the complete desired
    * contents (device diffs against what's actually on the card and only
-   * touches rows that differ — see setitemsbulk_begin/chunk/end). Unlike
-   * setperksbulk this can't arrive as one call — a category's item list can
-   * exceed what safely fits in one line-buffered command — so it's split into
-   * a begin/chunk×N/end sequence instead. Called for every category on every
+   * touches rows that differ - see setitemsbulk_begin/chunk/end). Unlike
+   * setperksbulk this can't arrive as one call - a category's item list can
+   * exceed what safely fits in one line-buffered command - so it's split into
+   * a begin/chunk x N/end sequence instead. Called for every category on every
    * full sync, even with an empty entries array, since that's what clears out
    * a category the player emptied.
    */
@@ -1722,8 +1740,8 @@ export class SyncEngine extends EventEmitter {
 
   /**
    * Full-sync DAM reconciliation: entries is the complete desired *_DAM.INV
-   * contents, split into a begin/chunk×N/end sequence (device diffs in place
-   * — see setdamsbulk_begin/chunk/end) instead of clearing the file and
+   * contents, split into a begin/chunk x N/end sequence (device diffs in place
+   * - see setdamsbulk_begin/chunk/end) instead of clearing the file and
    * rewriting it whole on every full sync.
    */
   _buildSetDamsBulkCommands(entries) {
@@ -1776,7 +1794,7 @@ export class SyncEngine extends EventEmitter {
           typeof mapped === 'number'
             ? `0x${(mapped >>> 0).toString(16)}`
             : String(mapped);
-        this.emit('status', `Form ID ${fromHex} → ${toHex}`);
+        this.emit('status', `Form ID ${fromHex} -> ${toHex}`);
       }
       resolved = mapped;
     }
@@ -1818,7 +1836,7 @@ export class SyncEngine extends EventEmitter {
 
   async _getPresyncBackupStatus() {
     // manifest v3: presyncCats grew from 5 item categories to 7 (added PERKS,
-    // SKILLS as INV files) — bumping the version forces one fresh backup pass
+    // SKILLS as INV files) - bumping the version forces one fresh backup pass
     // for installs upgrading from the old JSON-based perk/skill backup.
     const expr = `(()=>{try{var f=require('fs'),m=NV?'NV':'F3',r={hasManifest:!1,manifestOld:!0,playerMissing:!0,invMissing:!0},cats=['AID','AMMO','APPAREL','MISC','WEAPONS','PERKS','SKILLS'],i,p;try{var man=JSON.parse(f.readFileSync('INV/PRESYNC/MANIFEST.JSON'));r.hasManifest=!0;r.manifestOld=!man.v||man.v<3}catch(e){}try{f.statSync('SETTINGS/PRESYNC/PLAYER.JSON');r.playerMissing=!1}catch(e){}try{f.statSync('INV/PRESYNC/'+m);for(i=0;i<cats.length;i++){p='INV/PRESYNC/'+m+'/'+cats[i]+'.INV';try{f.statSync(p);r.invMissing=!1;break}catch(e){}}}catch(e){}return r}catch(e){return{error:!0}}})()`;
     const raw = await this.bridge.eval(expr);
@@ -1877,11 +1895,11 @@ export class SyncEngine extends EventEmitter {
   }
 
   /**
-   * Game loaded a save or started a new game — discard cached state.
+   * Game loaded a save or started a new game - discard cached state.
    */
   handleSaveLoad() {
     this._resetForFullSync();
-    this.emit('status', 'Game save loaded — full resync on next snapshot');
+    this.emit('status', 'Game save loaded - full resync on next snapshot');
   }
 
   /**
