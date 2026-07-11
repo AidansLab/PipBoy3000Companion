@@ -33,7 +33,7 @@ Sync your **Fallout: New Vegas** and **Fallout 3** player stats and inventory to
 2. **Companion App** (Node.js) receives JSON snapshots over a Windows Named Pipe, diffs against previous state
 3. **Pip-Boy commands** Espruino commands are sent over USB serial to update the device
 
-## Quick Start
+## Initial Setup
 - Download the latest companion app exe from the [Releases page](https://github.com/AidansLab/PipBoy3000Companion/releases)
 - Install [NVSE](https://www.nexusmods.com/newvegas/mods/67883?tab=files) or [FOSE](https://www.nexusmods.com/fallout3/mods/8606?tab=description) depending on your game.
 - Install the latest plugin DLL for [Fallout New Vegas]() or [Fallout 3]() by clicking the Mod manager download if you are using a mod manager, or manually install from the [Releases page](https://github.com/AidansLab/PipBoy3000Companion/releases) to your NVSE/FOSE plugins folder.
@@ -41,6 +41,20 @@ Sync your **Fallout: New Vegas** and **Fallout 3** player stats and inventory to
 - Make sure your Pip-Boy is set to the same mode as the game you want to sync with by going to DATA>Settings>Pip-Boy mode and selecting New Vegas or Fallout 3.
 - Open the companion app and click "Install Companion Menus & Boot Patch" to install the companion firmware to your device. Wait for it to reboot and connect to the app.
 - Launch your game via your mod manager, or script extender loader (nvse_loader.exe/fose_loader.exe).
+
+### General Usage
+Note: If you have factory reset or updated your Pip-Boy, you will need to click "Install Companion Menus & Boot Patch" first.
+ - Set the Pip-Boy mode for the Fallout you will be playing
+ - Open the companion app
+ - Start the Fallout you chose
+
+<br>
+
+> ⚠ NOTE: To restore to stock Pip-Boy OS:
+> -  Go to the [official TWC upgrade page](https://www.thewandcompany.com/pip-boy/upgrade/#)
+> - Click Fallout 3 / New Vegas
+> - Then click Advanced options
+> - Click Factory Reset
 
 ## Limitations/Known Issues
 - Equip/unequip sounds on Pip-Boy can sometimes be delayed slightly
