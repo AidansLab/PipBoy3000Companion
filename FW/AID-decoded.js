@@ -64,12 +64,20 @@
         if (cmode) {
           // Bleak Venom: in-game only - see the comment at the top of this file.
           if (it.id === 0x001613d0) return;
-          // HP-restoring items (stimpaks, food…) are blocked when HP is full.
+          // Pure healing items are blocked when HP is full, mirroring the
+          // game's "already at full health" refusal. Super Stimpak's
+          // delayed-damage aftereffect isn't "HP +n" shaped, so text/effect
+          // matching alone misses it.
+          const PURE_HEALER_IDS = [0x00015169 /* Stimpak */, 0x000ccef2 /* Super Stimpak */];
           const curHp = player.getav('hp');
           if (curHp !== undefined) {
             const info = player.getinfo();
-            if (info.maxHP > 0 && curHp >= info.maxHP &&
-                item.ef && item.ef.some(e => e.indexOf('HP') >= 0)) {
+            const isPureHealer =
+              PURE_HEALER_IDS.indexOf(it.id) >= 0 ||
+              (item.txt && /^(super )?stimpak$/i.test(item.txt)) ||
+              (item.ef && item.ef.length &&
+                item.ef.every(e => /^HP \+/.test(e)));
+            if (info.maxHP > 0 && curHp >= info.maxHP && isPureHealer) {
               return;
             }
           }

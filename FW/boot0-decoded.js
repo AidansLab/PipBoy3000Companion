@@ -489,32 +489,6 @@
     } catch (e) {}
   };
 
-  Player.prototype.setitemcondition = function (id, cnd) {
-    for (let ci = 0; ci < cats.length; ci++) {
-      const v = cats[ci];
-      try {
-        const dbIds = getCatIds(v),
-          i = dbIds.indexOf(id);
-        if (i < 0) continue;
-        const onMenu = Pip.inv && Pip.CURRENT && Pip.CURRENT.id === v;
-        const inv = onMenu
-          ? Pip.inv
-          : new InvFile(`INV/${NV ? 'NV' : 'F3'}/${v}.INV`, { idOrder: dbIds });
-        const inx = inv.indexOf(id);
-        if (inx >= 0) {
-          let it = inv.get(inx);
-          it.cnd = cnd;
-          inv.set(inx, it);
-          if (onMenu) {
-            Pip.emit('scroller', 'refresh');
-          } else inv.sync();
-          return !0;
-        }
-      } catch (e) {}
-    }
-    return !1;
-  };
-
   // Authoritatively rebuild every row of `id` from `stacks` ([{cnt,cnd},...]).
   // Used when an item's per-condition distribution changes (degrade/repair): a
   // single atomic replace instead of add+remove, so a lost remove can't leave a

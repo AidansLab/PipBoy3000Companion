@@ -143,6 +143,16 @@ static DWORD g_lastSnapshotTime = 0;
 static std::atomic<bool> g_saveLoadPending(false);
 static std::atomic<bool> g_mainMenuPending(false);
 
+// Ticks (main-loop iterations) to hold off building/sending a snapshot after
+// PostLoadGame/NewGame. The player object exists and g_gameLoaded goes true
+// immediately, but the engine can take a few more frames to finish
+// deserializing container changes - snapshotting too early captured a
+// technically-valid but empty inventory array, which the companion (primed
+// by handleSaveLoad() to treat the next snapshot as an authoritative full
+// state) then reconciled onto the device, flashing it empty before the real
+// inventory arrived a moment later.
+static UInt32 g_postLoadSettleTicks = 0;
+
 // Set by the companion app (SYNC_LOCK/SYNC_UNLOCK) while it performs the
 // initial Pip-Boy sync. Disables player controls, freezes the game clock, and
 // shows a syncing pop up so nothing can move or act mid-sync.
@@ -760,6 +770,10 @@ public:
 
   void valueStr(const std::string &v) { ss << "\"" << escape(v) << "\""; }
   void valueInt(int v) { ss << v; }
+  // Form IDs must stay unsigned: a plugin at load-order index >= 0x80 gives
+  // refIDs with the top bit set, and casting those to int emits negative
+  // JSON numbers that break the companion's form-ID matching.
+  void valueUInt(UInt32 v) { ss << v; }
   void valueFloat(float v) { ss << std::fixed << std::setprecision(2) << v; }
   void valueBool(bool v) { ss << (v ? "true" : "false"); }
 
@@ -770,6 +784,10 @@ public:
   void keyInt(const std::string &k, int v) {
     key(k);
     valueInt(v);
+  }
+  void keyUInt(const std::string &k, UInt32 v) {
+    key(k);
+    valueUInt(v);
   }
   void keyFloat(const std::string &k, float v) {
     key(k);
@@ -785,6 +803,10 @@ public:
   void arrayElementInt(int v) {
     comma();
     valueInt(v);
+  }
+  void arrayElementUInt(UInt32 v) {
+    comma();
+    valueUInt(v);
   }
 
     std::string str() const { return ss.str(); }
@@ -1340,7 +1362,7 @@ std::string BuildPlayerSnapshot() {
 
     // --- Equipped items (integer form IDs for Pip-Boy sync) ---
     TESObjectWEAP *eqWeapon = player->GetEquippedWeapon();
-    json.keyInt("equippedweap", eqWeapon ? (int)eqWeapon->refID : 0);
+    json.keyUInt("equippedweap", eqWeapon ? eqWeapon->refID : 0);
 
     // Condition of the equipped weapon stack - lets the Pip-Boy flag only the
     // matching condition row as equipped when several conditions of one weapon
@@ -1367,7 +1389,7 @@ std::string BuildPlayerSnapshot() {
         if (ammoInfo && ammoInfo->ammo)
           currentAmmo = ammoInfo->ammo->refID;
       }
-      json.keyInt("current", (int)currentAmmo);
+      json.keyUInt("current", currentAmmo);
 
       json.key("usable");
       json.beginArray();
@@ -1380,10 +1402,10 @@ std::string BuildPlayerSnapshot() {
             for (UInt32 i = 0; i < ammoCount; i++) {
               TESForm *f = ammoList->GetNthForm(i);
               if (f)
-                json.arrayElementInt((int)f->refID);
+                json.arrayElementUInt(f->refID);
             }
           } else if (ammoForm->typeID == kFormType_TESAmmo) {
-            json.arrayElementInt((int)ammoForm->refID);
+            json.arrayElementUInt(ammoForm->refID);
           }
         }
       }
@@ -1408,7 +1430,7 @@ std::string BuildPlayerSnapshot() {
         if (seenApparel.count(apparelId))
           continue;
         seenApparel.insert(apparelId);
-        json.arrayElementInt((int)apparelId);
+        json.arrayElementUInt(apparelId);
       }
     }
     json.endArray();
@@ -2409,6 +2431,7 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
             g_gameLoaded = true;
     g_saveLoadPending = true;
     g_factionStateValid = false; // re-evaluate rep for the loaded character
+    g_postLoadSettleTicks = 60; // let container changes finish deserializing
     ResetSyncLockState(true);
     {
       std::lock_guard<std::mutex> lock(g_snapshotMutex);
@@ -2420,6 +2443,7 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
             g_gameLoaded = true;
     g_saveLoadPending = true;
     g_factionStateValid = false; // re-evaluate rep for the new character
+    g_postLoadSettleTicks = 60; // let container changes finish deserializing
     ResetSyncLockState(true);
     {
       std::lock_guard<std::mutex> lock(g_snapshotMutex);
@@ -2443,6 +2467,8 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
         case NVSEMessagingInterface::kMessage_MainGameLoop:
             if (g_gameLoaded) {
       LogMenuMaskIfChanged();
+      if (g_postLoadSettleTicks > 0)
+        g_postLoadSettleTicks--;
       if (g_syncHudReadyDelay > 0)
         g_syncHudReadyDelay--;
       if (g_syncHudRefreshDelay > 0) {
@@ -2533,6 +2559,8 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
                 DWORD now = GetTickCount();
                 if (now - g_lastSnapshotTime >= SNAPSHOT_INTERVAL_MS) {
                     g_lastSnapshotTime = now;
+        if (g_postLoadSettleTicks > 0)
+          break; // still settling after a save/new-game load - see comment above
         if (!g_syncLockRequested.load() && ShouldSkipSnapshotDuringModMenu() &&
             !IsPipBoyMenuOpen()) {
           if (now - g_lastSnapshotSkipLogTime >= 1000) {

@@ -116,6 +116,9 @@ cmake --build build-fo3 --config Release
 - Or open `build-fo3\FalloutPipBoySync.sln` and Build -> Build Solution
 - The DLL will be built to `build-fo3\Release\FalloutPipBoySyncF3.dll` (install to `Data\FOSE\Plugins\`)
 
+## Roadmap
+- Item mod display support (+)
+
 ### Credits
 
 - Author: Aidan's Lab

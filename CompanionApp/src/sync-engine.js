@@ -1208,7 +1208,6 @@ export class SyncEngine extends EventEmitter {
       cmd.includes('resetinventory') ||
       cmd.includes('additem') ||
       cmd.includes('removeitem') ||
-      cmd.includes('setitemcondition') ||
       cmd.includes('setformstacks') ||
       cmd.includes('additemhealthpercent')
     ) {
@@ -1633,11 +1632,6 @@ export class SyncEngine extends EventEmitter {
       this._normalizeItemCondition(currentItem?.condition) !==
       this._normalizeItemCondition(prevItem?.condition)
     );
-  }
-
-  _buildSetItemConditionCommand(formId, condition) {
-    const cnd = this._normalizeItemCondition(condition);
-    return `player.setitemcondition(${formId},${cnd})`;
   }
 
   _toItemEntry(formId, count, condition) {
