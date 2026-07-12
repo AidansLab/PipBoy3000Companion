@@ -1596,11 +1596,20 @@ static void RefreshPipBoyUI() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// VANILLA EQUIP COMMANDS
-// Direct Actor::EquipItem() does not run the full worn-item pipeline that the
-// in-game Pip-Boy uses, so in-game equips won't conflict and the model won't
-// update. Route through the game's own equipitem/unequipitem script commands
-// (same path as the console and GECK) via Script::RunScriptLine2.
+// DEVICE-INITIATED EQUIP/UNEQUIP
+// Verified by disassembling FalloutNV.exe 1.4.0.525 + on-hardware testing.
+//
+// While the in-game Pip-Boy is open, a device-initiated Actor::EquipItem for
+// armor/weapons does not equip immediately - the request is pushed onto the
+// actor process equip queue (queue call at 0x88C726 inside EquipItem) and
+// the engine drains it when gameplay resumes on Pip-Boy close. That drain,
+// run in gameplay context, does the full job: inventory state, 1st-person
+// arm/gear model attach, and enchantment registration.
+//
+// DO NOT call QueueEquipItem (vtbl +0x178) manually via JIP's header: the
+// real function pops 11 args (retn 0x2C); JIP's declaration lists 10
+// (lockEquip missing). A 10-arg call corrupts the stack and crashes
+// (confirmed the hard way).
 // ═══════════════════════════════════════════════════════════════════════════════
 
 static bool RunVanillaItemCommand(PlayerCharacter *player, TESForm *form,
@@ -1610,6 +1619,46 @@ static bool RunVanillaItemCommand(PlayerCharacter *player, TESForm *form,
   ss << (equip ? "EquipItem " : "UnequipItem ") << std::hex << std::uppercase
      << std::setfill('0') << std::setw(8) << form->refID;
   return Script::RunScriptLine2(ss.str().c_str(), player, true);
+}
+
+// 0x95EA30's tail, exactly: armor/clothing only, resolve the item's
+// enchantment, apply it to the player's MagicTarget immediately.
+static void ApplyWornEnchantmentNow(PlayerCharacter *player, TESForm *form) {
+  if (form->typeID != kFormType_TESObjectARMO &&
+      form->typeID != kFormType_TESObjectCLOT)
+    return;
+  TESEnchantableForm *enchantable =
+      DYNAMIC_CAST(form, TESForm, TESEnchantableForm);
+  if (!enchantable || !enchantable->enchantItem)
+    return;
+  ThisStdCall<void>(0x824110, &player->magicTarget,
+                     &enchantable->enchantItem->magicItem);
+}
+
+// Single-item equip/unequip: vanilla script command first (model-correct),
+// native fallback (matches pre-fix behavior), then the stat fix on equip.
+static void EquipSingleItemWithInstantStats(PlayerCharacter *player,
+                                             bool doEquip, TESForm *form) {
+  if (doEquip) {
+    if (!RunVanillaItemCommand(player, form, true))
+      player->EquipItem(form, 1, NULL, 1, false, 1);
+    ApplyWornEnchantmentNow(player, form);
+  } else {
+    // Unequip needs no extra handling: effect removal inside UnequipItem is
+    // synchronous (confirmed by testing - unequips always updated instantly).
+    if (!RunVanillaItemCommand(player, form, false))
+      player->UnequipItem(form, 1, NULL, 1, false, 1);
+  }
+}
+
+// Stack/thrown/condition-targeted equip: the vanilla script command can't
+// express count or a specific ExtraDataList, so this always was (and
+// remains) a direct native call - only the stat fix is new here.
+static void EquipItemDirectWithInstantStats(PlayerCharacter *player,
+                                             TESForm *form, UInt32 count,
+                                             ExtraDataList *xDataList) {
+  player->EquipItem(form, count, xDataList, 1, false, 1);
+  ApplyWornEnchantmentNow(player, form);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2110,28 +2159,31 @@ static void ExecutePipBoyCommand(const std::string &line) {
     }
     if (verb == "EQUIP" && countToEquip > 1 && IsThrownWeapon(form)) {
       // Thrown weapons: equip the whole stack.
-      player->EquipItem(form, countToEquip, NULL, 1, false, 1);
+      EquipItemDirectWithInstantStats(player, form, countToEquip, NULL);
     } else if (verb == "EQUIP" && countToEquip > 1 && wantCnd >= 0) {
       // Several instances of one form differ by condition. Equip the exact
       // instance the user picked on the Pip-Boy instead of the engine's default
       // (highest-condition) match.
       bool found = false;
       ExtraDataList *xdl = FindStackByCondition(player, form, wantCnd, &found);
-      player->EquipItem(form, 1, found ? xdl : NULL, 1, false, 1);
+      EquipItemDirectWithInstantStats(player, form, 1, found ? xdl : NULL);
       PipBoyLog("CMD-IN", "EQUIP %08X targeted cnd=%d (%s)", formId, wantCnd,
                 found ? (xdl ? "matched stack" : "pristine") : "no match");
-    } else if (countToEquip > 1) {
+    } else if (verb == "EQUIP" && countToEquip > 1) {
       // Stacked but no per-instance target (e.g. no condition supplied):
       // preserve whole-stack equip to avoid splitting.
-      player->EquipItem(form, countToEquip, NULL, 1, false, 1);
+      EquipItemDirectWithInstantStats(player, form, countToEquip, NULL);
+    } else if (verb == "EQUIP") {
+      EquipSingleItemWithInstantStats(player, true, form);
     } else {
-      // Single item: USE (ingestibles) and EQUIP both go through vanilla equipitem
-      if (!RunVanillaItemCommand(player, form, true))
-        player->EquipItem(form, 1, NULL, 1, false, 1);
+      // USE (ingestibles): aid items always take the direct branch inside
+      // EquipItem (0x88C74E) and never showed the stale-AV bug - keep the
+      // original call untouched.
+      player->EquipItem(form, (countToEquip > 1) ? countToEquip : 1, NULL, 1,
+                        false, 1);
     }
   } else if (verb == "UNEQUIP") {
-    if (!RunVanillaItemCommand(player, form, false))
-      player->UnequipItem(form, 1, NULL, 1, false, 1);
+    EquipSingleItemWithInstantStats(player, false, form);
   } else if (verb == "DROP") {
     int dropCount = wantCnd > 0 ? wantCnd : 1;
     SInt32 total = GetTotalFormCount(player, form);
