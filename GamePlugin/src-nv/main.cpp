@@ -66,7 +66,7 @@
 // Write FalloutPipBoySync.log beside this DLL (Data/NVSE/Plugins/). Flip to 1
 // to enable PipBoyLog output (e.g. the TORCH-DIAG lines) for a debug session.
 #ifndef PIPBOY_VERBOSE_LOG
-#define PIPBOY_VERBOSE_LOG 1 // temporarily on for SELDIAG (read-only diagnostic)
+#define PIPBOY_VERBOSE_LOG 0
 #endif
 
 // How often to snapshot player state (in milliseconds). Lower = less delay
@@ -1601,37 +1601,10 @@ std::string BuildPlayerSnapshot() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ITEMS-list scroll position, preserved across a device-initiated
-// equip/unequip. Full history for whoever revisits this:
-//
-// Attempts 1-3 all used the engine's own save/restore pair
-// (0x77FFD0/0x7800C0) or a guessed trait, and all reproduced "list jumps to
-// the last-CLICKED row" (or, in attempt 3's case, broke mouse-wheel input
-// entirely by force-writing an unregistered trait ID with propagate=true -
-// never do that again). Root cause: 0x77FFD0 captures kTileValue_listindex
-// (trait 0xFAC) off the SELECTED tile, which only changes on a genuine
-// click - it was never the scroll position to begin with.
-//
-// The real trait, ground-truthed from the game's own XML (extracted from
-// Fallout - Misc.bsa - InventoryMenu's list box literally includes
-// menus/prefabs/scrollbar_vert.xml, NOT vertical_scroll.xml, which was an
-// earlier wrong guess), is "_current_value" directly on the scrollbar tile
-// itself (name confirmed live as "lb_scrollbar") - no child tile involved.
-//
-// SELDIAG logging further showed EquipItem/UnequipItem null out the
-// selected tile as a side effect, and SCROLL-DIAG logging showed
-// _current_value reads correctly (e.g. 11.00) at the very start of command
-// processing but has already been reset to 0 by the time RefreshPipBoyUI
-// runs at the end - i.e. the equip/unequip call itself resets the scroll,
-// not Refresh(). So the value has to be captured BEFORE EquipItem/
-// UnequipItem runs and re-applied right before Refresh() - reading it late
-// (where all previous attempts read it) always sees 0.
-//
-// PeekInventoryScrollValue() only ever reads (Tile::GetValue - the same
-// safe accessor already used elsewhere in this file). The eventual write
-// (RestoreInventoryScrollBeforeRefresh) is a plain memory store into the
-// native tabScrollPos struct, never Tile::SetFloat, never touching the
-// trait/reaction system - the mechanism that broke wheel input is not
-// reachable from this code path.
+// equip/unequip. EquipItem/UnequipItem reset the scrollbar's live scroll
+// value to 0 as a side effect of the underlying inventory change, and that
+// happens before Refresh() ever runs - so the value must be captured
+// before calling EquipItem/UnequipItem and reapplied right before Refresh().
 static float PeekInventoryScrollValue(const char *tag) {
   Menu *invMenu = InterfaceManager::GetMenuByType(kMenuType_Inventory);
   if (!invMenu) {
@@ -1733,7 +1706,7 @@ static bool RunVanillaItemCommand(PlayerCharacter *player, TESForm *form,
   return Script::RunScriptLine2(ss.str().c_str(), player, true);
 }
 
-// 0x95EA30's tail, exactly: armor/clothing only, resolve the item's
+// 0x95EA30's tail, exactly: resolve the item's
 // enchantment, apply it to the player's MagicTarget immediately.
 static void ApplyWornEnchantmentNow(PlayerCharacter *player, TESForm *form) {
   if (form->typeID != kFormType_TESObjectARMO &&
@@ -2249,16 +2222,10 @@ static void ExecutePipBoyCommand(const std::string &line) {
   if (!player || !form)
     return;
 
-  // SELDIAG: read-only - logs the InventoryMenu's selected-tile pointer
-  // before/after this command, to see whether EquipItem (vs RemoveItem)
-  // changes selection independent of Refresh(). No writes anywhere.
-  void *selBefore = nullptr;
-  if (Menu *invMenu = InterfaceManager::GetMenuByType(kMenuType_Inventory))
-    selBefore = *(void **)((UInt8 *)invMenu + 0xB8 + 0x10);
-  // Capture NOW, before EquipItem/UnequipItem runs below - confirmed via
-  // SCROLL-DIAG logging that the trait is already reset to 0 by the time
-  // RefreshPipBoyUI runs at the end of this function. See the comment above
-  // RestoreInventoryScrollBeforeRefresh for the full story.
+  // Capture the ITEMS list scroll position before
+  // EquipItem/UnequipItem runs below -
+  // it resets the scrollbar's trait to 0 as a side effect,
+  // so reading it any later always sees 0.
   g_pendingInventoryScroll = PeekInventoryScrollValue("cmd-start");
 
   if (verb == "USE" || verb == "EQUIP") {
@@ -2384,12 +2351,6 @@ static void ExecutePipBoyCommand(const std::string &line) {
       total -= subCount;
     }
   }
-
-  void *selAfter = nullptr;
-  if (Menu *invMenu = InterfaceManager::GetMenuByType(kMenuType_Inventory))
-    selAfter = *(void **)((UInt8 *)invMenu + 0xB8 + 0x10);
-  PipBoyLog("SELDIAG", "%s selBefore=%p selAfter=%p (changed=%d)",
-            verb.c_str(), selBefore, selAfter, selBefore != selAfter);
 
   RefreshPipBoyUI();
   PipBoyLog("CMD-OK", "%s -> form %08X", verb.c_str(), formId);

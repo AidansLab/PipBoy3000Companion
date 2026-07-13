@@ -182,6 +182,12 @@
   Player.prototype.getinfo = function (refresh) {
     const p = _getinfo.call(this, refresh);
     if (cmode) {
+      // maxHP must be applied before the hp fraction below is computed from
+      // it - the game's actual effective max (includes any perk/trait/mod
+      // bonus), overriding the stock (100 + 20*END + 5*(level-1)) formula
+      // above, which only accounts for vanilla bonuses.
+      const maxHP = this.getav('maxhp');
+      if (void 0 !== maxHP) p.maxHP = maxHP;
       const hp = this.getav('hp');
       if (void 0 !== hp) p.hp = E.clip(hp, 0, p.maxHP) / p.maxHP;
       // Carry weight is copied straight from the game (see sync-engine

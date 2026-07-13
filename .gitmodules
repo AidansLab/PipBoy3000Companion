@@ -5,3 +5,6 @@ branch = master
 [submodule "GamePlugin/xFOSE"]
 	path = GamePlugin/xFOSE
 	url = https://github.com/AtomicTEM/xFOSE.git
+[submodule "CompanionApp/EspruinoTools"]
+	path = CompanionApp/EspruinoTools
+	url = https://github.com/espruino/EspruinoTools.git

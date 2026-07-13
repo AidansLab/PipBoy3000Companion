@@ -448,8 +448,12 @@ export class SyncEngine extends EventEmitter {
       // Simple scalar attributes
       // 'hp' is the game's true health pool (kAV_Health) - the Pip-Boy firmware
       // uses it directly instead of averaging limb conditions when present.
-      // maxHP is NOT synced: the Pip-Boy derives it correctly from endurance/level.
-      const scalarAttrs = ['name', 'level', 'hp', 'karma', 'perceptioncondition', 'endurancecondition', 'leftattackcondition', 'rightattackcondition', 'leftmobilitycondition', 'rightmobilitycondition'];
+      // 'maxHP' is the game's actual effective max (kAV_Health max, includes
+      // any perk/trait/mod bonus) - synced ephemeral (like maxAP/maxWg below)
+      // so the firmware's own endurance/level formula (which only accounts for
+      // vanilla bonuses) is overridden by getinfo() whenever a mod changes max
+      // HP some other way.
+      const scalarAttrs = ['name', 'level', 'hp', 'maxHP', 'karma', 'perceptioncondition', 'endurancecondition', 'leftattackcondition', 'rightattackcondition', 'leftmobilitycondition', 'rightmobilitycondition'];
       for (const attr of scalarAttrs) {
         let current = player[attr];
         let previous = prevPlayer[attr];
@@ -460,6 +464,12 @@ export class SyncEngine extends EventEmitter {
         if (attr === 'hp') {
           current = current !== undefined ? Math.ceil(current) : undefined;
           previous = previous !== undefined ? Math.ceil(previous) : undefined;
+        }
+        // maxHP arrives as a float (2dp) but is a whole-number pool in
+        // practice - round to avoid diffing on floating-point noise.
+        if (attr === 'maxHP') {
+          current = current !== undefined ? Math.round(current) : undefined;
+          previous = previous !== undefined ? Math.round(previous) : undefined;
         }
 
         if (current !== undefined && current !== previous) {
@@ -477,9 +487,10 @@ export class SyncEngine extends EventEmitter {
           } else if (attr === 'name') {
             commands.push(`player.setav('name', ${JSON.stringify(player.name)}, !0)`);
           } else {
-            commands.push(`player.setav('${attr}', ${JSON.stringify(current)}, ${attr === 'hp' ? '!1' : '!0'})`);
+            const ephemeral = attr === 'hp' || attr === 'maxHP';
+            commands.push(`player.setav('${attr}', ${JSON.stringify(current)}, ${ephemeral ? '!1' : '!0'})`);
           }
-          if (attr === 'hp' || attr === 'level') {
+          if (attr === 'hp' || attr === 'maxHP' || attr === 'level') {
             commands.push(ITEMS_HEADER_SOFT_REFRESH_CMD);
           }
         }
@@ -629,12 +640,15 @@ export class SyncEngine extends EventEmitter {
       }
 
       // Set all scalar attributes (hp = true health pool from the game;
-      // maxHP is omitted - the Pip-Boy calculates it itself)
-      const attrs = ['hp', 'karma', 'perceptioncondition', 'endurancecondition', 'leftattackcondition', 'rightattackcondition', 'leftmobilitycondition', 'rightmobilitycondition'];
+      // maxHP = actual effective max, see the comment in _generateCommands)
+      const attrs = ['hp', 'maxHP', 'karma', 'perceptioncondition', 'endurancecondition', 'leftattackcondition', 'rightattackcondition', 'leftmobilitycondition', 'rightmobilitycondition'];
       for (const attr of attrs) {
         if (player[attr] !== undefined) {
-          const value = attr === 'hp' ? Math.ceil(player[attr]) : player[attr];
-          commands.push(`player.setav('${attr}', ${JSON.stringify(value)}, ${attr === 'hp' ? '!1' : '!0'})`);
+          const ephemeral = attr === 'hp' || attr === 'maxHP';
+          const value = attr === 'hp' ? Math.ceil(player[attr])
+            : attr === 'maxHP' ? Math.round(player[attr])
+            : player[attr];
+          commands.push(`player.setav('${attr}', ${JSON.stringify(value)}, ${ephemeral ? '!1' : '!0'})`);
         }
       }
 
