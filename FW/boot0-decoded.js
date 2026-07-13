@@ -153,6 +153,31 @@
     return _changeMenu.apply(this, arguments);
   };
 
+  // Menu JS loads read from the SD card, which is not re-entrant: if a sync
+  // burst is mid-write (INV/DAM/REP flushes arrive over USB at any time), the
+  // fs.readFileSync inside stock Pip.loadMenu can fail and the user gets the
+  // "UNABLE TO LOAD AMMO.JS" screen for a menu that exists. Pre-flight the
+  // read here, if it fails, retry the whole load once shortly after (the
+  // write in progress is done within milliseconds).
+  const _loadMenu = Pip.loadMenu;
+  Pip.loadMenu = function (src, params) {
+    let path;
+    try {
+      path = 'JS/' + (src || Pip.getMode(Pip.MODE).footer[Pip.MENUX].src);
+    } catch (e) {
+      return _loadMenu.call(this, src, params);
+    }
+    let ok = false;
+    try {
+      ok = !!require('fs').readFileSync(path);
+    } catch (e) {}
+    if (ok) return _loadMenu.call(this, src, params);
+    debug(`Menu preflight read failed for ${path}, retrying once`);
+    setTimeout(function () {
+      _loadMenu.call(Pip, src, params);
+    }, 250);
+  };
+
   const _getinfo = Player.prototype.getinfo;
   Player.prototype.getinfo = function (refresh) {
     const p = _getinfo.call(this, refresh);

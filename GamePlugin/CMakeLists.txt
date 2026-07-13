@@ -125,7 +125,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 # Set output name (no "lib" prefix)
 set_target_properties(${PROJECT_NAME} PROPERTIES
     PREFIX ""
-    OUTPUT_NAME "Pip-Boy Sync NV By Aidan's Lab"
+    OUTPUT_NAME "Pip-Boy Sync NV by Aidan's Lab"
     SUFFIX ".dll"
 )
 
@@ -204,7 +204,7 @@ target_link_libraries(FalloutPipBoySyncFO3 PRIVATE
 
 set_target_properties(FalloutPipBoySyncFO3 PROPERTIES
     PREFIX ""
-    OUTPUT_NAME "Pip-Boy Sync F3 By Aidan's Lab"
+    OUTPUT_NAME "Pip-Boy Sync F3 by Aidan's Lab"
     SUFFIX ".dll"
     CXX_STANDARD 14
     CXX_STANDARD_REQUIRED ON
