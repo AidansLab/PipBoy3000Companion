@@ -33,6 +33,8 @@ Sync your **Fallout: New Vegas** and **Fallout 3** player stats and inventory to
 2. **Companion App** (Node.js) receives JSON snapshots over a Windows Named Pipe, diffs against previous state
 3. **Pip-Boy commands** Espruino commands are sent over USB serial to update the device
 
+### You can find an in depth feature walkthrough [here](https://www.youtube.com/watch?v=HOHzIO06UVo)
+
 ## Initial Setup
 - Download the latest companion app exe from the [Releases page](https://github.com/AidansLab/PipBoy3000Companion/releases)
 - Install [NVSE](https://www.nexusmods.com/newvegas/mods/67883?tab=files) or [FOSE](https://www.nexusmods.com/fallout3/mods/8606?tab=description) depending on your game.
