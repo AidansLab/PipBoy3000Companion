@@ -42,7 +42,7 @@ Sync your **Fallout: New Vegas** and **Fallout 3** player stats and inventory to
 - Open the companion app and click "Install Companion Menus & Boot Patch" to install the companion firmware to your device. Wait for it to reboot and connect to the app.
 - Launch your game via your mod manager, or script extender loader (nvse_loader.exe/fose_loader.exe).
 
-### General Usage
+### Post-Setup Usage
  - Set the Pip-Boy mode for the Fallout you will be playing
  - Open the companion app
  - Start the Fallout you chose
@@ -125,7 +125,7 @@ cmake --build build-fo3 --config Release
 - Pip-Boy 3000: [The Wand Company](https://www.thewandcompany.com/)
 - Script extenders: [xNVSE](https://www.nexusmods.com/newvegas/mods/67883) and [FOSE](https://fose.silverlock.org/) teams
 - Helpful Resources: [JIP-LN-NVSE](https://github.com/jazzisparis/JIP-LN-NVSE) and [Command Extender](https://www.nexusmods.com/fallout3/mods/23682)
-- Testers: Special thanks to [Theeohn](https://www.youtube.com/channel/UCEPD_e4JH7xFLzdrPGUM_Gg) and Jim D for testing.
+- Testers: Special thanks to [Theeohn](https://www.youtube.com/channel/UCEPD_e4JH7xFLzdrPGUM_Gg) and Jim D for initial testing, as well as BeanutPudder, Ferehn, and Lore for later testing.
 
 ## License
 
