@@ -352,10 +352,28 @@ static LONG FO3PumpTicks() { return g_pumpTickCount; }
 // RUNTIME FORM DISCOVERY
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// Locate the Pip-Boy light SpellItem by scanning the spell list for a full
-// name containing both "pip" and "light" (case-insensitive). Avoids
-// hardcoding a form id the SDK doesn't publish.
+// Editor ID "PipBoyLight" (SPEL, dataSize 76) sits at FormID 0x00000147 in
+// the base Fallout3.esm (mod index 0, so this never shifts with load
+// order) - confirmed by reading the raw record header directly out of the
+// master file: tag="SPEL" dataSize=76 flags=0 formID=0x00000147
+// VCS1=0x003F3616 formVersion=8, immediately followed by an EDID subrecord
+// (size 12) containing "PipBoyLight\0". This was previously located via a
+// substring name scan ("pip"+"light" in the full display name) instead,
+// which never actually matched anything - GetFullName() returns FO3's
+// display name for the spell, not its editor ID, and vanilla Pip-Boy
+// light apparently has no in-world display name to search - so
+// GetPipBoyLightSpell() always returned NULL and every torch sync call
+// silently no-opped. Direct lookup fixes that; the old scan is kept as a
+// fallback only in case a mod removes/replaces the base form entirely.
+static const UInt32 kFormId_PipBoyLightSpell = 0x00000147;
+
 static SpellItem *FO3FindPipBoyLightSpell() {
+  if (TESForm *form = LookupFormByID(kFormId_PipBoyLightSpell)) {
+    if (form->typeID == kFormType_Spell)
+      return (SpellItem *)form;
+  }
+
+  // Fallback: scan by display name in case a mod replaced the base form.
   DataHandler *dh = DataHandler::Get();
   if (!dh)
     return NULL;

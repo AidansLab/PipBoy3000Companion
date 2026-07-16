@@ -158,7 +158,6 @@ static std::vector<std::string> g_commandQueue;
 // Vanilla command handlers, located by name at load.
 static CommandInfo *g_cmdCIOS = NULL;
 static CommandInfo *g_cmdDispel = NULL;
-static CommandInfo *g_cmdIsSpellTarget = NULL;
 static CommandInfo *g_cmdHasPerk = NULL;
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -615,10 +614,26 @@ static const char *GetFormTypeString(UInt8 typeID) {
 static SpellItem *g_pipBoyLightSpell = NULL;
 static bool g_pipBoyLightSearched = false;
 
+// The engine's own cached PipBoyLight spell pointer, FO3's equivalent of
+// NV's 0x11C358C global. Found by scanning Fallout3.exe for `push 0x147`
+// (the spell's FormID): the bootstrap at 0x408A2C looks the form up and
+// stores it here (creating a default SPEL if the lookup fails, so after
+// startup this global is always populated), and the vanilla TAB-hold
+// flashlight handler at 0x7748C0 reads the spell back from this exact
+// global for its own state check / cast / remove calls.
+static SpellItem **const g_enginePipBoyLightSpell = (SpellItem **)0x106C86C;
+
 static SpellItem *GetPipBoyLightSpell() {
   if (!g_pipBoyLightSearched && g_gameLoaded) {
     g_pipBoyLightSearched = true;
-    g_pipBoyLightSpell = FO3FindPipBoyLightSpell();
+    // Prefer the engine's own cached pointer - it's the exact object the
+    // vanilla TAB-hold toggle uses, so state checks/removes against it can
+    // never miss due to a mod replacing the base form. The FormID lookup
+    // stays as a fallback for the (unexpected) case of the global being
+    // empty.
+    g_pipBoyLightSpell = *g_enginePipBoyLightSpell;
+    if (!g_pipBoyLightSpell)
+      g_pipBoyLightSpell = FO3FindPipBoyLightSpell();
     if (g_pipBoyLightSpell)
       PipBoyLog("TORCH", "Pip-Boy light spell found: %08X (%s)",
                 g_pipBoyLightSpell->refID, GetFullName(g_pipBoyLightSpell));
@@ -629,16 +644,21 @@ static SpellItem *GetPipBoyLightSpell() {
   return g_pipBoyLightSpell;
 }
 
+// MagicTarget::HasMagicItemEffect(MagicItem*, UInt32) - returns bool (al).
+// This is the EXACT state check the vanilla TAB-hold flashlight handler
+// (0x7748C0) performs before deciding to toggle: `push 1; push magicItem;
+// ecx = &actor->magicTarget; call 0x6B6D00`.
+static const UInt32 kAddr_MagicTargetHasMagicItemEffect = 0x6B6D00;
+
 static bool IsPipBoyLightOn(PlayerCharacter *player) {
   if (!player)
     return false;
   SpellItem *pipBoyLight = GetPipBoyLightSpell();
   if (!pipBoyLight)
     return false;
-  double result = 0.0;
-  if (!EvalGameCommand(g_cmdIsSpellTarget, player, pipBoyLight, NULL, &result))
-    return false;
-  return result != 0.0;
+  return ThisCall<bool>(kAddr_MagicTargetHasMagicItemEffect,
+                        &player->magicTarget, &pipBoyLight->magicItem,
+                        (UInt32)1);
 }
 
 // Companion torch intent (physical Pip-Boy ITEMS shortcut).
@@ -646,6 +666,14 @@ static bool g_companionTorchDesired = false;
 static bool g_pipBoyChromeSession = false;
 static bool g_pipBoyTorchUiWasActive = false;
 static bool g_lastObservedTorchOn = false;
+// True while a companion-initiated toggle is still propagating (mirrors the
+// NV plugin's g_companionTorchPending). The cast in EngineCastPipBoyLightOnSelf
+// applies through the same queued-effect mechanism NV uses, and the Pip-Boy
+// menu pauses gameplay, so IsPipBoyLightOn() can keep reading the stale
+// pre-toggle value for the menu's entire lifetime. Without this guard, the
+// main-loop observer below mistakes that stale read for a genuine in-game
+// toggle and overwrites g_companionTorchDesired right back to the old value.
+static bool g_companionTorchPending = false;
 
 // True while the Pip-Boy 3D chrome is visible (tabs or Repair from Pip-Boy).
 static bool IsPipBoyTorchUiActive() {
@@ -656,9 +684,33 @@ static bool IsPipBoyTorchUiActive() {
   return false;
 }
 
-// Turn the in-game Pip-Boy flashlight on or off (companion-initiated).
-// suppressPipBoyGlow is accepted for interface parity with the NV plugin, on
-// FO3 both paths run the same spell cast/dispel (see section comment).
+// MagicCaster vtable slot 0: cast-on-self, args (SpellItem*, 0). This is
+// verbatim what the vanilla TAB-hold flashlight handler's ON branch does
+// (0x7749F3 in Fallout3.exe 1.7.0.3: loads the spell from the engine's own
+// 0x106C86C global, `ecx = &player->magicCaster`, calls vtbl[0] with the
+// SpellItem* - the full form here, unlike the check/remove calls which take
+// the MagicItem sub-object - plus a 0).
+static void EngineCastPipBoyLightOnSelf(PlayerCharacter *player,
+                                         SpellItem *pipBoyLight) {
+  void *magicCaster = &player->magicCaster;
+  void **vtbl = *(void ***)magicCaster;
+  using CastFn = void(__thiscall *)(void *, SpellItem *, UInt32);
+  ((CastFn)vtbl[0])(magicCaster, pipBoyLight, 0);
+}
+
+// MagicTarget::RemoveEffect - thiscall + 3 stack args (ret 0xC), the same
+// routine both the vanilla Dispel handler (0x5234A0) and the vanilla
+// TAB-hold flashlight handler's OFF branch (0x774975..0x77498D) call on
+// &actor->magicTarget.
+static const UInt32 kAddr_MagicTargetRemoveEffect = 0x6B76E0;
+static void EngineRemovePipBoyLightFromSelf(PlayerCharacter *player,
+                                             SpellItem *pipBoyLight) {
+  ThisCall<void>(kAddr_MagicTargetRemoveEffect, &player->magicTarget,
+                 &pipBoyLight->magicItem, (UInt32)0, (UInt32)0);
+}
+
+// suppressPipBoyGlow is accepted for interface parity with the NV plugin;
+// FO3 has no separate FOPipboyManager glow-suppression path to skip.
 static void SetPipBoyLight(PlayerCharacter *player, bool wantOn,
                            bool suppressPipBoyGlow = false) {
   (void)suppressPipBoyGlow;
@@ -672,16 +724,28 @@ static void SetPipBoyLight(PlayerCharacter *player, bool wantOn,
   if (IsPipBoyLightOn(player) == wantOn)
     return;
 
-  GameCommandArg arg = GameCommandArg::Form(pipBoyLight);
-  bool ok;
-  if (wantOn)
-    ok = CallGameCommand(g_cmdCIOS, player, &arg, 1);
-  else
-    ok = CallGameCommand(g_cmdDispel, player, &arg, 1);
+  // Committed to changing the state - see g_companionTorchPending's comment.
+  g_companionTorchPending = true;
 
-  PipBoyLog("TORCH", "%s via %s (%s)", wantOn ? "ON" : "OFF",
-            wantOn ? "CastImmediateOnSelf" : "Dispel",
-            ok ? "ok" : "FAILED");
+  if (wantOn) {
+    EngineCastPipBoyLightOnSelf(player, pipBoyLight);
+  } else {
+    EngineRemovePipBoyLightFromSelf(player, pipBoyLight);
+  }
+  bool nowOn = IsPipBoyLightOn(player);
+  PipBoyLog("TORCH", "%s via native call (now %s)", wantOn ? "ON" : "OFF",
+            nowOn ? "ON" : "OFF");
+
+  if (nowOn != wantOn) {
+    // Native call didn't take for this direction - fall back to the (likely
+    // broken for argument-taking commands, but cheap to try) script path.
+    GameCommandArg arg = GameCommandArg::Form(pipBoyLight);
+    bool ok = wantOn ? CallGameCommand(g_cmdCIOS, player, &arg, 1)
+                     : CallGameCommand(g_cmdDispel, player, &arg, 1);
+    PipBoyLog("TORCH", "native call did not reach %s, fallback via %s (%s, now %s)",
+              wantOn ? "ON" : "OFF", wantOn ? "CIOS" : "Dispel",
+              ok ? "ok" : "FAILED", IsPipBoyLightOn(player) ? "ON" : "OFF");
+  }
 }
 
 // After closing the in-game Pip-Boy, re-assert companion intent so the world
@@ -690,9 +754,14 @@ static void ReconcileCompanionTorchAfterPipBoyClose() {
   PlayerCharacter *player = PlayerCharacter::GetSingleton();
   if (!player)
     return;
+  PipBoyLog("TORCH-DIAG", "reconcile enter desired=%d beforeAny=%d",
+            g_companionTorchDesired ? 1 : 0,
+            IsPipBoyLightOn(player) ? 1 : 0);
   SetPipBoyLight(player, g_companionTorchDesired);
-  PipBoyLog("TORCH", "reconciled %s after Pip-Boy menu close",
-            g_companionTorchDesired ? "ON" : "OFF");
+  PipBoyLog("TORCH", "reconciled %s after Pip-Boy menu close (now %s, pending=%d)",
+            g_companionTorchDesired ? "ON" : "OFF",
+            IsPipBoyLightOn(player) ? "ON" : "OFF",
+            g_companionTorchPending ? 1 : 0);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1881,14 +1950,21 @@ static void OnMainGameLoop() {
     }
   }
 
-  // In-game flashlight toggles (holding TAB) - keep companion intent aligned
-  // so snapshots reflect actual game state after the user toggles the light
-  // outside the physical Pip-Boy shortcut.
+  // In-game flashlight toggles (holding TAB), including while the in-game
+  // Pip-Boy UI is open - keep companion intent aligned so snapshots reflect
+  // actual game state, and so ReconcileCompanionTorchAfterPipBoyClose()
+  // doesn't get stomped by this same observer reading a still-propagating
+  // toggle as if it were a fresh user action (see g_companionTorchPending).
   {
     PlayerCharacter *player = PlayerCharacter::GetSingleton();
-    if (player && !IsPipBoyTorchUiActive()) {
+    if (player) {
       const bool torchOn = IsPipBoyLightOn(player);
-      if (torchOn != g_lastObservedTorchOn) {
+      if (g_companionTorchPending) {
+        if (torchOn == g_companionTorchDesired) {
+          g_companionTorchPending = false;
+          g_lastObservedTorchOn = torchOn;
+        }
+      } else if (torchOn != g_lastObservedTorchOn) {
         g_companionTorchDesired = torchOn;
         g_lastObservedTorchOn = torchOn;
       }
@@ -2088,7 +2164,6 @@ static void LookupGameCommands() {
   } wanted[] = {
       {&g_cmdCIOS, "CastImmediateOnSelf", false},
       {&g_cmdDispel, "Dispel", false},
-      {&g_cmdIsSpellTarget, "IsSpellTarget", false},
       {&g_cmdHasPerk, "HasPerk", false},
   };
   for (auto &w : wanted) {

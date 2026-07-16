@@ -36,7 +36,7 @@ Sync your **Fallout: New Vegas** and **Fallout 3** player stats and inventory to
 ## Initial Setup
 - Download the latest companion app exe from the [Releases page](https://github.com/AidansLab/PipBoy3000Companion/releases)
 - Install [NVSE](https://www.nexusmods.com/newvegas/mods/67883?tab=files) or [FOSE](https://www.nexusmods.com/fallout3/mods/8606?tab=description) depending on your game.
-- Install the latest plugin DLL for [Fallout New Vegas]() or [Fallout 3]() by clicking the Mod manager download if you are using a mod manager, or manually install from the [Releases page](https://github.com/AidansLab/PipBoy3000Companion/releases) to your NVSE/FOSE plugins folder.
+- Install the latest plugin version from Nexus Mods for [Fallout New Vegas](https://www.nexusmods.com/newvegas/mods/98176) or [Fallout 3]() by clicking the Mod manager download, alternatively manually download and install the ZIP via your mod managers manual mod install, or manually install the DLL from the [Releases page](https://github.com/AidansLab/PipBoy3000Companion/releases) to your NVSE/FOSE plugins folder.
 - Plug in your Pip-Boy 3000 with a USB C cable, make sure to use a USB cable that supports data transfer, not just charging. The one that came with your Pip-Boy works great.
 - Make sure your Pip-Boy is set to the same mode as the game you want to sync with by going to DATA>Settings>Pip-Boy mode and selecting New Vegas or Fallout 3.
 - Open the companion app and click "Install Companion Menus & Boot Patch" to install the companion firmware to your device. Wait for it to reboot and connect to the app.
