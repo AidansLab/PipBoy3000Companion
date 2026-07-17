@@ -1,11 +1,3 @@
-const packageJson = require('./package.json');
-
-// Strip off the `.0` from the version if it exists
-let displayVersion = packageJson.version;
-if (displayVersion.endsWith('.0')) {
-  displayVersion = displayVersion.slice(0, -2);
-}
-
 module.exports = {
   appId: "com.fallout.pipboy.sync",
   productName: "Pip-Boy Sync",
@@ -36,6 +28,6 @@ module.exports = {
       }
     ],
     signAndEditExecutable: false,
-    artifactName: `\${productName} ${displayVersion}.\${ext}`
+    artifactName: "${productName}.${ext}"
   }
 };
