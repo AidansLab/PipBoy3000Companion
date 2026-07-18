@@ -45,6 +45,144 @@ const MENU_SKIP = new Set(['FW.JS']);
 /** Re-upload-and-reverify attempts per file if the CRC32 doesn't match. */
 const UPLOAD_VERIFY_MAX_ATTEMPTS = 3;
 
+/**
+ * Minimum internal-Storage bytes needed before uploading .boot0 (~15.4 KB
+ * plus write slack). Espruino needs contiguous room for the whole new copy
+ * during the write, even when replacing an existing .boot0.
+ */
+export const STORAGE_MIN_FREE_BYTES = 17 * 1024;
+
+/**
+ * Reclaimable device files: crash report + the stock firmware's debug/log
+ * appenders (FW.JS debug() writes to debug.txt on battery power until free
+ * Storage drops to ~4 KB, which is exactly the state that starves a .boot0
+ * install - seen in the field on a device with 63 KB of debug.txt).
+ *
+ * Deletion walks Storage.list() and erases every entry whose base name
+ * matches, rather than going through the StorageFile API: the logs are
+ * usually chunked StorageFiles (entries named "debug.txt\1", "\2", ... -
+ * each chunk is an ordinary Storage entry underneath, so plain erase works
+ * on them), but a plain "debug.txt" written by other firmware variants gets
+ * caught by the exact-name match too. An earlier revision used
+ * Storage.open(name,'r').getLength() to probe before erasing and left a
+ * field device's debug.txt untouched - enumerating what actually exists
+ * makes no assumptions about which form the file takes.
+ */
+// NOTE: deletion walks Storage.list() and picks the erase API per entry
+// form, because field devices have held BOTH forms of these logs:
+//   - plain records named exactly "debug.txt"  -> Storage.erase(name)
+//     (the StorageFile API can never delete these),
+//   - chunked StorageFiles ("debug.txt\1", "\2", ...) -> the documented
+//     Storage.open(base,'r').erase(), which drops every chunk (the
+//     Reference explicitly says not to use Storage.erase on StorageFiles).
+// open() MUST get its mode argument - open(name) without one throws.
+// Erase failures are returned in `failed` instead of being swallowed - a
+// silent catch here cost several support round-trips.
+const STORAGE_RECLAIM_EXPR =
+  "(()=>{var s=require('Storage');var f=s.getFree();" +
+  `if(f>=${STORAGE_MIN_FREE_BYTES})return{free:f,cleaned:[],failed:[]};` +
+  "var t=['ERROR','debug.txt','log.txt'];var c=[],fl=[];" +
+  "s.list().forEach(x=>{" +
+  "var b=x,sf=false;" +
+  "if(x.length&&x.charCodeAt(x.length-1)<32){b=x.substr(0,x.length-1);sf=true}" +
+  "if(t.indexOf(b)<0)return;" +
+  "try{" +
+  "if(sf){if(c.indexOf(b)<0){s.open(b,'r').erase();c.push(b)}}" +
+  "else{s.erase(x);if(c.indexOf(b)<0)c.push(b)}" +
+  "}catch(e){fl.push(b+': '+e.message)}" +
+  "});" +
+  "s.compact();" +
+  "return{free:s.getFree(),cleaned:c,failed:fl}})()";
+
+/** Storage listing with per-entry byte sizes, for the too-full error message. */
+const STORAGE_LISTING_EXPR =
+  "require('Storage').list().map(n=>{" +
+  "try{var d=require('Storage').read(n);return n+' ('+(d===undefined?'?':d.length)+' b)'}" +
+  "catch(e){return n+' (?)'}})";
+
+/**
+ * bridge.eval() resolves with the RAW response text, and the REPL may prefix
+ * it with boot-banner noise (the prepare step's reset() prints the Espruino
+ * banner, which lands in the first eval's buffer) - same issue
+ * SerialBridge.getFileCRC32 handles for numeric results. The JSON payload is
+ * always last in the buffer, so parse from the latest '{'/'[' that yields
+ * valid JSON. Returns undefined if nothing parses.
+ */
+function parseDeviceJson(raw) {
+  const text = String(raw).trim();
+  try {
+    return JSON.parse(text);
+  } catch {
+    // Candidate start positions, latest first (banner noise precedes JSON;
+    // note the banner itself contains '[' inside ANSI escapes, so scanning
+    // from the end is what makes this safe).
+    const starts = [text.lastIndexOf('{'), text.lastIndexOf('[')]
+      .filter((i) => i >= 0)
+      .sort((a, b) => b - a);
+    for (const i of starts) {
+      try {
+        return JSON.parse(text.slice(i));
+      } catch {
+        // Try the next candidate.
+      }
+    }
+    return undefined;
+  }
+}
+
+/**
+ * Ensure internal Storage has room for the .boot0 patch. If free space is
+ * under STORAGE_MIN_FREE_BYTES, erase ERROR/debug.txt/log.txt (when present),
+ * compact, and re-check. Throws with a diagnostic listing if Storage is
+ * still too full - failing here beats uploading the SD menus and then dying
+ * on .boot0, which would leave menus and boot patch at mismatched versions.
+ * @param {import('./serial-bridge.js').SerialBridge} bridge
+ * @param {Function} log
+ */
+export async function ensureStorageSpace(bridge, log) {
+  // compact() rewrites flash pages, so allow well beyond the eval default.
+  const raw = await bridge.eval(STORAGE_RECLAIM_EXPR, 20000);
+  const result = parseDeviceJson(raw);
+  if (!result || typeof result.free !== 'number' || !Array.isArray(result.cleaned)) {
+    throw new Error(
+      `Storage space check returned unexpected result: ${JSON.stringify(String(raw).slice(0, 200))}`
+    );
+  }
+
+  if (result.cleaned.length > 0) {
+    log('info', `Storage was low - deleted ${result.cleaned.join(', ')} and compacted (${result.free} bytes free now)`);
+  }
+  if (Array.isArray(result.failed) && result.failed.length > 0) {
+    log('warn', `Storage cleanup could not erase: ${result.failed.join('; ')}`);
+  }
+
+  if (result.free < STORAGE_MIN_FREE_BYTES) {
+    let listing = '';
+    let hint = '';
+    try {
+      const list = parseDeviceJson(await bridge.eval(STORAGE_LISTING_EXPR, 10000));
+      if (Array.isArray(list)) {
+        // JSON-escape each name: StorageFile chunk entries end in control
+        // chars ("debug.txt\1") that would otherwise print invisibly and
+        // make the listing lie about what's on the device.
+        listing = ` Storage contains: ${list.map((n) => JSON.stringify(n)).join(', ')}.`;
+        if (list.some((n) => String(n).startsWith('.bootcde'))) {
+          hint =
+            ` .bootcde is code saved from the Espruino IDE ("Save on Send") - if you don't need it, ` +
+            `free its space with require('Storage').erase('.bootcde').`;
+        }
+      }
+    } catch {
+      // Listing is best-effort diagnostics only.
+    }
+    throw new Error(
+      `Not enough free Pip-Boy Storage for the .boot0 patch: ${result.free} bytes free, ` +
+      `need ${STORAGE_MIN_FREE_BYTES}.${listing} Connect with the Espruino Web IDE to see ` +
+      `what is using the space, then retry.${hint}`
+    );
+  }
+}
+
 // Standard CRC-32 (zlib polynomial), matching the device's E.CRC32 - local
 // table-based implementation rather than node:zlib's crc32, which only
 // exists from Node 20.15+ while package.json supports >=18.
@@ -173,6 +311,9 @@ export async function flashFirmware(bridge, options = {}) {
     log('info', 'Pausing Pip-Boy UI before upload...');
     await bridge.sendCommand(PREPARE_FOR_FLASH_CMD);
     await bridge._sleep(400);
+
+    log('info', 'Checking free device Storage...');
+    await ensureStorageSpace(bridge, log);
 
     await bridge.sendCommand(`try{require('fs').statSync('JS')}catch(e){require('fs').mkdir('JS')}`);
 

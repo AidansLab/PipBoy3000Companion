@@ -1,6 +1,6 @@
 module.exports = {
   appId: "com.fallout.pipboy.sync",
-  productName: "Pip-Boy Sync",
+  productName: "Pip-Boy_Sync",
   icon: "build/icon.ico",
   directories: {
     output: "release"
