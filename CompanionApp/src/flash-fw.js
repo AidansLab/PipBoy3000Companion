@@ -310,7 +310,7 @@ export async function flashFirmware(bridge, options = {}) {
 
     log('info', 'Pausing Pip-Boy UI before upload...');
     await bridge.sendCommand(PREPARE_FOR_FLASH_CMD);
-    await bridge._sleep(400);
+    await bridge.awaitReconnectAfterReboot(30000); // timed out if i did not set this value higher.
 
     log('info', 'Checking free device Storage...');
     await ensureStorageSpace(bridge, log);
