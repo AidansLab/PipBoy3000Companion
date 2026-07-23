@@ -129,6 +129,14 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
     SUFFIX ".dll"
 )
 
+# Ensure the zip staging root exists before anything tries to use it as a
+# working directory - Windows refuses to even launch a process whose
+# specified CWD doesn't exist yet, which fails the very first build
+# (MSB3073, "The system cannot find the path specified").
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/zip-nv"
+)
+
 # Release zip with the mod-manager layout (paths relative to Data/):
 #   nvse/plugins/<OUTPUT_NAME>.dll
 # Staged then zipped with cmake -E tar so no external zip tool is needed.
