@@ -120,6 +120,7 @@ cmake --build build-fo3 --config Release
 
 ## Roadmap
 - Item mod display support (+)
+- Map syncing
 
 ### Credits
 
