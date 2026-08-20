@@ -121,6 +121,9 @@ cmake --build build-fo3 --config Release
 ## Roadmap
 - Item mod display support (+)
 - Map syncing
+- Linux Support
+- Pip OS Version Checking
+- FO3 DLC
 
 ### Credits
 
