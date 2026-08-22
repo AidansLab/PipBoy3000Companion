@@ -10,6 +10,7 @@
     "flash-fw": "node src/flash-fw-cli.js",
     "build-fw": "node scripts/build-fw.mjs",
     "build:win": "node scripts/generate-icon.mjs && node scripts/prebuild-win.mjs && electron-builder --win portable --config electron-builder.config.cjs --config.win.signAndEditExecutable=false",
+    "build:linux": "electron-builder --linux AppImage --config electron-builder.config.cjs",
     "generate-icon": "node scripts/generate-icon.mjs",
     "test": "node --test test/*.test.js",
     "postinstall": "electron-builder install-app-deps"

@@ -29,5 +29,14 @@ module.exports = {
     ],
     signAndEditExecutable: false,
     artifactName: "${productName}.${ext}"
+  },
+  linux: {
+    target: [
+      { target: "AppImage", 
+        arch: ["x64"] 
+      }
+    ],
+    icon: "build/icon.png", 
+    artifactName: "${productName}.${ext}"
   }
 };
