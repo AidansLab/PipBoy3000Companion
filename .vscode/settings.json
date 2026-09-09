@@ -1,0 +1,24 @@
+{
+  "files.watcherExclude": {
+    "**/CompanionApp/node_modules/**": true,
+    "**/CompanionApp/dist/**": true,
+    "**/CompanionApp/release/**": true,
+    "**/GamePlugin/build/**": true,
+    "**/GamePlugin/build-nv/**": true,
+    "**/GamePlugin/build-fo3/**": true,
+    "**/GamePlugin/x64/**": true,
+    "**/GamePlugin/.vs/**": true,
+    "**/FW/FW Build/**": true
+  },
+  "files.exclude": {
+    "**/CompanionApp/release": true,
+    "**/GamePlugin/build-nv": true,
+    "**/GamePlugin/build-fo3": true
+  },
+  "search.exclude": {
+    "**/CompanionApp/release": true,
+    "**/GamePlugin/build-nv": true,
+    "**/GamePlugin/build-fo3": true
+  },
+  "cmake.ignoreCMakeListsMissing": true
+}

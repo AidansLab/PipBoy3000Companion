@@ -79,7 +79,7 @@ export const STORAGE_MIN_FREE_BYTES = 17 * 1024;
 // Erase failures are returned in `failed` instead of being swallowed - a
 // silent catch here cost several support round-trips.
 const STORAGE_RECLAIM_EXPR =
-  "(()=>{var s=require('Storage');var f=s.getFree();" +
+  "(()=>{var s=require('Storage');s.compact();var f=s.getFree();" +
   `if(f>=${STORAGE_MIN_FREE_BYTES})return{free:f,cleaned:[],failed:[]};` +
   "var t=['ERROR','debug.txt','log.txt'];var c=[],fl=[];" +
   "s.list().forEach(x=>{" +
@@ -131,11 +131,16 @@ function parseDeviceJson(raw) {
 }
 
 /**
- * Ensure internal Storage has room for the .boot0 patch. If free space is
- * under STORAGE_MIN_FREE_BYTES, erase ERROR/debug.txt/log.txt (when present),
- * compact, and re-check. Throws with a diagnostic listing if Storage is
- * still too full - failing here beats uploading the SD menus and then dying
- * on .boot0, which would leave menus and boot patch at mismatched versions.
+ * Ensure internal Storage has room for the .boot0 patch. Always compacts
+ * first (reclaims fragmented/trash bytes left by earlier erases, so the free
+ * count reflects what's actually usable) before checking against
+ * STORAGE_MIN_FREE_BYTES; if still short, erases ERROR/debug.txt/log.txt
+ * (when present) and compacts again. Throws with a diagnostic listing if
+ * Storage is still too full - failing here beats uploading the SD menus and
+ * then dying on .boot0, which would leave menus and boot patch at mismatched
+ * versions. The caller's earlier reset() left the Pip-Boy with no menu
+ * running, so a reboot is issued before giving up, returning it to normal
+ * use even though the upload itself can't proceed.
  * @param {import('./serial-bridge.js').SerialBridge} bridge
  * @param {Function} log
  */
@@ -175,6 +180,17 @@ export async function ensureStorageSpace(bridge, log) {
     } catch {
       // Listing is best-effort diagnostics only.
     }
+
+    // The prepare step's reset() already stopped the running menu/UI, so
+    // without this the Pip-Boy would sit unresponsive until power-cycled
+    // even though the upload itself is being aborted here.
+    log('warn', 'Not enough Storage to proceed - rebooting Pip-Boy back to normal operation...');
+    try {
+      await bridge.sendCommand('E.reboot();');
+    } catch {
+      // Best-effort recovery only; the storage error below is what matters.
+    }
+
     throw new Error(
       `Not enough free Pip-Boy Storage for the .boot0 patch: ${result.free} bytes free, ` +
       `need ${STORAGE_MIN_FREE_BYTES}.${listing} Connect with the Espruino Web IDE to see ` +

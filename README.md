@@ -122,8 +122,8 @@ cmake --build build-fo3 --config Release
 - Item mod display support (+)
 - Map syncing
 - Linux Support
-- Pip OS Version Checking
-- FO3 DLC
+- ~~FO3 DLC~~
+- ~~Fix undiscovered factions staying hidden on pre-sync data restore~~
 
 ### Credits
 

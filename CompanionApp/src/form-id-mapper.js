@@ -26,8 +26,8 @@
  * those files use fixed plugin offsets baked into the replica firmware - they
  * do NOT follow the player's live mod load order.
  *
- * For FNV, the game plugin emits a `loadOrder` array so we can identify which
- * plugin owns a form ID. The Pip-Boy then uses a fixed high byte per plugin
+ * Both game plugins emit a `loadOrder` array so we can identify which plugin
+ * owns a form ID. The Pip-Boy then uses a fixed high byte per plugin
  * (independent of where that plugin sits in the player's load order).
  */
 
@@ -56,11 +56,36 @@ const FNV_PIPBOY_PLUGIN_HIGH_BYTE = {
 /** @deprecated Use FNV_PIPBOY_PLUGIN_HIGH_BYTE */
 const FNV_PIPBOY_PLUGIN_OFFSETS = FNV_PIPBOY_PLUGIN_HIGH_BYTE;
 
-function pipboyHighByteForPlugin(pluginName, gameModIndex) {
-  if (!Object.prototype.hasOwnProperty.call(FNV_PIPBOY_PLUGIN_HIGH_BYTE, pluginName)) {
+// Fixed Pip-Boy high byte per FO3 plugin, same idea as FNV above. Verified
+// directly against a real replica firmware dump (FW/1.1.6/DATA/F3/*.DAT,
+// parsed per the DataFile format in FW-decoded.js: u32 recordCount, u32
+// recordSize, then recordCount form IDs, then recordCount JSON records) by
+// grouping items by form-ID high byte and matching known per-DLC item names
+// (e.g. high byte 0x02 held Tesla Cannon/Tri-beam Laser Rifle/Callahan's
+// Magnum - all Broken Steel exclusives) across WEAPONS.DAT and APPAREL.DAT.
+// The order is alphabetical by .esm filename (Anchorage, BrokenSteel,
+// PointLookout, ThePitt, Zeta) - NOT DLC release order - matching how a
+// vanilla FO3 install with no load-order manager sorts master files.
+const FO3_PIPBOY_PLUGIN_HIGH_BYTE = {
+  'fallout3.esm': null,
+  'anchorage.esm': 0x01,
+  'brokensteel.esm': 0x02,
+  'pointlookout.esm': 0x03,
+  'thepitt.esm': 0x04,
+  'zeta.esm': 0x05,
+};
+
+const PIPBOY_PLUGIN_HIGH_BYTE_BY_MODE = {
+  F3: FO3_PIPBOY_PLUGIN_HIGH_BYTE,
+  FNV: FNV_PIPBOY_PLUGIN_HIGH_BYTE,
+};
+
+function pipboyHighByteForPlugin(pluginName, gameModIndex, gameMode = 'FNV') {
+  const table = PIPBOY_PLUGIN_HIGH_BYTE_BY_MODE[gameMode];
+  if (!table || !Object.prototype.hasOwnProperty.call(table, pluginName)) {
     return null;
   }
-  const fixed = FNV_PIPBOY_PLUGIN_HIGH_BYTE[pluginName];
+  const fixed = table[pluginName];
   return fixed === null ? gameModIndex & 0xff : fixed;
 }
 
@@ -213,7 +238,8 @@ export class FormIdMapper {
   }
 
   _resolveByLoadOrder(gameFormId, gameMode) {
-    if (gameMode !== 'FNV' || this.loadOrder.size === 0) return null;
+    const table = PIPBOY_PLUGIN_HIGH_BYTE_BY_MODE[gameMode];
+    if (!table || this.loadOrder.size === 0) return null;
 
     const id = parseFormId(gameFormId);
     if (id === null) return null;
@@ -223,14 +249,15 @@ export class FormIdMapper {
     const pluginName = this.loadOrder.get(gameModIndex);
     if (!pluginName) return null;
 
-    const highByte = pipboyHighByteForPlugin(pluginName, gameModIndex);
+    const highByte = pipboyHighByteForPlugin(pluginName, gameModIndex, gameMode);
     if (highByte === null) return null;
 
     return buildFormId(highByte, localId);
   }
 
   _resolveToGameByLoadOrder(pipboyFormId, gameMode) {
-    if (gameMode !== 'FNV' || this.loadOrder.size === 0) return null;
+    const table = PIPBOY_PLUGIN_HIGH_BYTE_BY_MODE[gameMode];
+    if (!table || this.loadOrder.size === 0) return null;
 
     const id = parseFormId(pipboyFormId);
     if (id === null) return null;
@@ -238,10 +265,10 @@ export class FormIdMapper {
     const localId = id & 0x00ffffff;
     const pipboyModIndex = (id >>> 24) & 0xff;
 
-    for (const pluginName of Object.keys(FNV_PIPBOY_PLUGIN_HIGH_BYTE)) {
+    for (const pluginName of Object.keys(table)) {
       const gameModIndex = this.loadOrderByName.get(pluginName);
       if (gameModIndex === undefined) continue;
-      if (pipboyHighByteForPlugin(pluginName, gameModIndex) === pipboyModIndex) {
+      if (pipboyHighByteForPlugin(pluginName, gameModIndex, gameMode) === pipboyModIndex) {
         return buildFormId(gameModIndex, localId);
       }
     }
@@ -353,6 +380,7 @@ export {
   ITEM_CATEGORIES,
   FNV_PIPBOY_PLUGIN_HIGH_BYTE,
   FNV_PIPBOY_PLUGIN_OFFSETS,
+  FO3_PIPBOY_PLUGIN_HIGH_BYTE,
   normalizePluginName,
   parseFormId,
   buildFormId,

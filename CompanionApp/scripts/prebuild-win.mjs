@@ -42,7 +42,7 @@ function removeDir(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
-tryExec('taskkill /F /IM "Pip-Boy Sync.exe" /T');
+tryExec('taskkill /F /IM "Pip-Boy_Sync.exe" /T');
 
 // Give Windows a moment to release file handles.
 const waitUntil = Date.now() + 500;

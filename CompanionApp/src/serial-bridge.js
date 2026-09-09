@@ -408,6 +408,14 @@ export class SerialBridge extends EventEmitter {
    * serial. Storage reads are memory-mapped flat strings (near-free);
    * SD (fs) files are read whole, which is fine at this firmware's sizes
    * (largest file ~16KB) on a freshly reset() device.
+   *
+   * SD reads go through E.openFile/statSync rather than fs.readFileSync:
+   * third-party holotapes (e.g. a custom character switcher) have been seen
+   * monkeypatching fs.readFileSync to redirect reads of one menu file's path
+   * to different content (a stored override) - readFileSync would then
+   * "verify" against that override instead of the bytes actually on the SD
+   * card, permanently failing CRC-check every re-upload of that file.
+   * statSync/E.openFile are separate APIs untouched by that kind of patch.
    * Returns null if the file doesn't exist on the device.
    * @param {string} deviceName
    * @param {{ fs?: boolean, timeout?: number }} [options] fs:true for SD files
@@ -416,7 +424,7 @@ export class SerialBridge extends EventEmitter {
   async getFileCRC32(deviceName, options = {}) {
     const name = JSON.stringify(deviceName);
     const expr = options.fs
-      ? `(()=>{try{var s=require('fs').readFileSync(${name});return s===undefined?null:E.CRC32(s)}catch(e){return null}})()`
+      ? `(()=>{try{var st=require('fs').statSync(${name});if(!st)return null;var sz=st.size,f=E.openFile(${name},'r'),d='',c;while(d.length<sz&&(c=f.read(sz-d.length)))d+=c;f.close();return E.CRC32(d)}catch(e){return null}})()`
       : `(()=>{var s=require('Storage').read(${name});return s===undefined?null:E.CRC32(s)})()`;
     const raw = await this.eval(expr, options.timeout);
     try {

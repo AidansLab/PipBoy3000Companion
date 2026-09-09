@@ -81,6 +81,63 @@ describe('FormIdMapper load-order remapping', () => {
   });
 });
 
+const FO3_SAMPLE_LOAD_ORDER = [
+  { index: 0, name: 'Fallout3.esm' },
+  { index: 1, name: 'Anchorage.esm' },
+  { index: 2, name: 'ThePitt.esm' },
+  { index: 3, name: 'BrokenSteel.esm' },
+  { index: 4, name: 'PointLookout.esm' },
+  { index: 5, name: 'Zeta.esm' },
+];
+
+describe('FormIdMapper load-order remapping (FO3)', () => {
+  it('uses fixed 0x02 high byte for Broken Steel regardless of load-order index', () => {
+    const mapper = new FormIdMapper();
+    mapper.setLoadOrder(FO3_SAMPLE_LOAD_ORDER);
+
+    // BrokenSteel.esm is at mod index 3 in FO3_SAMPLE_LOAD_ORDER, but its
+    // fixed Pip-Boy high byte (verified against FW/1.1.6/DATA/F3/*.DAT) is 0x02.
+    const pipboyId = mapper.resolve('0x03001234', 'F3');
+
+    assert.equal(pipboyId, 0x02001234);
+  });
+
+  it('remaps a DLC item when its load-order index differs from the fixed byte (e.g. GOTY/mod-manager reorder)', () => {
+    const mapper = new FormIdMapper();
+    mapper.setLoadOrder([
+      { index: 0, name: 'Fallout3.esm' },
+      { index: 1, name: 'PointLookout.esm' },
+    ]);
+
+    // PointLookout.esm loaded at mod index 1, but the Pip-Boy's fixed byte is 0x03.
+    const pipboyId = mapper.resolve('0x01000867', 'F3');
+
+    assert.equal(pipboyId, 0x03000867);
+  });
+
+  it('leaves base-game F3 items unchanged when delta is zero', () => {
+    const mapper = new FormIdMapper();
+    mapper.setLoadOrder(FO3_SAMPLE_LOAD_ORDER);
+
+    const gameId = '0x00015038';
+    const pipboyId = mapper.resolve(gameId, 'F3');
+
+    assert.equal(pipboyId, 0x00015038);
+  });
+
+  it('remaps Pip-Boy DLC IDs back to the runtime game mod index', () => {
+    const mapper = new FormIdMapper();
+    mapper.setLoadOrder([
+      { index: 0, name: 'Fallout3.esm' },
+      { index: 1, name: 'PointLookout.esm' },
+    ]);
+
+    const gameId = mapper.resolveToGame('0x03000867', 'F3');
+
+    assert.equal(gameId, 0x01000867);
+  });
+});
+
 describe('formatGameFormId', () => {
   it('formats numeric form IDs as 0x-prefixed hex for the game pipe', () => {
     assert.equal(formatGameFormId(0x05000a09), '0x05000a09');

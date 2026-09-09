@@ -304,6 +304,9 @@
       });
       player.calculateInvWeight && player.calculateInvWeight();
       Pip.renderHeader && Pip.renderHeader();
+      try {
+        fs.unlinkSync('SETTINGS/REP_VISIBLE.JSON');
+      } catch (e) {}
       clearPreSyncBackup();
       console.log('PIPSYNC:RESTORE:PRESYNC');
       Pip.CURRENT &&
@@ -511,7 +514,7 @@
       (menu = showMenu({
         '': { title: 'Sound Settings', back: showMainMenu },
         'Sound effects volume': {
-          value: Math.round((settings.volume || 27) / 1.35),
+          value: Math.round((settings.volume ?? 27) / 1.35),
           min: 0,
           max: 20,
           step: 1,
