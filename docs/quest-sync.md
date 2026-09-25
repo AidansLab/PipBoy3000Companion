@@ -350,6 +350,27 @@ trait; simulate the click through `Menu::HandleClick`; reverse-engineer a
 `MapMenu` refresh address. **Do not** call `0x7DF230` with a MapMenu pointer —
 it is StatsMenu-specific and would misinterpret the object layout.
 
+### The device catalog is incomplete — some quests can never be shown
+
+`QUESTS.DAT` holds 168 NV quests, which is **not** every quest in the game.
+Confirmed omissions so far: **Vance's Gun** (found during the ordering check) and
+**Young Hearts** (a side quest picked up in normal play). Both are minor side
+quests; the catalog appears to cover main and major side quests only.
+
+`questRowFromEntry` drops any quest whose ID is not in the catalog, because
+there is no name or objective text for it to display. The catalog is read-only
+game data on the device, so **a quest outside those 168 cannot be shown** without
+regenerating the file.
+
+The current behaviour is a **silent drop** — nothing in the companion log or on
+the device explains the absence. At minimum the companion should read the
+catalog id list once at connect (168 x u32 = 672 bytes, one eval) and warn per
+quest it cannot display. A larger option is generating a replacement
+`QUESTS.DAT` from the game: the format is fully understood (see section 2.1) and
+the plugin already reads every quest name and objective string, so it is
+feasible — but it means overwriting TWC data on the SD card, and mod-added
+quests would make it per-playthrough.
+
 ### `objCount` is never sent
 
 `_questEntryLiteral` emits 5 fields; `questRowFromEntry` reads a 6th

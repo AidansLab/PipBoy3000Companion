@@ -2458,6 +2458,203 @@ static ExtraDataList *FindStackByCondition(PlayerCharacter *player,
   return nullptr;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// DATA-TAB QUEST LIST REFRESH
+//
+// Setting PlayerCharacter::quest updates game data but repaints nothing, so a
+// quest activated from the device only appeared after closing and reopening the
+// in-game Pip-Boy. The quest list lives in kMenuType_Map (the DATA tab) and
+// RefreshPipBoyUI() has no path for it - the SDK has no MapMenu class and no
+// refresh address is known.
+//
+// Rather than guess at one, this drives the menu's OWN handler. A tile tree dump
+// (see below) showed the DATA sub-tabs are buttons under MM_Tabline with ids
+// Local Map 32, World Map 33, Quests 34, Notes 35, Radio 36, and that the quest
+// list is MM_QuestsList id=7. Re-issuing the Quests tab click makes the menu
+// rebuild its list through the same code path a real click uses, which picks up
+// the new active quest.
+//
+// Guarded so it only fires when the quest list is already on screen: clicking
+// the tab while the player is on World Map would yank them to a different view.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+static const UInt32 kMapTabQuests = 34;   // "Quests" tab button
+static const UInt32 kMapQuestsList = 7;   // MM_QuestsList
+
+static Tile *FindTileById(Tile *tile, UInt32 wantId, int depth = 0) {
+  if (!tile || depth > 16)
+    return nullptr;
+  Tile::Value *idVal = tile->GetValue(Tile::kTileValue_id);
+  if (idVal && (UInt32)idVal->num == wantId)
+    return tile;
+  for (auto iter = tile->childList.Begin(); !iter.End(); ++iter) {
+    Tile::ChildNode *node = iter.Get();
+    if (!node || !node->child)
+      continue;
+    if (Tile *hit = FindTileById(node->child, wantId, depth + 1))
+      return hit;
+  }
+  return nullptr;
+}
+
+static bool TileIsVisible(Tile *tile) {
+  if (!tile)
+    return false;
+  Tile::Value *v = tile->GetValue(Tile::kTileValue_visible);
+  return v && v->num != 0.0f;
+}
+
+// Rebuild the in-game DATA > Quests list so a device-set active quest shows
+// immediately. No-op unless that list is currently displayed.
+static void RefreshInGameQuestList() {
+  if (!InterfaceManager::IsMenuVisible(kMenuType_Map))
+    return;
+  Menu *mapMenu = InterfaceManager::GetMenuByType(kMenuType_Map);
+  if (!mapMenu || !mapMenu->tile)
+    return;
+
+  // Only when the quest list is the visible sub-tab.
+  Tile *questList = FindTileById(mapMenu->tile, kMapQuestsList);
+  if (!TileIsVisible(questList))
+    return;
+
+  Tile *questsTab = FindTileById(mapMenu->tile, kMapTabQuests);
+  if (!questsTab)
+    return;
+
+  // Menu::HandleClick is virtual slot 3 - the same entry point a real click
+  // goes through, so the menu does its own rebuilding and we touch no traits.
+  try {
+    mapMenu->HandleClick(kMapTabQuests, questsTab);
+    PipBoyLog("QUEST", "re-issued DATA>Quests tab click to refresh the list");
+  } catch (...) {
+    PipBoyLog("QUEST", "quest list refresh threw - ignored");
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TILE TREE DUMP (diagnostic, read-only)
+//
+// The in-game Pip-Boy does not repaint when the device sets the active quest:
+// the quest list lives in kMenuType_Map (the DATA tab - Local Map, World Map,
+// Quests, Notes, Radio), and RefreshPipBoyUI() only knows how to refresh the
+// Inventory and Stats menus. The xNVSE SDK has no MapMenu class and there is no
+// known refresh address for it, so the first step is finding out what the menu
+// is actually built from.
+//
+// This walks the menu's tile tree and writes it to FalloutPipBoyTiles.log
+// beside the DLL. It only READS tile fields - no traits are set, no menu
+// functions are called - so it cannot disturb the UI. Triggered on demand with
+// the DUMPTILES pipe command, because the tree only exists while the menu is
+// built and we want it captured with DATA > Quests actually on screen.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#ifndef PIPBOY_TILE_DEBUG
+#define PIPBOY_TILE_DEBUG 1
+#endif
+
+#if PIPBOY_TILE_DEBUG
+static FILE *g_tileDebugFile = nullptr;
+// One auto-dump per DATA-tab open, capped per session so the log stays small.
+static bool g_tileDumpDone = false;
+static UInt32 g_tileDumpDelay = 0;
+static UInt32 g_tileDumpCount = 0;
+
+// Bounded so a pathological tree can't stall the main thread or fill the disk.
+static const int kTileDumpMaxDepth = 14;
+static const int kTileDumpMaxNodes = 6000;
+
+static const char *TileTraitStr(Tile *tile, UInt32 traitId) {
+  Tile::Value *v = tile->GetValue(traitId);
+  return (v && v->str) ? v->str : nullptr;
+}
+
+static bool TileTraitNum(Tile *tile, UInt32 traitId, float *out) {
+  Tile::Value *v = tile->GetValue(traitId);
+  if (!v)
+    return false;
+  *out = v->num;
+  return true;
+}
+
+static void DumpTileRecursive(Tile *tile, int depth, int *nodeCount) {
+  if (!tile || depth > kTileDumpMaxDepth || *nodeCount >= kTileDumpMaxNodes)
+    return;
+  (*nodeCount)++;
+
+  char indent[64];
+  const int pad = (depth < 20) ? depth * 2 : 40;
+  for (int i = 0; i < pad; i++)
+    indent[i] = ' ';
+  indent[pad] = '\0';
+
+  const char *name = tile->name.m_data ? tile->name.m_data : "<unnamed>";
+
+  // `id` is what Menu::HandleClick receives, so tiles carrying one are the
+  // clickable elements - the most likely handles for forcing a refresh.
+  float idVal = 0.0f;
+  const bool hasId = TileTraitNum(tile, Tile::kTileValue_id, &idVal);
+  float visVal = 0.0f;
+  const bool hasVis = TileTraitNum(tile, Tile::kTileValue_visible, &visVal);
+  float listIdx = 0.0f;
+  const bool hasList = TileTraitNum(tile, Tile::kTileValue_listindex, &listIdx);
+  const char *str = TileTraitStr(tile, Tile::kTileValue_string);
+
+  fprintf(g_tileDebugFile, "%s%s", indent, name);
+  if (hasId)
+    fprintf(g_tileDebugFile, "  id=%d", (int)idVal);
+  if (hasList)
+    fprintf(g_tileDebugFile, "  listindex=%d", (int)listIdx);
+  if (hasVis)
+    fprintf(g_tileDebugFile, "  visible=%d", (int)visVal);
+  if (str && str[0])
+    fprintf(g_tileDebugFile, "  string=\"%.60s\"", str);
+  fprintf(g_tileDebugFile, "  children=%u\n", tile->childList.Count());
+
+  for (auto iter = tile->childList.Begin(); !iter.End(); ++iter) {
+    Tile::ChildNode *node = iter.Get();
+    if (node && node->child)
+      DumpTileRecursive(node->child, depth + 1, nodeCount);
+  }
+}
+
+static void DumpMenuTileTree(UInt32 menuType, const char *label) {
+  if (!g_tileDebugFile) {
+    char path[MAX_PATH] = {};
+    if (!g_hModule || !GetModuleFileNameA(g_hModule, path, MAX_PATH))
+      return;
+    char *slash = strrchr(path, '\\');
+    if (slash)
+      *(slash + 1) = '\0';
+    strcat_s(path, "FalloutPipBoyTiles.log");
+    g_tileDebugFile = fopen(path, "a");
+    if (!g_tileDebugFile)
+      return;
+  }
+
+  Menu *menu = InterfaceManager::GetMenuByType(menuType);
+  const bool visible = InterfaceManager::IsMenuVisible(menuType);
+  SYSTEMTIME st;
+  GetLocalTime(&st);
+  fprintf(g_tileDebugFile,
+          "\n===== %s (type 0x%X) at %02d:%02d:%02d  menu=%p visible=%d =====\n",
+          label, menuType, st.wHour, st.wMinute, st.wSecond, (void *)menu,
+          visible ? 1 : 0);
+
+  if (!menu || !menu->tile) {
+    fprintf(g_tileDebugFile, "  (menu or root tile not present)\n");
+    fflush(g_tileDebugFile);
+    return;
+  }
+
+  int nodeCount = 0;
+  DumpTileRecursive(menu->tile, 0, &nodeCount);
+  fprintf(g_tileDebugFile, "----- %d tiles dumped%s -----\n", nodeCount,
+          nodeCount >= kTileDumpMaxNodes ? " (TRUNCATED)" : "");
+  fflush(g_tileDebugFile);
+}
+#endif // PIPBOY_TILE_DEBUG
+
 static void ExecutePipBoyCommand(const std::string &line) {
   PipBoyLog("CMD-IN", "%s", line.c_str());
   if (line == "TORCH ON") {
@@ -2472,6 +2669,17 @@ static void ExecutePipBoyCommand(const std::string &line) {
     SetPipBoyLight(player, false, IsPipBoyTorchUiActive());
     return;
   }
+#if PIPBOY_TILE_DEBUG
+  // Diagnostic, read-only: capture the DATA-tab tile tree with the in-game
+  // Pip-Boy open on Quests. Handled here, before the verb/formId split below,
+  // because it takes no arguments.
+  if (line == "DUMPTILES") {
+    DumpMenuTileTree(kMenuType_Map, "MapMenu / DATA tab");
+    DumpMenuTileTree(kMenuType_Stats, "StatsMenu (for comparison)");
+    PipBoyLog("TILES", "tile tree dumped to FalloutPipBoyTiles.log");
+    return;
+  }
+#endif
 
   size_t space = line.find(' ');
   if (space == std::string::npos)
@@ -2561,6 +2769,8 @@ static void ExecutePipBoyCommand(const std::string &line) {
     }
     player->quest = quest;
     PipBoyLog("QUEST", "active quest set to %08X from device", formId);
+    // Repaint the in-game list if the player is looking at it right now.
+    RefreshInGameQuestList();
   } else if (verb == "DROP") {
     int dropCount = wantCnd > 0 ? wantCnd : 1;
     SInt32 total = GetTotalFormCount(player, form);
@@ -2828,6 +3038,37 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
         case NVSEMessagingInterface::kMessage_MainGameLoop:
             if (g_gameLoaded) {
       LogMenuMaskIfChanged();
+
+#if PIPBOY_TILE_DEBUG
+      // Auto-dump the DATA tab's tile tree once per session, a moment after it
+      // first becomes visible. Driven from the game loop rather than the
+      // DUMPTILES command because alt-tabbing PAUSES the game: the pipe thread
+      // still queues commands, but this handler stops running, so a command
+      // sent from the companion while tabbed out is not executed until focus
+      // returns. Waiting a few frames lets the menu finish building its list
+      // before the tree is walked.
+      // One dump per menu-open, up to a few per session: the DATA tab covers
+      // Local Map / World Map / Quests / Notes / Radio, and which sub-tab is
+      // showing decides what the tree contains. Dumping on each open means
+      // closing and reopening on Quests captures it without any extra step.
+      {
+        if (InterfaceManager::IsMenuVisible(kMenuType_Map)) {
+          if (!g_tileDumpDone && g_tileDumpCount < 3 && ++g_tileDumpDelay >= 45) {
+            g_tileDumpDone = true;
+            g_tileDumpCount++;
+            try {
+              DumpMenuTileTree(kMenuType_Map, "MapMenu / DATA tab (auto)");
+              if (g_tileDumpCount == 1)
+                DumpMenuTileTree(kMenuType_Stats, "StatsMenu (for comparison)");
+            } catch (...) {
+            }
+          }
+        } else {
+          g_tileDumpDelay = 0;
+          g_tileDumpDone = false; // re-arm for the next time DATA is opened
+        }
+      }
+#endif
       if (g_postLoadSettleTicks > 0)
         g_postLoadSettleTicks--;
       if (g_syncHudReadyDelay > 0)
