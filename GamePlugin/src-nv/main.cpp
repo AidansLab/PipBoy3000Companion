@@ -61,7 +61,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #define PLUGIN_NAME "FalloutPipBoySync"
-#define PLUGIN_VERSION 32
+#define PLUGIN_VERSION 33
 
 // Write FalloutPipBoySync.log beside this DLL (Data/NVSE/Plugins/). Flip to 1
 // to enable PipBoyLog output (e.g. the TORCH-DIAG lines) for a debug session.
@@ -1197,6 +1197,278 @@ static void ReconcileCompanionTorchAfterPipBoyClose() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// QUESTS
+// The Pip-Boy ships a static quest catalog (DATA/<game>/QUESTS.DAT) holding
+// every quest's name and the full text of its objectives, indexed
+// POSITIONALLY. The device therefore needs no strings from us - only which
+// objectives are displayed and which are completed, as bitmasks over those
+// catalog positions.
+//
+// The game keys objectives by BGSQuestObjective::objectiveId, which is a GECK
+// index (10, 20, 30 ...) and not a position. Each quest's objectives are
+// therefore sorted by objectiveId and bit N is set for the Nth. That
+// rank-order mapping is the one assumption this feature rests on; see
+// PIPBOY_QUEST_DEBUG below for how to verify it against the real catalog.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Writes FalloutPipBoyQuests.log beside this DLL: one JSON line per quest with
+// its sorted objective IDs and display text, so the rank-order assumption can
+// be diffed against the device's QUESTS.DAT. Deliberately independent of
+// PIPBOY_VERBOSE_LOG so the check doesn't require a full debug session and
+// doesn't drown in snapshot spam. Set to 0 for release builds.
+#ifndef PIPBOY_QUEST_DEBUG
+#define PIPBOY_QUEST_DEBUG 0
+#endif
+
+// BGSQuestObjective::status bits (GameForms.h: bit0 displayed, bit1 completed).
+enum {
+  kQObjStatus_Displayed = 1 << 0,
+  kQObjStatus_Completed = 1 << 1,
+};
+
+// TESQuest::flags - bit0 is startGameEnabled/isRunning, bit1 tracks completion.
+enum {
+  kQuestFlag_Running = 1 << 0,
+  kQuestFlag_Completed = 1 << 1,
+};
+
+// Flags byte emitted per quest; matches the device's QUESTS.STA row layout.
+enum {
+  kPipQuest_Running = 1 << 0,
+  kPipQuest_Complete = 1 << 1,
+  kPipQuest_Active = 1 << 2,
+};
+
+// Objectives past this cannot be represented in the 64-bit masks. The NV
+// catalog's worst case is 36 (How Little We Know), so this is headroom - but a
+// mod could exceed it, and those objectives are dropped rather than wrapping
+// onto bit 0 and marking an unrelated line complete.
+static const UInt32 kMaxObjectiveBits = 64;
+
+static std::string FormatHex64(UInt64 v) {
+  std::stringstream ss;
+  ss << std::hex << v;
+  return ss.str();
+}
+
+// Every objective the GECK defines for this quest that the DEVICE CATALOG also
+// carries, ascending by objectiveId. The resulting index is what the masks are
+// bit-indexed by, so it has to match QUESTS.DAT's obj[] array exactly.
+//
+// TESQuest::lVarOrObjectives holds BOTH objectives and script local variables
+// (the SDK says so outright at GameForms.h - "this list would contain both
+// Objectives and LocalVariables"), so entries are filtered on the back-pointer:
+// a real BGSQuestObjective points back at its owning quest, a VariableInfo will
+// not. Casting the node data straight to BGSQuestObjective* follows xNVSE's own
+// Cmd_GetNthQuestObjective.
+//
+// Objectives with no display text are then dropped, because TWC built the
+// catalog that way: comparing a 50-quest log against DATA/NV/QUESTS.DAT, every
+// discrepancy was an empty-text objective the catalog omits. Keeping them
+// shifts every later bit by one - in Volare! and Vance's Gun the empty entry
+// sits at rank 0, so the whole mask would have been off by one and marked the
+// wrong lines complete. With them dropped, 49 of 50 quests match the catalog
+// position-for-position (the 50th, Vance's Gun, has only an empty objective and
+// is absent from the catalog entirely).
+static void CollectQuestObjectiveIds(TESQuest *quest,
+                                     std::vector<UInt32> &outIds) {
+  outIds.clear();
+  if (!quest)
+    return;
+  const UInt32 count = quest->lVarOrObjectives.Count();
+  for (UInt32 i = 0; i < count; i++) {
+    BGSQuestObjective *obj =
+        (BGSQuestObjective *)quest->lVarOrObjectives.GetNthItem((SInt32)i);
+    if (!obj)
+      continue;
+    // Reading ->quest on a VariableInfo would be reading a foreign object, so
+    // guard the probe: a mismatch (or a fault) just means "not an objective".
+#if defined(_M_IX86)
+    __try {
+      if (obj->quest != quest)
+        continue;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      continue;
+    }
+#else
+    if (obj->quest != quest)
+      continue;
+#endif
+    // Not in the device catalog - see the comment above.
+    if (!obj->displayText.m_data || obj->displayText.m_data[0] == '\0')
+      continue;
+    outIds.push_back(obj->objectiveId);
+  }
+  std::sort(outIds.begin(), outIds.end());
+}
+
+#if PIPBOY_QUEST_DEBUG
+static std::set<UInt32> g_questDebugLogged;
+static FILE *g_questDebugFile = nullptr;
+
+static void QuestDebugReset() { g_questDebugLogged.clear(); }
+
+// One JSON line per quest, written once each. Paired with the catalog pulled
+// by scripts/dump-device-file.mjs, this is what settles whether catalog
+// position N corresponds to the Nth-lowest objectiveId.
+static void QuestDebugDump(TESQuest *quest, const std::vector<UInt32> &ids) {
+  if (!quest || g_questDebugLogged.count(quest->refID))
+    return;
+  g_questDebugLogged.insert(quest->refID);
+
+  if (!g_questDebugFile) {
+    char path[MAX_PATH] = {};
+    if (!g_hModule || !GetModuleFileNameA(g_hModule, path, MAX_PATH))
+      return;
+    char *slash = strrchr(path, '\\');
+    if (slash)
+      *(slash + 1) = '\0';
+    strcat_s(path, "FalloutPipBoyQuests.log");
+    g_questDebugFile = fopen(path, "a");
+    if (!g_questDebugFile)
+      return;
+  }
+
+  const char *name = GetFullName(quest);
+  JsonBuilder j;
+  j.beginObject();
+  j.keyStr("formId", FormatFormId(quest->refID));
+  j.keyStr("name", name ? name : "");
+  j.keyInt("stage", (int)quest->currentStage);
+  j.key("objectives");
+  j.beginArray();
+  for (size_t n = 0; n < ids.size(); n++) {
+    // Re-find each objective so the dump carries the text the game shows,
+    // which is what gets compared against the catalog's obj[] entries.
+    const char *text = "";
+    const UInt32 count = quest->lVarOrObjectives.Count();
+    for (UInt32 i = 0; i < count; i++) {
+      BGSQuestObjective *obj =
+          (BGSQuestObjective *)quest->lVarOrObjectives.GetNthItem((SInt32)i);
+      if (!obj || obj->quest != quest || obj->objectiveId != ids[n])
+        continue;
+      if (obj->displayText.m_data)
+        text = obj->displayText.m_data;
+      break;
+    }
+    j.arrayElement();
+    j.beginObject();
+    j.keyInt("rank", (int)n);
+    j.keyUInt("id", ids[n]);
+    j.keyStr("txt", text);
+    j.endObject();
+  }
+  j.endArray();
+  j.endObject();
+
+  fprintf(g_questDebugFile, "%s\n", j.str().c_str());
+  fflush(g_questDebugFile);
+}
+#endif // PIPBOY_QUEST_DEBUG
+
+// Per-quest sync state assembled from the player's objective log.
+struct QuestSyncState {
+  TESQuest *quest;
+  UInt64 disp;
+  UInt64 done;
+  UInt32 objCount;
+};
+
+// Emit the "quests" array. Keyed and ordered by form ID rather than by the
+// game's log order: the log reorders itself as objectives are added, and any
+// reordering would make an otherwise-unchanged snapshot differ byte-wise,
+// defeating the pipe thread's send-only-on-change check.
+static void AppendQuestsJson(JsonBuilder &json, PlayerCharacter *player) {
+  json.key("quests");
+  json.beginArray();
+
+  std::map<UInt32, QuestSyncState> quests;
+  std::map<TESQuest *, std::vector<UInt32>> objectiveOrder;
+
+  for (auto iter = player->questObjectiveList.Begin(); !iter.End(); ++iter) {
+    BGSQuestObjective *obj = iter.Get();
+    if (!obj || !obj->quest)
+      continue;
+    TESQuest *quest = obj->quest;
+
+    // Hidden scripted quests carry no name and never appear in the game's own
+    // Quests tab; the device catalog has no record for them either.
+    const char *name = GetFullName(quest);
+    if (!name || name[0] == '\0')
+      continue;
+
+    auto orderIt = objectiveOrder.find(quest);
+    if (orderIt == objectiveOrder.end()) {
+      std::vector<UInt32> ids;
+      CollectQuestObjectiveIds(quest, ids);
+      orderIt = objectiveOrder.insert(std::make_pair(quest, ids)).first;
+#if PIPBOY_QUEST_DEBUG
+      QuestDebugDump(quest, orderIt->second);
+#endif
+    }
+    const std::vector<UInt32> &ids = orderIt->second;
+    if (ids.empty())
+      continue;
+
+    auto pos = std::lower_bound(ids.begin(), ids.end(), obj->objectiveId);
+    if (pos == ids.end() || *pos != obj->objectiveId)
+      continue; // objective not in the quest's own list - skip rather than guess
+    const size_t rank = (size_t)(pos - ids.begin());
+    if (rank >= kMaxObjectiveBits) {
+      PipBoyLog("QUEST", "objective rank %zu past mask width on quest %08X",
+                rank, quest->refID);
+      continue;
+    }
+
+    QuestSyncState &st = quests[quest->refID];
+    if (!st.quest) {
+      st.quest = quest;
+      st.disp = 0;
+      st.done = 0;
+      st.objCount = (UInt32)ids.size();
+    }
+    // Presence in the player's objective log IS display; the status bit is
+    // checked too so a cleared-but-still-listed objective stays unlit.
+    if (obj->status & kQObjStatus_Displayed)
+      st.disp |= (1ULL << rank);
+    if (obj->status & kQObjStatus_Completed)
+      st.done |= (1ULL << rank);
+  }
+
+  for (const auto &pair : quests) {
+    const QuestSyncState &st = pair.second;
+    if (!st.quest || st.disp == 0)
+      continue; // nothing displayed yet - the device would render an empty row
+
+    // Completed quests come back with every objective flagged done, including
+    // ones the player never saw (observed on live saves: disp=0x59d with
+    // done=0xfff). The device only renders displayed objectives, so keep done
+    // a strict subset of disp rather than making the renderer reconcile it.
+    const UInt64 done = st.done & st.disp;
+
+    int flags = 0;
+    if (st.quest->flags & kQuestFlag_Running)
+      flags |= kPipQuest_Running;
+    if (st.quest->flags & kQuestFlag_Completed)
+      flags |= kPipQuest_Complete;
+    if (player->quest == st.quest)
+      flags |= kPipQuest_Active;
+
+    json.arrayElement();
+    json.beginObject();
+    json.keyStr("formId", FormatFormId(pair.first));
+    json.keyInt("stage", (int)st.quest->currentStage);
+    json.keyInt("flags", flags);
+    json.keyInt("objCount", (int)st.objCount);
+    json.keyStr("disp", FormatHex64(st.disp));
+    json.keyStr("done", FormatHex64(done));
+    json.endObject();
+  }
+
+  json.endArray();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // PLAYER SNAPSHOT
 // Build a JSON snapshot of the player's current state.
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1588,6 +1860,9 @@ std::string BuildPlayerSnapshot() {
         }
     }
     json.endArray();
+
+    // --- Quests ---
+    AppendQuestsJson(json, player);
 
     json.endObject();
     return json.str();
@@ -2275,6 +2550,17 @@ static void ExecutePipBoyCommand(const std::string &line) {
     }
   } else if (verb == "UNEQUIP") {
     EquipSingleItemWithInstantStats(player, false, form);
+  } else if (verb == "QUEST") {
+    // Pip-Boy picked an active quest. PlayerCharacter::quest is the same field
+    // xNVSE's Cmd_SetCurrentQuest writes, and the next snapshot re-derives the
+    // active flag from it, so no separate state to keep in step here.
+    TESQuest *quest = DYNAMIC_CAST(form, TESForm, TESQuest);
+    if (!quest) {
+      PipBoyLog("CMD-IN", "QUEST rejected - form %08X is not a quest", formId);
+      return;
+    }
+    player->quest = quest;
+    PipBoyLog("QUEST", "active quest set to %08X from device", formId);
   } else if (verb == "DROP") {
     int dropCount = wantCnd > 0 ? wantCnd : 1;
     SInt32 total = GetTotalFormCount(player, form);
@@ -2500,6 +2786,9 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
             g_gameLoaded = true;
     g_saveLoadPending = true;
     g_factionStateValid = false; // re-evaluate rep for the loaded character
+#if PIPBOY_QUEST_DEBUG
+    QuestDebugReset(); // re-dump quests for the newly loaded character
+#endif
     g_postLoadSettleTicks = 60; // let container changes finish deserializing
     ResetSyncLockState(true);
     {
@@ -2512,6 +2801,9 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
             g_gameLoaded = true;
     g_saveLoadPending = true;
     g_factionStateValid = false; // re-evaluate rep for the new character
+#if PIPBOY_QUEST_DEBUG
+    QuestDebugReset(); // re-dump quests for the new character
+#endif
     g_postLoadSettleTicks = 60; // let container changes finish deserializing
     ResetSyncLockState(true);
     {

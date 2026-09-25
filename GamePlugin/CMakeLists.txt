@@ -132,6 +132,15 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 # Release zip with the mod-manager layout (paths relative to Data/):
 #   nvse/plugins/<OUTPUT_NAME>.dll
 # Staged then zipped with cmake -E tar so no external zip tool is needed.
+#
+# The staging root must exist at CONFIGURE time, not just build time: the
+# custom command below runs with WORKING_DIRECTORY set to it, and the shell
+# cd's there before executing any of the commands - including the
+# make_directory that would otherwise create it. On a fresh build tree that
+# cd failed and the whole POST_BUILD step errored out (MSB3073) even though
+# the DLL had linked fine.
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/zip-nv")
+
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_CURRENT_BINARY_DIR}/zip-nv/nvse/plugins"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/zip-nv/nvse/plugins"
@@ -213,6 +222,11 @@ set_target_properties(FalloutPipBoySyncFO3 PROPERTIES
 # Release zip with the mod-manager layout (paths relative to Data/):
 #   fose/plugins/<OUTPUT_NAME>.dll
 # Staged then zipped with cmake -E tar so no external zip tool is needed.
+#
+# Created at configure time for the same reason as the NV staging root above:
+# WORKING_DIRECTORY is cd'd into before the command's own make_directory runs.
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/zip-fo3")
+
 add_custom_command(TARGET FalloutPipBoySyncFO3 POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_CURRENT_BINARY_DIR}/zip-fo3/fose/plugins"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/zip-fo3/fose/plugins"

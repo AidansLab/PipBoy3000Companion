@@ -24,3 +24,6 @@ NEXUS.md
 
 # Firmware
 FW/stock/
+
+# Local DLL backups and captured device/plugin logs (not for the repo)
+backup/

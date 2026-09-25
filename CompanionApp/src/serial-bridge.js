@@ -246,6 +246,7 @@ export class SerialBridge extends EventEmitter {
    *   PIPSYNC:UNEQUIP:APPAREL:000340C8
    *   PIPSYNC:DROP:AMMO:0000434F:20
    *   PIPSYNC:TORCH:ON / PIPSYNC:TORCH:OFF
+   *   PIPSYNC:QUEST:000FF5DF
    * when the user uses/equips/drops an item on the device. These are emitted
    * as 'device-event' so the app can mirror the action in-game.
    */
@@ -271,6 +272,17 @@ export class SerialBridge extends EventEmitter {
           condition: verb === 'EQUIP' && match[4] !== undefined ? parseInt(match[4], 10) : undefined,
           // DROP: how many units to drop.
           count: verb === 'DROP' && match[4] !== undefined ? parseInt(match[4], 10) : undefined,
+        });
+        continue;
+      }
+
+      // Active-quest pick. Matched separately from the item pattern above:
+      // quests carry no category segment and no trailing count.
+      const questMatch = line.match(/PIPSYNC:QUEST:([0-9A-Fa-f]{1,8})/);
+      if (questMatch) {
+        this.emit('device-event', {
+          action: 'quest',
+          formId: '0x' + questMatch[1].toLowerCase().padStart(8, '0'),
         });
         continue;
       }
@@ -545,6 +557,30 @@ export class SerialBridge extends EventEmitter {
     }
 
     throw new Error(`Could not verify companion patch: ${lastErr?.message || 'unknown error'}`);
+  }
+
+  /**
+   * True when the loaded .boot0 implements quest sync.
+   *
+   * Quest support arrived after the first public firmware, so a device on an
+   * older patch has the companion methods for items and perks but none of the
+   * quest ones. Calling an undefined function on Espruino throws into the REPL
+   * where boot0's own try/catch cannot help, so the app probes once and simply
+   * omits quest commands when unsupported. setquestsbulk_begin stands in for
+   * the whole set - they ship together.
+   */
+  async hasQuestSupport() {
+    try {
+      const result = await this.eval(
+        "typeof Player!=='undefined'&&typeof Player.prototype.setquestsbulk_begin==='function'"
+      );
+      return this._parseEvalBool(result);
+    } catch (err) {
+      // Unreachable or unparseable means "assume not supported": skipping
+      // quest sync degrades gracefully, guessing wrong breaks the REPL.
+      this.emit('status', `Quest support probe failed (${err.message}) - quest sync off`);
+      return false;
+    }
   }
 
   /**

@@ -80,6 +80,17 @@ const INVENTORY_CATEGORIES = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
 // treats them as two more INV categories instead of separate JSON files.
 const PRESYNC_CATEGORIES = [...INVENTORY_CATEGORIES, 'PERKS', 'SKILLS'];
 
+// Quest state is a flat fixed-width file (QUESTS.STA, 24 bytes per quest)
+// rather than an InvFile: an 8-byte InvFile row has nowhere to put the two
+// 64-bit objective masks. It still needs pre-sync backup/restore, but the
+// InvFile-shaped copy loop above doesn't apply to it - see _backupPresyncData.
+const PRESYNC_QUEST_FILE = 'QUESTS.STA';
+
+// Entries per setquestsbulk_chunk. Each entry is `[id,stage,flags,"lo","hi"]`
+// at roughly 40 chars, so 12 keeps a chunk inside the serial bridge's 512-byte
+// packing - same reasoning as MAX_ITEM_BATCH, just a wider row.
+const MAX_QUEST_BATCH = 12;
+
 // Weapon DAM (skill/condition-adjusted display damage) lives in a side
 // *_DAM.INV file, mirrored via batched player.setdams()/setdamsbulk_* calls so
 // the device opens and flash-writes the file once per batch instead of once
@@ -125,6 +136,14 @@ export class SyncEngine extends EventEmitter {
     this._deviceEquipPending = new Map();
     // Device-initiated torch toggles - don't let a stale game snapshot turn the LED off.
     this._deviceTorchPending = null;
+    // Device-initiated active-quest pick. The device already set its own av
+    // when the user tapped the quest, so echoing the same value back is a
+    // wasted command; cleared once a snapshot confirms the game agrees.
+    this._deviceActiveQuestPending = null;
+    // Set from the firmware capability probe. Off until proven on: a device
+    // running an older .boot0 has no quest methods, and calling one throws in
+    // the REPL rather than failing quietly.
+    this._questSyncSupported = false;
     this._resyncEquipAfterInventory = false;
     // Last AP value actually pushed to the device - see _diffAP. Reset
     // alongside previousState so a full resync always pushes the current AP.
@@ -557,6 +576,9 @@ export class SyncEngine extends EventEmitter {
       );
       commands.push(...perkCommands);
 
+      // --- Quest diffs ---
+      commands.push(...this._diffQuests(snapshot.quests, prev.quests));
+
       // --- Skill diffs (written to INV/*/SKILLS.INV on device) ---
       commands.push(...this._diffSkills(player, prevPlayer));
     }
@@ -730,6 +752,10 @@ export class SyncEngine extends EventEmitter {
         perkFormIds.push(formId);
       }
       commands.push(this._buildSetPerksBulkCommand(perkFormIds));
+
+      // Quests - reconciled in place like items and perks, so an unchanged
+      // quest list costs no flash write on the device.
+      commands.push(...this._buildSetQuestsBulkCommands(snapshot.quests));
     }
 
     // Faction reputation - always sync (not gated on inventory pause)
@@ -1316,6 +1342,194 @@ export class SyncEngine extends EventEmitter {
   /**
    * Diff two perk arrays and generate add/remove commands
    */
+  /**
+   * Quest flags byte, mirroring the plugin and the device's QUESTS.STA row.
+   */
+  static get QUEST_FLAG_RUNNING() { return 1 << 0; }
+  static get QUEST_FLAG_COMPLETE() { return 1 << 1; }
+  static get QUEST_FLAG_ACTIVE() { return 1 << 2; }
+
+  /**
+   * Normalize one snapshot quest into the shape the diff and the device
+   * command both use. Masks stay as lowercase hex STRINGS end to end: they can
+   * exceed 32 bits (the NV catalog has quests with 35 and 36 objectives) and
+   * JavaScript bitwise operators are 32-bit, so parsing them into Numbers would
+   * silently truncate. The device splits them into lo/hi u32 pairs itself.
+   * @returns {{formId:number,stage:number,flags:number,objCount:number,disp:string,done:string}|null}
+   */
+  _toQuestEntry(quest) {
+    if (!quest) return null;
+    const formId = this._toFormIdInt(quest.formId);
+    if (formId === null) return null;
+
+    const hex = (v) => {
+      if (v === undefined || v === null) return '0';
+      const s = String(v).trim().toLowerCase().replace(/^0x/, '');
+      // Anything non-hex means a malformed snapshot; treat as empty rather
+      // than passing junk into a JS literal on the device.
+      if (!/^[0-9a-f]+$/.test(s)) return '0';
+      // Strip leading zeros so an unchanged mask always stringifies identically.
+      return s.replace(/^0+(?=.)/, '');
+    };
+
+    const num = (v, fallback) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : fallback;
+    };
+
+    return {
+      formId,
+      stage: num(quest.stage, 0) & 0xff,
+      flags: num(quest.flags, 0) & 0xff,
+      objCount: num(quest.objCount, 0) & 0xff,
+      disp: hex(quest.disp),
+      done: hex(quest.done),
+    };
+  }
+
+  /**
+   * Map a snapshot's quests array to formId -> normalized entry.
+   * Invalid entries (unknown form ID, malformed) are dropped.
+   */
+  _questMap(quests) {
+    const map = new Map();
+    if (!Array.isArray(quests)) return map;
+    for (const q of quests) {
+      const entry = this._toQuestEntry(q);
+      if (!entry) continue;
+      map.set(entry.formId, entry);
+    }
+    return map;
+  }
+
+  _questChanged(a, b) {
+    return (
+      a.stage !== b.stage ||
+      a.flags !== b.flags ||
+      a.objCount !== b.objCount ||
+      a.disp !== b.disp ||
+      a.done !== b.done
+    );
+  }
+
+  /** `[id,stage,flags,"disp","done"]` - the device parses these positionally. */
+  _questEntryLiteral(e) {
+    return `[${e.formId},${e.stage},${e.flags},${JSON.stringify(e.disp)},${JSON.stringify(e.done)}]`;
+  }
+
+  /**
+   * Full-sync quest reconciliation. Like setitemsbulk_*, the device marks rows
+   * as it receives them and sweeps away whatever wasn't touched at _end, so a
+   * quest the player somehow lost is dropped without a separate remove.
+   */
+  _buildSetQuestsBulkCommands(quests) {
+    if (!this._questSyncSupported) return [];
+    const entries = [];
+    for (const q of Array.isArray(quests) ? quests : []) {
+      const e = this._toQuestEntry(q);
+      if (e) entries.push(e);
+    }
+    const commands = ['player.setquestsbulk_begin()'];
+    for (let i = 0; i < entries.length; i += MAX_QUEST_BATCH) {
+      const slice = entries.slice(i, i + MAX_QUEST_BATCH);
+      commands.push(
+        `player.setquestsbulk_chunk([${slice.map((e) => this._questEntryLiteral(e)).join(',')}])`
+      );
+    }
+    commands.push('player.setquestsbulk_end()');
+    return commands;
+  }
+
+  /**
+   * Incremental quest diff. Emits one setquest per changed quest, one
+   * removequest per vanished quest, and routes a bare active-quest change
+   * through the stock av the device already persists.
+   */
+  _diffQuests(current, previous) {
+    if (!this._questSyncSupported) return [];
+    const commands = [];
+    const cur = this._questMap(current);
+    const prev = this._questMap(previous);
+
+    let changed = 0;
+    let removed = 0;
+
+    for (const [formId, entry] of cur) {
+      const before = prev.get(formId);
+      if (before && !this._questChanged(before, entry)) continue;
+
+      // Only the active bit moved: the device stores that as av 'quest'
+      // (what stock QUESTS.JS reads), so this avoids rewriting the whole row.
+      if (before) {
+        const activeOnly =
+          before.stage === entry.stage &&
+          before.objCount === entry.objCount &&
+          before.disp === entry.disp &&
+          before.done === entry.done &&
+          (before.flags ^ entry.flags) === SyncEngine.QUEST_FLAG_ACTIVE;
+        if (activeOnly) {
+          if (entry.flags & SyncEngine.QUEST_FLAG_ACTIVE) {
+            // Suppress the echo of a pick the device itself just made.
+            if (this._deviceActiveQuestPending === formId) {
+              this._deviceActiveQuestPending = null;
+              continue;
+            }
+            commands.push(`player.setactivequest(${formId})`);
+            changed++;
+          }
+          // Losing the active bit needs no command: whichever quest gained it
+          // emits its own setactivequest, and the device clears the rest.
+          continue;
+        }
+      }
+
+      commands.push(`player.setquest(${this._questEntryLiteral(entry).slice(1, -1)})`);
+      changed++;
+    }
+
+    for (const formId of prev.keys()) {
+      if (cur.has(formId)) continue;
+      commands.push(`player.removequest(${formId})`);
+      removed++;
+    }
+
+    if (changed || removed) {
+      this.emit('status', `Quests: ${changed} updated, ${removed} removed`);
+    }
+    return commands;
+  }
+
+  /**
+   * Declare whether the connected firmware implements the quest methods.
+   * Set from SerialBridge.hasQuestSupport() after the companion patch check.
+   * @param {boolean} supported
+   */
+  setQuestSyncSupported(supported) {
+    const next = !!supported;
+    if (this._questSyncSupported === next) return;
+    this._questSyncSupported = next;
+    this.emit(
+      'status',
+      next
+        ? 'Quest sync supported by device firmware'
+        : 'Quest sync unavailable (device firmware predates it)'
+    );
+  }
+
+  isQuestSyncSupported() {
+    return this._questSyncSupported;
+  }
+
+  /**
+   * Record that the Pip-Boy set the active quest itself, so the resulting game
+   * snapshot doesn't bounce the same value straight back at it.
+   * @param {string|number} gameFormId
+   */
+  notifyDeviceActiveQuest(gameFormId) {
+    const formId = this._toFormIdInt(gameFormId);
+    this._deviceActiveQuestPending = formId === null ? null : formId;
+  }
+
   _diffPerks(current, previous) {
     const commands = [];
 
@@ -1882,6 +2096,13 @@ export class SyncEngine extends EventEmitter {
             `(()=>{var f=require('fs'),m=NV?'NV':'F3',live='INV/'+m+'/${cat}.INV',def='INV/DEFAULT/'+m+'/${cat}.INV',dst='INV/PRESYNC/'+m+'/${cat}.INV',d='';try{d=f.readFileSync(live)}catch(e){}if(!d||!d.length){try{d=f.readFileSync(def)}catch(e){}}try{f.writeFileSync(dst,d||'')}catch(e){}})()`
           );
         }
+
+        // Quest state is ours alone: stock ships no QUESTS.STA and there is no
+        // INV/DEFAULT fallback for it, so "no file yet" is the correct pre-sync
+        // state and restore writes an empty file to mean "back to stock".
+        await this.bridge.sendCommand(
+          `(()=>{var f=require('fs'),m=NV?'NV':'F3',live='INV/'+m+'/${PRESYNC_QUEST_FILE}',dst='INV/PRESYNC/'+m+'/${PRESYNC_QUEST_FILE}',d='';try{d=f.readFileSync(live)}catch(e){}try{f.writeFileSync(dst,d||'')}catch(e){}})()`
+        );
       }
 
       await this.bridge.sendCommand(
@@ -1924,6 +2145,7 @@ export class SyncEngine extends EventEmitter {
     this._deviceConsumed.clear();
     this._deviceEquipPending.clear();
     this._deviceTorchPending = null;
+    this._deviceActiveQuestPending = null;
     this._resyncEquipAfterInventory = false;
     this._lastSentAp = undefined;
     if (this._debounceTimer) {
