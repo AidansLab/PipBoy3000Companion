@@ -570,17 +570,40 @@ export class SerialBridge extends EventEmitter {
    * the whole set - they ship together.
    */
   async hasQuestSupport() {
-    try {
-      const result = await this.eval(
-        "typeof Player!=='undefined'&&typeof Player.prototype.setquestsbulk_begin==='function'"
-      );
-      return this._parseEvalBool(result);
-    } catch (err) {
-      // Unreachable or unparseable means "assume not supported": skipping
-      // quest sync degrades gracefully, guessing wrong breaks the REPL.
-      this.emit('status', `Quest support probe failed (${err.message}) - quest sync off`);
-      return false;
+    // Probe via the `player` INSTANCE, not the `Player` class. FW.JS declares
+    // its classes with `class`/`let` at top level, which in Espruino are not
+    // globals - the same reason detectGameMode() cannot read `NV` directly and
+    // goes through Pip.settings instead. `player` is a real global (stock
+    // QUESTS.JS calls player.getav from menu scope), so reaching the method
+    // through the instance sees the prototype regardless of class visibility.
+    const expressions = [
+      "typeof player!=='undefined'&&typeof player.setquestsbulk_begin==='function'",
+      "typeof Player!=='undefined'&&typeof Player.prototype.setquestsbulk_begin==='function'",
+    ];
+
+    // Settle first and retry, matching hasCompanionPatch/detectGameMode: an
+    // eval issued immediately after the previous one can read a short or
+    // still-filling response buffer.
+    await this._sleep(250);
+
+    for (const expression of expressions) {
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const raw = await this.eval(expression);
+          const ok = this._parseEvalBool(raw);
+          if (ok) return true;
+          this.emit(
+            'status',
+            `Quest probe [${expression.slice(0, 40)}...] -> false (raw ${JSON.stringify(String(raw).trim().slice(-40))})`
+          );
+          break; // a clean false means this form resolved; try the next form
+        } catch (err) {
+          this.emit('status', `Quest probe error (attempt ${attempt}): ${err.message}`);
+          await this._sleep(200);
+        }
+      }
     }
+    return false;
   }
 
   /**

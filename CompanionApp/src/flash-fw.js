@@ -46,11 +46,20 @@ const MENU_SKIP = new Set(['FW.JS']);
 const UPLOAD_VERIFY_MAX_ATTEMPTS = 3;
 
 /**
- * Minimum internal-Storage bytes needed before uploading .boot0 (~15.4 KB
- * plus write slack). Espruino needs contiguous room for the whole new copy
- * during the write, even when replacing an existing .boot0.
+ * Floor for free internal Storage before uploading .boot0. Espruino needs
+ * contiguous room for the whole new copy during the write, even when
+ * replacing an existing .boot0.
+ *
+ * This is only a floor: ensureStorageSpace() prefers the ACTUAL size of the
+ * .boot0 being uploaded plus STORAGE_WRITE_SLACK_BYTES. A fixed constant had
+ * already drifted stale once - the patch grew from 15.8 KB to 18.0 KB when
+ * quest sync landed, leaving the old 17 KB value smaller than the file it was
+ * meant to guarantee room for.
  */
-export const STORAGE_MIN_FREE_BYTES = 17 * 1024;
+export const STORAGE_MIN_FREE_BYTES = 21 * 1024;
+
+/** Headroom beyond the file size itself, for flash page granularity. */
+export const STORAGE_WRITE_SLACK_BYTES = 3 * 1024;
 
 /**
  * Reclaimable device files: crash report + the stock firmware's debug/log
@@ -139,7 +148,16 @@ function parseDeviceJson(raw) {
  * @param {import('./serial-bridge.js').SerialBridge} bridge
  * @param {Function} log
  */
-export async function ensureStorageSpace(bridge, log) {
+export async function ensureStorageSpace(bridge, log, requiredBytes) {
+  // Derive the requirement from the .boot0 actually being uploaded rather
+  // than trusting the constant alone: the patch grew past a stale
+  // STORAGE_MIN_FREE_BYTES once already (15.8 KB -> 18.0 KB when quest sync
+  // landed), which would have let the pre-flight pass a device with no room.
+  // The constant stays as the floor for callers that don't pass a size.
+  const needed = Math.max(
+    STORAGE_MIN_FREE_BYTES,
+    Number.isFinite(requiredBytes) ? Math.ceil(requiredBytes + STORAGE_WRITE_SLACK_BYTES) : 0
+  );
   // compact() rewrites flash pages, so allow well beyond the eval default.
   const raw = await bridge.eval(STORAGE_RECLAIM_EXPR, 20000);
   const result = parseDeviceJson(raw);
@@ -156,7 +174,7 @@ export async function ensureStorageSpace(bridge, log) {
     log('warn', `Storage cleanup could not erase: ${result.failed.join('; ')}`);
   }
 
-  if (result.free < STORAGE_MIN_FREE_BYTES) {
+  if (result.free < needed) {
     let listing = '';
     let hint = '';
     try {
@@ -177,7 +195,7 @@ export async function ensureStorageSpace(bridge, log) {
     }
     throw new Error(
       `Not enough free Pip-Boy Storage for the .boot0 patch: ${result.free} bytes free, ` +
-      `need ${STORAGE_MIN_FREE_BYTES}.${listing} Connect with the Espruino Web IDE to see ` +
+      `need ${needed}.${listing} Connect with the Espruino Web IDE to see ` +
       `what is using the space, then retry.${hint}`
     );
   }
@@ -313,7 +331,15 @@ export async function flashFirmware(bridge, options = {}) {
     await bridge._sleep(400);
 
     log('info', 'Checking free device Storage...');
-    await ensureStorageSpace(bridge, log);
+    // Size the check against the .boot0 actually about to be written.
+    const boot0Entry = firmwareFiles.find((f) => f.storage);
+    let boot0Bytes = 0;
+    if (boot0Entry) {
+      const boot0Path = path.join(fwDir, boot0Entry.local);
+      if (fs.existsSync(boot0Path)) boot0Bytes = fs.statSync(boot0Path).size;
+      log('info', `.boot0 is ${(boot0Bytes / 1024).toFixed(1)} KB`);
+    }
+    await ensureStorageSpace(bridge, log, boot0Bytes);
 
     await bridge.sendCommand(`try{require('fs').statSync('JS')}catch(e){require('fs').mkdir('JS')}`);
 

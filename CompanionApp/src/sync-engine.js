@@ -107,6 +107,15 @@ const REFRESH_WEAPON_DAM_CMD = 'player.refreshweapondam()';
 /** Refresh open WEAPONS/APPAREL scroller after remote equip; safe if .boot0 not loaded */
 const REFRESH_EQUIP_CMD = 'player.refreshequip()';
 
+/** Numeric value of a form ID in any of the shapes that reach the engine. */
+function parseFormIdLoose(v) {
+  if (typeof v === 'number' && Number.isFinite(v)) return v >>> 0;
+  if (typeof v !== 'string') return null;
+  const t = v.trim().toLowerCase();
+  const n = t.startsWith('0x') ? parseInt(t, 16) : parseInt(t, 10);
+  return Number.isNaN(n) ? null : n >>> 0;
+}
+
 export class SyncEngine extends EventEmitter {
   constructor(serialBridge, formIdMapper) {
     super();
@@ -144,6 +153,9 @@ export class SyncEngine extends EventEmitter {
     // running an older .boot0 has no quest methods, and calling one throws in
     // the REPL rather than failing quietly.
     this._questSyncSupported = false;
+    // One lazy re-probe per connection when the connect-time one came back
+    // false but the game is clearly sending quests - see _processSnapshotInternal.
+    this._questProbeRetried = false;
     this._resyncEquipAfterInventory = false;
     // Last AP value actually pushed to the device - see _diffAP. Reset
     // alongside previousState so a full resync always pushes the current AP.
@@ -313,6 +325,29 @@ export class SyncEngine extends EventEmitter {
     // Use snapshot game id when mode not set yet (e.g. before Pip-Boy detection).
     if (!this.gameMode && snapshot.game) {
       this.setGameMode(snapshot.game);
+    }
+
+    // Lazy re-probe. The connect-time probe is a single point of failure: if it
+    // misses (device still settling, a response read short), quest sync stays
+    // off for the whole session with no way back. So the first time a snapshot
+    // actually carries quests and we believe the device can't take them, ask
+    // the device once more - by then it has been idle and answering commands
+    // for a while, which is the most favourable moment to ask.
+    if (
+      !this._questSyncSupported &&
+      !this._questProbeRetried &&
+      Array.isArray(snapshot.quests) &&
+      snapshot.quests.length > 0 &&
+      typeof this.bridge.hasQuestSupport === 'function'
+    ) {
+      this._questProbeRetried = true;
+      try {
+        const ok = await this.bridge.hasQuestSupport();
+        this.emit('status', `Quest support re-probe: ${ok}`);
+        this.setQuestSyncSupported(ok);
+      } catch (err) {
+        this.emit('status', `Quest support re-probe failed: ${err.message}`);
+      }
     }
 
     const isFullSync = !this.previousState;
@@ -755,7 +790,14 @@ export class SyncEngine extends EventEmitter {
 
       // Quests - reconciled in place like items and perks, so an unchanged
       // quest list costs no flash write on the device.
-      commands.push(...this._buildSetQuestsBulkCommands(snapshot.quests));
+      const questCmds = this._buildSetQuestsBulkCommands(snapshot.quests);
+      this.emit(
+        'status',
+        `Quest full sync: supported=${this._questSyncSupported}, ` +
+          `snapshot=${Array.isArray(snapshot.quests) ? snapshot.quests.length + ' quests' : 'NO quests field'}, ` +
+          `commands=${questCmds.length}`
+      );
+      commands.push(...questCmds);
     }
 
     // Faction reputation - always sync (not gated on inventory pause)
@@ -1506,8 +1548,10 @@ export class SyncEngine extends EventEmitter {
    */
   setQuestSyncSupported(supported) {
     const next = !!supported;
-    if (this._questSyncSupported === next) return;
     this._questSyncSupported = next;
+    // Always reported, not just on change: the initial value is false, so a
+    // failing probe used to set false-over-false and say nothing at all,
+    // which is precisely the case worth seeing in the log.
     this.emit(
       'status',
       next
@@ -2007,16 +2051,16 @@ export class SyncEngine extends EventEmitter {
         this.emit('warning', `Unknown form ID: ${gameFormId}`);
         return null;
       }
-      if (mapped !== gameFormId) {
-        const fromHex =
-          typeof gameFormId === 'number'
-            ? `0x${(gameFormId >>> 0).toString(16)}`
-            : String(gameFormId);
-        const toHex =
-          typeof mapped === 'number'
-            ? `0x${(mapped >>> 0).toString(16)}`
-            : String(mapped);
-        this.emit('status', `Form ID ${fromHex} -> ${toHex}`);
+      // Compare NUMERICALLY. resolve() hands back a number even when nothing
+      // was remapped, so `mapped !== gameFormId` was true for every plain
+      // string id and logged a "remap" of 0x00004321 -> 0x4321 - hundreds of
+      // no-op lines per full sync, which buries anything useful in the log.
+      const fromNum = parseFormIdLoose(gameFormId);
+      const toNum = parseFormIdLoose(mapped);
+      if (fromNum === null || toNum === null || fromNum !== toNum) {
+        const hex = (v, raw) =>
+          v === null ? String(raw) : `0x${(v >>> 0).toString(16).padStart(8, '0')}`;
+        this.emit('status', `Form ID ${hex(fromNum, gameFormId)} -> ${hex(toNum, mapped)}`);
       }
       resolved = mapped;
     }

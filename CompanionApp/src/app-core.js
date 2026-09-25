@@ -277,6 +277,7 @@ export class CompanionApp extends EventEmitter {
       this.syncEngine.setEnabled(false);
       // Re-probed on reconnect; the next device may be on older firmware.
       this.syncEngine.setQuestSyncSupported(false);
+      this.syncEngine._questProbeRetried = false;
       if (!this.options.game) {
         this.syncEngine.clearGameMode();
       }
