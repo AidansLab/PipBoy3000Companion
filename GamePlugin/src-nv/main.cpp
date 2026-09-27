@@ -61,7 +61,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #define PLUGIN_NAME "FalloutPipBoySync"
-#define PLUGIN_VERSION 33
+#define PLUGIN_VERSION 34
 
 // Write FalloutPipBoySync.log beside this DLL (Data/NVSE/Plugins/). Flip to 1
 // to enable PipBoyLog output (e.g. the TORCH-DIAG lines) for a debug session.
@@ -1366,6 +1366,137 @@ static void QuestDebugDump(TESQuest *quest, const std::vector<UInt32> &ids) {
 }
 #endif // PIPBOY_QUEST_DEBUG
 
+// ─────────────────────────────────────────────────────────────────────────────
+// FULL QUEST ENUMERATION (diagnostic)
+//
+// The snapshot only carries quests the player has DISCOVERED, so it says
+// nothing about how much of the game's quest set the device catalog covers.
+// DataHandler::questList holds every quest in the loaded plugins; dumping it
+// lets the 168-record QUESTS.DAT be measured against reality, and is the same
+// enumeration a regenerated catalog would be built from.
+//
+// Writes FalloutPipBoyAllQuests.log beside the DLL, once per load.
+// ─────────────────────────────────────────────────────────────────────────────
+#ifndef PIPBOY_ALLQUESTS_DEBUG
+#define PIPBOY_ALLQUESTS_DEBUG 1
+#endif
+
+#if PIPBOY_ALLQUESTS_DEBUG
+static bool g_allQuestsDumped = false;
+
+static void DumpAllQuests() {
+  DataHandler *dataHandler = DataHandler::Get();
+  if (!dataHandler)
+    return;
+
+  char path[MAX_PATH] = {};
+  if (!g_hModule || !GetModuleFileNameA(g_hModule, path, MAX_PATH))
+    return;
+  char *slash = strrchr(path, '\\');
+  if (slash)
+    *(slash + 1) = '\0';
+  strcat_s(path, "FalloutPipBoyAllQuests.log");
+  FILE *f = fopen(path, "w");
+  if (!f)
+    return;
+
+  // Load order first, so the generator can remap plugin high bytes to the
+  // Pip-Boy's fixed ones without needing the game running.
+  {
+    JsonBuilder j;
+    j.beginObject();
+    j.keyStr("game", "FNV");
+    j.key("loadOrder");
+    j.beginArray();
+    const ModInfo **activeMods = dataHandler->GetActiveModList();
+    const UInt32 modCount = dataHandler->modList.modInfoList.Count();
+    for (UInt32 i = 0; i < modCount; i++) {
+      const ModInfo *mod = activeMods[i];
+      if (!mod)
+        continue;
+      j.arrayElement();
+      j.beginObject();
+      j.keyInt("index", (int)i);
+      j.keyStr("name", mod->name);
+      j.endObject();
+    }
+    j.endArray();
+    j.endObject();
+    fprintf(f, "%s\n", j.str().c_str());
+  }
+
+  int total = 0, named = 0, withObjectives = 0;
+
+  for (auto iter = dataHandler->questList.Begin(); !iter.End(); ++iter) {
+    TESQuest *quest = iter.Get();
+    if (!quest)
+      continue;
+    total++;
+
+    const char *name = GetFullName(quest);
+    const bool hasName = name && name[0] != '\0' &&
+                         strcmp(name, "<no name>") != 0 &&
+                         strcmp(name, "<NULL>") != 0;
+    if (hasName)
+      named++;
+
+    std::vector<UInt32> objIds;
+    try {
+      CollectQuestObjectiveIds(quest, objIds);
+    } catch (...) {
+      objIds.clear();
+    }
+    if (!objIds.empty())
+      withObjectives++;
+
+    // Only quests that could actually be displayed are worth writing in full:
+    // a name plus at least one objective. Everything else gets a stub line so
+    // the totals still add up.
+    const bool displayable = hasName && !objIds.empty();
+
+    JsonBuilder j;
+    j.beginObject();
+    j.keyStr("formId", FormatFormId(quest->refID));
+    j.keyStr("name", hasName ? name : "");
+    j.keyInt("objectives", (int)objIds.size());
+    j.keyInt("stage", (int)quest->currentStage);
+    j.keyInt("flags", (int)quest->flags);
+    if (displayable) {
+      // Objective text in CATALOG ORDER (ascending objectiveId), matching the
+      // positional layout QUESTS.DAT uses - so a supplementary record built
+      // from this indexes identically to a stock one.
+      j.key("obj");
+      j.beginArray();
+      for (size_t n = 0; n < objIds.size(); n++) {
+        const char *text = "";
+        const UInt32 count = quest->lVarOrObjectives.Count();
+        for (UInt32 i = 0; i < count; i++) {
+          BGSQuestObjective *obj =
+              (BGSQuestObjective *)quest->lVarOrObjectives.GetNthItem((SInt32)i);
+          if (!obj || obj->quest != quest || obj->objectiveId != objIds[n])
+            continue;
+          if (obj->displayText.m_data)
+            text = obj->displayText.m_data;
+          break;
+        }
+        j.arrayElement();
+        j.valueStr(text);
+      }
+      j.endArray();
+    }
+    j.endObject();
+    fprintf(f, "%s\n", j.str().c_str());
+  }
+
+  fprintf(f,
+          "{\"summary\":true,\"total\":%d,\"named\":%d,\"withObjectives\":%d}\n",
+          total, named, withObjectives);
+  fclose(f);
+  PipBoyLog("QUESTS", "enumerated %d quests (%d named, %d with objectives)",
+            total, named, withObjectives);
+}
+#endif // PIPBOY_ALLQUESTS_DEBUG
+
 // Per-quest sync state assembled from the player's objective log.
 struct QuestSyncState {
   TESQuest *quest;
@@ -1457,6 +1588,14 @@ static void AppendQuestsJson(JsonBuilder &json, PlayerCharacter *player) {
     json.arrayElement();
     json.beginObject();
     json.keyStr("formId", FormatFormId(pair.first));
+    // DIAGNOSTIC ONLY - never forwarded to the device, which reads every name
+    // from its own QUESTS.DAT. It rides the pipe (local IPC, effectively free)
+    // so the companion can name a quest the device cannot display, instead of
+    // reporting a bare form ID. Do not send this over the serial link.
+    {
+      const char *questName = GetFullName(st.quest);
+      json.keyStr("name", questName ? questName : "");
+    }
     json.keyInt("stage", (int)st.quest->currentStage);
     json.keyInt("flags", flags);
     json.keyInt("objCount", (int)st.objCount);
@@ -3038,6 +3177,17 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
         case NVSEMessagingInterface::kMessage_MainGameLoop:
             if (g_gameLoaded) {
       LogMenuMaskIfChanged();
+
+#if PIPBOY_ALLQUESTS_DEBUG
+      // Once the post-load settle has finished, the form lists are populated.
+      if (!g_allQuestsDumped && g_postLoadSettleTicks == 0) {
+        g_allQuestsDumped = true;
+        try {
+          DumpAllQuests();
+        } catch (...) {
+        }
+      }
+#endif
 
 #if PIPBOY_TILE_DEBUG
       // Auto-dump the DATA tab's tile tree once per session, a moment after it

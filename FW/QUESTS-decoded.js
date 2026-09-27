@@ -26,6 +26,67 @@
 
   const QF_COMPLETE = 2;
 
+  // Supplementary catalog for quests QUESTS.DAT does not contain. The stock
+  // catalog covers 168 of the game's 192 displayable quests and no mod quests
+  // at all, so without this a synced quest with no catalog record would render
+  // as "== MISSING ==". Generated per playthrough by
+  // CompanionApp/scripts/gen-quest-ext.mjs; absent on most devices, which is
+  // fine - every lookup just misses.
+  //
+  // One JSON object per line ({"i":id,"txt":name,"obj":[...]}) so a record can
+  // be found by scanning for its id and parsing only that line. The file is
+  // never read whole: it can be tens of KB and the device has little RAM.
+  const EXT_PATH = `DATA/${NV ? 'NV' : 'F3'}/QUESTS_EXT.TXT`;
+  const extCache = {};
+
+  function extLookup(id) {
+    if (extCache[id] !== undefined) return extCache[id];
+    let rec = null;
+    const needle = '"i":' + id;
+    try {
+      const f = E.openFile(EXT_PATH, 'r');
+      if (f) {
+        let buf = '';
+        let chunk;
+        while (!rec && (chunk = f.read(1024))) {
+          buf += chunk;
+          let nl;
+          while ((nl = buf.indexOf('\n')) >= 0) {
+            const line = buf.substr(0, nl);
+            buf = buf.substr(nl + 1);
+            if (line.indexOf(needle) >= 0) {
+              try {
+                const o = JSON.parse(line);
+                if (o && o.i === id) {
+                  rec = o;
+                  break;
+                }
+              } catch (e) {}
+            }
+          }
+        }
+        // Trailing line with no newline after it.
+        if (!rec && buf.indexOf(needle) >= 0) {
+          try {
+            const o = JSON.parse(buf);
+            if (o && o.i === id) rec = o;
+          } catch (e) {}
+        }
+        f.close();
+      }
+    } catch (e) {}
+    extCache[id] = rec;
+    return rec;
+  }
+
+  // Catalog record for a quest, falling back to the supplement. Shaped like
+  // DataFile.getId's result so callers cannot tell the difference.
+  function questRecord(id) {
+    if (db.ids.indexOf(id) >= 0) return db.getId(id);
+    const ext = extLookup(id);
+    return ext ? { txt: ext.txt, obj: ext.obj } : { txt: '== MISSING ==', obj: [] };
+  }
+
   // Synced quest rows, already ordered by boot0 (running first, completed
   // last). Empty when the companion has never synced this device.
   let rows = [];
@@ -71,7 +132,7 @@
     itemCount: count(),
     getItem: (n) => {
       const id = idAt(n);
-      const item = db.getId(id);
+      const item = questRecord(id);
       item.activ = id === activeId;
       if (synced) {
         const r = rows[n];

@@ -86,14 +86,19 @@ async function status(c) {
  * THE IMPORTANT ONE.
  *
  * Espruino Storage is append-only: every .boot0 rewrite leaves the previous
- * copy as trash until compaction. compact() cannot relocate .bootcde while the
- * interpreter is executing it (Storage code runs memory-mapped from flash), so
- * calling it during normal operation silently does nothing - which is exactly
- * what flash-fw.js's ensureStorageSpace() does today. Five reflashes leaked
- * 61 KB and eventually broke the boot.
+ * copy as trash until compaction. Calling compact() during normal operation
+ * silently does nothing - which is exactly what flash-fw.js's
+ * ensureStorageSpace() does today. Five reflashes leaked 61 KB and eventually
+ * broke the boot.
  *
- * The trick: reset(), interrupt the boot code with Ctrl-C before .bootcde can
- * load, and compact with nothing running.
+ * reset() is what makes compaction work: it reinitialises the interpreter and
+ * drops its references to flash-resident code, freeing compaction to relocate
+ * entries. Bare compact() was called three times without it and moved nothing
+ * (trashBytes stayed at 61,184); with reset() first it went to 0 immediately.
+ *
+ * The Ctrl-C spam below is belt-and-braces, NOT the mechanism - the firmware
+ * reloads across reset() regardless (typeof Pip === 'function' throughout) and
+ * compaction still succeeds.
  */
 async function compact(c) {
   console.log('before  : ' + (await ask(c, null, "JSON.stringify(require('Storage').getStats())")));

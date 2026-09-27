@@ -939,12 +939,69 @@
     player.setav('quest', active || 0, !0, !0);
   }
 
-  // [id, stage, flags, "dispHex", "doneHex"] -> row, or null if the quest
-  // isn't in this device's catalog (mod-added quests have no text to show).
+  // Quest ids from the supplementary catalog (DATA/<mode>/QUESTS_EXT.TXT),
+  // which covers quests missing from the stock QUESTS.DAT - real ones it omits
+  // plus anything mod-added. Scanned once and cached; an empty result is NOT
+  // cached, so uploading the file after boot still takes effect.
+  let _extQuestIds = null;
+  function getExtQuestIds() {
+    if (_extQuestIds && _extQuestIds.length) return _extQuestIds;
+    const ids = [];
+    const take = (line) => {
+      const m = line.indexOf('"i":');
+      if (m < 0) return;
+      const v = parseInt(line.substr(m + 4), 10);
+      if (v) ids.push(v >>> 0);
+    };
+    try {
+      const f = E.openFile(`DATA/${NV ? 'NV' : 'F3'}/QUESTS_EXT.TXT`, 'r');
+      if (f) {
+        let buf = '',
+          chunk;
+        while ((chunk = f.read(1024))) {
+          buf += chunk;
+          let nl;
+          while ((nl = buf.indexOf('\n')) >= 0) {
+            take(buf.substr(0, nl));
+            buf = buf.substr(nl + 1);
+          }
+        }
+        if (buf.length) take(buf);
+        f.close();
+      }
+    } catch (e) {}
+    _extQuestIds = ids;
+    return ids;
+  }
+
+  function questIdKnown(id) {
+    return getCatIds('QUESTS').indexOf(id) >= 0 || getExtQuestIds().indexOf(id) >= 0;
+  }
+
+  // Every quest id this device can render: stock catalog plus supplement. The
+  // companion reads this so it can warn about quests it cannot display rather
+  // than dropping them silently.
+  Player.prototype.getquestcatalog = function () {
+    try {
+      const out = [],
+        cat = getCatIds('QUESTS');
+      for (let i = 0; i < cat.length; i++) out.push(cat[i]);
+      const ext = getExtQuestIds();
+      for (let i = 0; i < ext.length; i++) {
+        if (out.indexOf(ext[i]) < 0) out.push(ext[i]);
+      }
+      return out;
+    } catch (e) {
+      return [];
+    }
+  };
+
+  // [id, stage, flags, "dispHex", "doneHex"] -> row, or null if this device has
+  // no text for the quest in either catalog.
   function questRowFromEntry(e) {
     if (!e || e.length < 5) return null;
     const id = Number(e[0]) >>> 0;
-    if (!id || getCatIds('QUESTS').indexOf(id) < 0) return null;
+    if (!id || !questIdKnown(id)) return null;
     const d = qhex(e[3]),
       n = qhex(e[4]);
     return {
