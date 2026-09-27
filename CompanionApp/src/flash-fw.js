@@ -89,7 +89,7 @@ export const STORAGE_WRITE_SLACK_BYTES = 3 * 1024;
 // silent catch here cost several support round-trips.
 const STORAGE_RECLAIM_EXPR =
   "(()=>{var s=require('Storage');var f=s.getFree();" +
-  `if(f>=${STORAGE_MIN_FREE_BYTES})return{free:f,cleaned:[],failed:[]};` +
+  `if(f>=${STORAGE_MIN_FREE_BYTES})return{free:f,cleaned:[],failed:[],skipped:true};` +
   "var t=['ERROR','debug.txt','log.txt'];var c=[],fl=[];" +
   "s.list().forEach(x=>{" +
   "var b=x,sf=false;" +
@@ -102,6 +102,28 @@ const STORAGE_RECLAIM_EXPR =
   "});" +
   "s.compact();" +
   "return{free:s.getFree(),cleaned:c,failed:fl}})()";
+
+/**
+ * Storage.getStats() reports trash directly - space held by superseded copies
+ * of entries that have not been compacted away. getFree() alone cannot see it,
+ * which is why a leak went unnoticed until a device stopped booting.
+ * Returns null on firmware without getStats.
+ */
+const STORAGE_STATS_EXPR =
+  "(()=>{try{var s=require('Storage').getStats();" +
+  'return{total:s.totalBytes,free:s.freeBytes,files:s.fileBytes,' +
+  'trash:s.trashBytes,trashCount:s.trashCount}}catch(e){return null}})()';
+
+/** Compact alone; see compactStorage() for why reset() has to precede it. */
+const STORAGE_COMPACT_EXPR =
+  "(()=>{try{require('Storage').compact();return true}catch(e){return false}})()";
+
+/**
+ * Trash above this is worth reclaiming before a flash. One .boot0 is ~18 KB,
+ * so this triggers after roughly half an install's worth has accumulated -
+ * well before it can threaten a write.
+ */
+export const STORAGE_TRASH_COMPACT_BYTES = 8 * 1024;
 
 /** Storage listing with per-entry byte sizes, for the too-full error message. */
 const STORAGE_LISTING_EXPR =
@@ -139,12 +161,53 @@ function parseDeviceJson(raw) {
   }
 }
 
+/** Read Storage.getStats(), or null if unsupported/unreadable. */
+async function readStorageStats(bridge) {
+  try {
+    const parsed = parseDeviceJson(await bridge.eval(STORAGE_STATS_EXPR, 10000));
+    return parsed && typeof parsed.free === 'number' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Ensure internal Storage has room for the .boot0 patch. If free space is
- * under STORAGE_MIN_FREE_BYTES, erase ERROR/debug.txt/log.txt (when present),
- * compact, and re-check. Throws with a diagnostic listing if Storage is
- * still too full - failing here beats uploading the SD menus and then dying
- * on .boot0, which would leave menus and boot patch at mismatched versions.
+ * Reclaim trash left by superseded Storage entries.
+ *
+ * Espruino Storage is append-only: every .boot0 rewrite leaves the old copy as
+ * trash until compaction. A bare compact() during normal operation does
+ * NOTHING - it was called three times on a device holding 61 KB of trash and
+ * moved none of it. reset() first is what makes it work: it reinitialises the
+ * interpreter and drops its references to flash-resident code, freeing
+ * compaction to relocate entries. (The firmware reloads across reset() and
+ * compaction still succeeds, so stopping it is not the point.)
+ *
+ * This is why a device broke: five reflashes leaked 61 KB unnoticed because
+ * the old check only compacted once free space was already critical.
+ */
+async function compactStorage(bridge, log) {
+  log('info', 'Reinitialising interpreter so Storage can be compacted...');
+  try {
+    await bridge.sendCommand('reset()');
+  } catch {
+    // reset() drops the REPL mid-command; not an error.
+  }
+  await bridge._sleep(2500);
+  try {
+    await bridge.eval(STORAGE_COMPACT_EXPR, 20000);
+  } catch (err) {
+    log('warn', `Compaction call failed: ${err.message}`);
+  }
+  await bridge._sleep(500);
+}
+
+/**
+ * Ensure internal Storage has room for the .boot0 patch, and that it is not
+ * quietly filling with trash.
+ *
+ * Throws with a diagnostic listing if Storage is still too full - failing here
+ * beats uploading the SD menus and then dying on .boot0, which would leave
+ * menus and boot patch at mismatched versions.
  * @param {import('./serial-bridge.js').SerialBridge} bridge
  * @param {Function} log
  */
@@ -158,6 +221,37 @@ export async function ensureStorageSpace(bridge, log, requiredBytes) {
     STORAGE_MIN_FREE_BYTES,
     Number.isFinite(requiredBytes) ? Math.ceil(requiredBytes + STORAGE_WRITE_SLACK_BYTES) : 0
   );
+  // Check trash BEFORE worrying about free space. The old code only compacted
+  // once free fell below the threshold, so trash accumulated invisibly across
+  // flashes and was never reclaimed until it was already too late.
+  const stats = await readStorageStats(bridge);
+  if (stats) {
+    log(
+      'info',
+      `Storage: ${stats.free} free, ${stats.files} in files, ` +
+        `${stats.trash} trash (${stats.trashCount} entries) of ${stats.total}`
+    );
+    if (stats.trash >= STORAGE_TRASH_COMPACT_BYTES) {
+      await compactStorage(bridge, log);
+      const after = await readStorageStats(bridge);
+      if (!after) {
+        log('warn', 'Could not confirm compaction - continuing on the free-space check alone.');
+      } else if (after.trash >= stats.trash) {
+        // Verify rather than assume: silently ineffective compaction is the
+        // exact failure that leaked 61 KB and broke a device's boot.
+        throw new Error(
+          `Storage compaction did not reclaim anything (${after.trash} bytes of trash ` +
+            `in ${after.trashCount} entries remain, ${after.free} free). Flashing now would ` +
+            `leak more. Recover with: node scripts/device-recovery.mjs compact`
+        );
+      } else {
+        log('info', `Reclaimed ${stats.trash - after.trash} bytes (now ${after.free} free)`);
+      }
+    }
+  } else {
+    log('info', 'Storage.getStats() unavailable - falling back to free-space checks only.');
+  }
+
   // compact() rewrites flash pages, so allow well beyond the eval default.
   const raw = await bridge.eval(STORAGE_RECLAIM_EXPR, 20000);
   const result = parseDeviceJson(raw);
