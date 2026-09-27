@@ -334,21 +334,64 @@ lazy re-probe moments later. Quest sync currently works *because* of the
 re-probe, so the original failure is worked around rather than understood.
 **First place to look if a user reports quests not syncing.**
 
-### In-game Pip-Boy does not refresh on a device-set active quest
+### In-game Pip-Boy live refresh — SOLVED
 
-Setting the active quest from the device updates game data, but if the in-game
-Pip-Boy is already open the change is not visible until it is closed and
-reopened. The quest list lives in `kMenuType_Map` (the DATA tab), and
-`RefreshPipBoyUI()` only refreshes Inventory and Stats — when Map is visible it
-refreshes the Stats menu for the HP chrome and nothing else.
+Setting `PlayerCharacter::quest` updates game data but repaints nothing, so a
+quest activated from the device used to appear only after closing and reopening
+the in-game Pip-Boy. The quest list lives in `kMenuType_Map` (the DATA tab) and
+`RefreshPipBoyUI()` has no path for it — the xNVSE SDK has no `MapMenu` class
+and no refresh address is known for it.
 
-The xNVSE SDK has **no `MapMenu` class**, so there is no refresh call to make.
-The existing refreshes are raw engine addresses (`0x782A90` =
-`InventoryMenu::Refresh`, `0x7DF230` = a StatsMenu update). Options, least
-risky first: dump the MapMenu tile tree to find the quest list tile and poke a
-trait; simulate the click through `Menu::HandleClick`; reverse-engineer a
-`MapMenu` refresh address. **Do not** call `0x7DF230` with a MapMenu pointer —
-it is StatsMenu-specific and would misinterpret the object layout.
+Solved by driving the menu's **own** handler rather than guessing at an address.
+`RefreshInGameQuestList()` calls `Menu::HandleClick(34, questsTabTile)` —
+virtual slot 3, the same entry point a real mouse click uses — so the menu
+rebuilds its list through normal game code and picks up the new active quest.
+No traits are written and no undocumented addresses are called. **Confirmed
+working on hardware.**
+
+Guarded two ways: it only fires when `MM_QuestsList` (id 7) is actually
+visible, so it cannot yank the player off World Map onto Quests, and the call
+is wrapped in `try/catch`.
+
+Do **not** call `0x7DF230` with a MapMenu pointer — it is StatsMenu-specific
+and would misinterpret the object layout.
+
+#### DATA-tab tile map
+
+Captured with the read-only tile dumper (`PIPBOY_TILE_DEBUG`, which walks the
+tree to `FalloutPipBoyTiles.log`; a copy is in `backup/`):
+
+```
+MapMenu id=112
+  GLOW_BRANCH id=110
+    MM_Tabline id=17
+      Local Map 32 | World Map 33 | Quests 34 | Notes 35 | Radio 36
+    MM_QuestsList id=7
+      MM_ListItem id=23  listindex=N  string="<quest name>"
+        MM_Template_ItemMarker        <- visible=1 on the ACTIVE quest
+        ListItemText
+    MM_ButtonA id=11  string="Make Active Quest"
+    MM_QuestObjectivesList id=15
+```
+
+The active DATA sub-tab is identifiable by its `box` child having `visible=1`
+while the other tabs' are 0. `MM_ButtonA` (id 11) is the more surgical
+alternative if the tab-click ever proves too blunt: select the row, then invoke
+that button.
+
+### Alt-tabbing pauses the game, so queued commands do not run
+
+Every device-to-game command is executed from the `kMessage_MainGameLoop`
+handler. Alt-tabbing pauses Fallout, that message stops firing, and the main
+thread stops draining `g_commandQueue` — the pipe thread still receives and
+queues commands, so the companion reports them as sent while nothing happens
+until the game regains focus.
+
+This is pre-existing behaviour affecting equip/use/drop equally, and arguably
+correct (the game should not mutate while paused). It is worth knowing when
+testing: a command typed at the companion prompt while tabbed out will not take
+effect until you click back into the game. It is why the tile dumper is driven
+from the game loop rather than from its `DUMPTILES` command.
 
 ### The device catalog is incomplete — some quests can never be shown
 
