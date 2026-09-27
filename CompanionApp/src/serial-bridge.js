@@ -607,6 +607,51 @@ export class SerialBridge extends EventEmitter {
   }
 
   /**
+   * Read the quest catalog's form IDs from the device.
+   *
+   * DATA/<mode>/QUESTS.DAT is fixed game data baked in by The Wand Company and
+   * it does NOT contain every quest in the game (confirmed omissions: Vance's
+   * Gun, Young Hearts). The device silently drops any quest it has no record
+   * for, because it would have no name or objective text to draw. Fetching the
+   * id list once lets the app say which quests it cannot display instead of
+   * losing them without a word.
+   *
+   * ~168 ids for NV, so roughly 1.8 KB of JSON over one eval.
+   *
+   * @returns {Promise<number[]|null>} form IDs, or null if unreadable
+   */
+  async getQuestCatalogIds() {
+    // Ask boot0 first: it returns the stock catalog PLUS the supplementary one
+    // (QUESTS_EXT.TXT), which is what the device can actually render. Reading
+    // QUESTS.DAT directly would miss the supplement and the app would filter
+    // out quests the device is perfectly able to show. Older firmware has no
+    // such method, hence the fallback.
+    const expressions = [
+      "(function(){try{return player.getquestcatalog()}catch(e){return null}})()",
+      "(function(){try{var d=new DataFile('DATA/'+(NV?'NV':'F3')+'/QUESTS.DAT');" +
+        'var a=[],i;for(i=0;i<d.ids.length;i++)a.push(d.ids[i]);' +
+        'd.close();return a}catch(e){return null}})()',
+    ];
+
+    for (const expr of expressions) {
+      try {
+        const raw = await this.eval(expr, 20000);
+        const text = String(raw).trim();
+        // The REPL may prefix banner noise; the array is last (see
+        // parseDeviceJson in flash-fw.js for the same problem).
+        const start = text.lastIndexOf('[');
+        if (start < 0) continue;
+        const parsed = JSON.parse(text.slice(start, text.lastIndexOf(']') + 1));
+        if (!Array.isArray(parsed) || parsed.length === 0) continue;
+        return parsed.map((n) => Number(n) >>> 0);
+      } catch (err) {
+        this.emit('status', `Quest catalog read failed (${err.message}), trying fallback`);
+      }
+    }
+    return null;
+  }
+
+  /**
    * Wait for a one-time bridge event.
    */
   waitForEvent(event, timeoutMs) {

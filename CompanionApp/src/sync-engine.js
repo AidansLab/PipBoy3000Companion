@@ -156,6 +156,14 @@ export class SyncEngine extends EventEmitter {
     // One lazy re-probe per connection when the connect-time one came back
     // false but the game is clearly sending quests - see _processSnapshotInternal.
     this._questProbeRetried = false;
+    // Form IDs present in the device's QUESTS.DAT, read once per connection.
+    // null = unknown, in which case nothing is filtered and quests are sent as
+    // before. The device validates independently either way; this only exists
+    // so the app can SAY which quests it cannot display.
+    this._deviceQuestIds = null;
+    // Quests already reported as undisplayable, so the warning fires once each
+    // rather than on every snapshot.
+    this._questsWarnedMissing = new Set();
     this._resyncEquipAfterInventory = false;
     // Last AP value actually pushed to the device - see _diffAP. Reset
     // alongside previousState so a full resync always pushes the current AP.
@@ -345,6 +353,12 @@ export class SyncEngine extends EventEmitter {
         const ok = await this.bridge.hasQuestSupport();
         this.emit('status', `Quest support re-probe: ${ok}`);
         this.setQuestSyncSupported(ok);
+        // The connect-time catalog read is skipped when the probe said no, so
+        // fetch it here too or every quest would look displayable.
+        if (ok && !this._deviceQuestIds &&
+            typeof this.bridge.getQuestCatalogIds === 'function') {
+          this.setDeviceQuestCatalog(await this.bridge.getQuestCatalogIds());
+        }
       } catch (err) {
         this.emit('status', `Quest support re-probe failed: ${err.message}`);
       }
@@ -1466,10 +1480,20 @@ export class SyncEngine extends EventEmitter {
    */
   _buildSetQuestsBulkCommands(quests) {
     if (!this._questSyncSupported) return [];
-    const entries = [];
-    for (const q of Array.isArray(quests) ? quests : []) {
+    const raw = Array.isArray(quests) ? quests : [];
+    let entries = [];
+    for (const q of raw) {
       const e = this._toQuestEntry(q);
       if (e) entries.push(e);
+    }
+    const beforeFilter = entries.length;
+    entries = this._filterToDeviceCatalog(entries, raw);
+    if (this._deviceQuestIds && beforeFilter !== entries.length) {
+      this.emit(
+        'status',
+        `Quests: ${entries.length} of ${beforeFilter} displayable ` +
+          `(${beforeFilter - entries.length} not in the device catalog)`
+      );
     }
     const commands = ['player.setquestsbulk_begin()'];
     for (let i = 0; i < entries.length; i += MAX_QUEST_BATCH) {
@@ -1492,6 +1516,23 @@ export class SyncEngine extends EventEmitter {
     const commands = [];
     const cur = this._questMap(current);
     const prev = this._questMap(previous);
+
+    // A quest the device has no catalog record for can never be shown. Drop it
+    // from BOTH sides: leaving it only in `cur` would emit a setquest the
+    // device discards on every change, and leaving it only in `prev` would emit
+    // a pointless removequest. Warned once each by _filterToDeviceCatalog.
+    if (this._deviceQuestIds) {
+      for (const [formId] of [...cur]) {
+        if (!this._deviceHasQuest(formId)) cur.delete(formId);
+      }
+      for (const [formId] of [...prev]) {
+        if (!this._deviceHasQuest(formId)) prev.delete(formId);
+      }
+      this._filterToDeviceCatalog(
+        [...this._questMap(current).values()],
+        Array.isArray(current) ? current : []
+      );
+    }
 
     let changed = 0;
     let removed = 0;
@@ -1562,6 +1603,68 @@ export class SyncEngine extends EventEmitter {
 
   isQuestSyncSupported() {
     return this._questSyncSupported;
+  }
+
+  /**
+   * Supply the quest form IDs the device's catalog contains.
+   * @param {number[]|null} ids
+   */
+  setDeviceQuestCatalog(ids) {
+    if (!Array.isArray(ids) || ids.length === 0) {
+      this._deviceQuestIds = null;
+      return;
+    }
+    this._deviceQuestIds = new Set(ids.map((n) => Number(n) >>> 0));
+    this._questsWarnedMissing.clear();
+    this.emit('status', `Device quest catalog: ${this._deviceQuestIds.size} quests`);
+  }
+
+  /**
+   * Can the device display this quest? Unknown catalog means "assume yes" -
+   * the device rejects unknown IDs itself, so the only cost of guessing wrong
+   * is a command it ignores.
+   * @param {number} formId Pip-Boy-space form ID
+   */
+  _deviceHasQuest(formId) {
+    if (!this._deviceQuestIds) return true;
+    return this._deviceQuestIds.has(formId >>> 0);
+  }
+
+  /**
+   * Drop quests the device has no catalog record for, naming each one once.
+   * Without this the loss is completely silent: the quest simply never appears
+   * on the device and nothing says why (this is how "Young Hearts" was lost).
+   * @param {Array} quests normalized entries
+   * @param {Array} rawQuests the snapshot entries, for their names
+   */
+  _filterToDeviceCatalog(quests, rawQuests) {
+    if (!this._deviceQuestIds) return quests;
+
+    const nameFor = (formId) => {
+      const raw = (rawQuests || []).find(
+        (q) => this._toFormIdInt(q.formId) === formId
+      );
+      return raw && raw.name ? raw.name : null;
+    };
+
+    const kept = [];
+    for (const entry of quests) {
+      if (this._deviceHasQuest(entry.formId)) {
+        kept.push(entry);
+        continue;
+      }
+      if (!this._questsWarnedMissing.has(entry.formId)) {
+        this._questsWarnedMissing.add(entry.formId);
+        const name = nameFor(entry.formId);
+        const hex = '0x' + (entry.formId >>> 0).toString(16).padStart(8, '0');
+        this.emit(
+          'warning',
+          `Quest ${name ? `"${name}" ` : ''}(${hex}) is not in the Pip-Boy's quest ` +
+            `catalog and cannot be displayed on the device.`
+        );
+      }
+    }
+    return kept;
   }
 
   /**

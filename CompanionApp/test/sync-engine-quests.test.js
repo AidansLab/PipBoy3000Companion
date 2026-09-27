@@ -202,6 +202,81 @@ describe('SyncEngine quest sync capability gate', () => {
   });
 });
 
+describe('SyncEngine device quest catalog', () => {
+  const IN_CATALOG = 0x00104c1c;   // 1068060
+  const NOT_IN_CATALOG = 0x0012c3d5;
+
+  function engineWithCatalog() {
+    const engine = makeEngine();
+    engine.setDeviceQuestCatalog([IN_CATALOG]);
+    return engine;
+  }
+
+  it('warns by name, once, for a quest the device cannot display', () => {
+    const engine = engineWithCatalog();
+    const warnings = [];
+    engine.on('warning', (m) => warnings.push(m));
+
+    const missing = quest({ formId: '0x0012c3d5', name: 'Young Hearts' });
+    engine._buildSetQuestsBulkCommands([quest(), missing]);
+    engine._buildSetQuestsBulkCommands([quest(), missing]);
+
+    const catalogWarnings = warnings.filter((w) => /not in the Pip-Boy/.test(w));
+    assert.equal(catalogWarnings.length, 1, 'should warn exactly once per quest');
+    assert.match(catalogWarnings[0], /Young Hearts/);
+    assert.match(catalogWarnings[0], /0x0012c3d5/);
+  });
+
+  it('omits undisplayable quests from the bulk payload', () => {
+    const engine = engineWithCatalog();
+    const cmds = engine._buildSetQuestsBulkCommands([
+      quest(),
+      quest({ formId: '0x0012c3d5', name: 'Young Hearts' }),
+    ]);
+    const chunks = cmds.slice(1, -1).join('');
+    assert.match(chunks, new RegExp(String(IN_CATALOG)));
+    assert.equal((chunks.match(/\[\d+,/g) || []).length, 1);
+  });
+
+  it('emits no commands at all for an undisplayable quest in the diff', () => {
+    const engine = engineWithCatalog();
+    const missing = quest({ formId: '0x0012c3d5', name: 'Young Hearts' });
+    // New quest appears: nothing should be sent, since the device would
+    // discard it anyway.
+    assert.deepEqual(engine._diffQuests([quest(), missing], [quest()]), []);
+    // And it disappearing must not produce a removequest either.
+    assert.deepEqual(engine._diffQuests([quest()], [quest(), missing]), []);
+  });
+
+  it('still syncs displayable quests alongside undisplayable ones', () => {
+    const engine = engineWithCatalog();
+    const missing = quest({ formId: '0x0012c3d5', name: 'Young Hearts' });
+    const cmds = engine._diffQuests([quest({ done: '7' }), missing], [quest(), missing]);
+    assert.equal(cmds.length, 1);
+    assert.match(cmds[0], /^player\.setquest\(1068060,/);
+  });
+
+  it('assumes everything is displayable when the catalog is unknown', () => {
+    const engine = makeEngine(); // no catalog set
+    const warnings = [];
+    engine.on('warning', (m) => warnings.push(m));
+    const cmds = engine._buildSetQuestsBulkCommands([
+      quest(),
+      quest({ formId: '0x0012c3d5', name: 'Young Hearts' }),
+    ]);
+    const chunks = cmds.slice(1, -1).join('');
+    assert.equal((chunks.match(/\[\d+,/g) || []).length, 2);
+    assert.equal(warnings.filter((w) => /not in the Pip-Boy/.test(w)).length, 0);
+  });
+
+  it('clears the catalog on disconnect so the next device is re-read', () => {
+    const engine = engineWithCatalog();
+    assert.equal(engine._deviceHasQuest(NOT_IN_CATALOG), false);
+    engine.setDeviceQuestCatalog(null);
+    assert.equal(engine._deviceHasQuest(NOT_IN_CATALOG), true);
+  });
+});
+
 describe('SyncEngine full sync includes quests', () => {
   it('reconciles quests as part of _generateFullSync', () => {
     const engine = makeEngine();

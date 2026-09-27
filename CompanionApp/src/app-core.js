@@ -149,6 +149,12 @@ export class CompanionApp extends EventEmitter {
     // Probe once per connection, after the patch check confirms boot0 is up:
     // an older .boot0 has the item/perk methods but none of the quest ones.
     this.syncEngine.setQuestSyncSupported(await this.bridge.hasQuestSupport());
+    // Read the device's quest catalog so quests it cannot display are reported
+    // by name rather than silently dropped. Cheap (one eval) and only needed
+    // when quest sync is actually on.
+    if (this.syncEngine.isQuestSyncSupported()) {
+      this.syncEngine.setDeviceQuestCatalog(await this.bridge.getQuestCatalogIds());
+    }
     this._deviceReady = true;
     if (this.pipeClient.connected) {
       await this._tryEnableSync({
@@ -275,9 +281,11 @@ export class CompanionApp extends EventEmitter {
       this._deviceReady = false;
       this._companionPatchInstalled = false;
       this.syncEngine.setEnabled(false);
-      // Re-probed on reconnect; the next device may be on older firmware.
+      // Re-probed on reconnect; the next device may be on older firmware, or
+      // be in the other game's mode with a different quest catalog.
       this.syncEngine.setQuestSyncSupported(false);
       this.syncEngine._questProbeRetried = false;
+      this.syncEngine.setDeviceQuestCatalog(null);
       if (!this.options.game) {
         this.syncEngine.clearGameMode();
       }
