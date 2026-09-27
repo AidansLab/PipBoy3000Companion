@@ -10,27 +10,28 @@ the flasher that will repeat this failure.
 
 ## 1. Current state of the device
 
-Working:
+**FULLY RECOVERED as of 2026-09-27.** The device is working normally:
 
-- Boots stock firmware, STATS page renders, `Pip.sleeping` is `false`
-- Battery healthy (4.20 V), USB enumerates on COM9
-- Storage healthy: `131,072` total, `72,472` free, **0 trash**
+- Boots, all menus load (WEAPONS / APPAREL / SETTINGS confirmed working)
+- `.boot0` reinstalled, `cmode` present, companion features restored
+- Battery healthy (4.19 V), `Pip.sleeping` is `false`
+- Storage clean: `131,072` total, `53,908` free, **0 trash**, 4 entries
 - SD card untouched throughout — all 27 `JS/*.JS`, `.INV` data, `QUESTS.STA`
   (46 rows) and `QUESTS_EXT.TXT` (10,231 bytes, 23 records) intact and CRC-verified
+- Quest sync intact
 
-Not working:
+The rest of this document is the record of what went wrong and how it was
+fixed, kept because the failure mode is easy to re-create.
 
-- **`.boot0` is absent** (erased during recovery), so there is no companion patch
-- Therefore `WEAPONS.JS`, `APPAREL.JS`, `SETTINGS.JS` report **"unable to load"**.
-  Those are *our* companion menu scripts sitting on the SD, and they reference
-  globals `.boot0` defines (`cmode`, `Pip.companionDropItem`,
-  `player.refreshequip`). Without it they throw on load and stock FW shows its
-  "unable to load" screen. The files themselves are fine.
-- `QUESTS.JS` still loads, because its calls are wrapped in `try/catch`; with no
-  `player.getquests()` it falls back to browsing all 168 catalog quests.
+### Symptoms, if it happens again
 
-**To finish the fix:** reinstall `.boot0` (`npm run flash-fw`). Storage is clean,
-so a single flash is safe. But fix section 5 first, or the leak resumes.
+| Symptom | Section |
+| --- | --- |
+| Boots but menus say "unable to load" | `.boot0` missing — reflash (§1) |
+| Power button flashes the tab LEDs, nothing else | stuck wake (§3.4) |
+| Screen lit but blank | half-completed wake (§3.4, then §3.5) |
+| No COM port, "Device Descriptor Request Failed" | try a different USB port (§4) |
+| Free Storage falling across flashes | the leak (§2) — `device-recovery.mjs compact` |
 
 ---
 
@@ -190,9 +191,32 @@ restored normal operation.
 
 ---
 
-## 5. The bug that must be fixed before flashing again
+## 5. The flasher bug — FIXED 2026-09-27
 
-`ensureStorageSpace()` in `CompanionApp/src/flash-fw.js` is unsound:
+`ensureStorageSpace()` in `CompanionApp/src/flash-fw.js` has been reworked. It
+now:
+
+- reads `Storage.getStats()` and logs free / files / **trash** / total before
+  anything is written
+- checks trash **unconditionally**, triggering at
+  `STORAGE_TRASH_COMPACT_BYTES` (8 KB) rather than only when free space is
+  already critical
+- reclaims via `compactStorage()`, which does `reset()` **then** `compact()`
+- **verifies** trash actually dropped and throws if it did not, pointing at
+  `node scripts/device-recovery.mjs compact`
+
+Verified against hardware: the stats path reports correctly and a flash onto
+clean Storage used exactly the ~18.5 KB of the patch with **zero trash left
+behind** (72,472 → 53,908 free).
+
+**Caveat:** the compaction branch itself has not yet executed for real — the
+device had no trash to reclaim when the fix landed. It will get its first
+genuine exercise after a few more flashes. It fails *closed* (refusing to
+flash) rather than leaking, which is the right direction.
+
+### What was wrong (for the record)
+
+The original `ensureStorageSpace()` was unsound:
 
 1. **It never verifies compaction worked.** It calls `compact()` and re-reads
    free space, but compaction silently no-ops while firmware runs, so the retry
@@ -211,7 +235,7 @@ Minimum fix:
 - Keep deriving the space requirement from the actual `.boot0` size (already
   done — `STORAGE_MIN_FREE_BYTES` 21 KB floor plus `STORAGE_WRITE_SLACK_BYTES`)
 
-Until that lands, **compact manually before each flash**:
+The safeguard now does this automatically. To check or reclaim by hand:
 
 ```
 node scripts/device-recovery.mjs compact
@@ -219,8 +243,9 @@ node scripts/device-recovery.mjs status      # confirm trashBytes: 0
 npm run flash-fw
 ```
 
-Each flash costs ~18.5 KB of trash. From a clean 76 KB free that is roughly
-three flashes before trouble.
+Each flash costs ~18.5 KB of trash if it is not reclaimed, so from a clean
+~72 KB free that is roughly three flashes before trouble. With the fix in
+place the reclaim happens at the 8 KB trigger, well before that.
 
 ---
 
