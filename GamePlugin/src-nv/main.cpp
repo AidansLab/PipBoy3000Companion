@@ -61,7 +61,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #define PLUGIN_NAME "FalloutPipBoySync"
-#define PLUGIN_VERSION 34
+#define PLUGIN_VERSION 35
 
 // Write FalloutPipBoySync.log beside this DLL (Data/NVSE/Plugins/). Flip to 1
 // to enable PipBoyLog output (e.g. the TORCH-DIAG lines) for a debug session.
@@ -1673,10 +1673,12 @@ std::string BuildPlayerSnapshot() {
         json.keyInt("hp", (int)ceilf(curHP));
         json.keyFloat("maxHP", maxHP);
 
-        // Action Points - floor to match game HUD, fractional regen ignored for sync.
+        // Max Action Points only. Current AP is deliberately not emitted: it
+        // drains and recharges continuously (mods that spend it as sprint
+        // stamina move it every tick), and since the pipe only sends a snapshot
+        // when it differs byte-for-byte from the last one, including it resent
+        // the entire snapshot ~10x/sec for a value the device never displays.
         float maxAP = player->avOwner.Fn_01(kAV_ActionPoints);
-        float curAP = player->avOwner.Fn_03(kAV_ActionPoints);
-        json.keyInt("ap", (int)floorf(curAP));
         json.keyInt("maxAP", (int)(maxAP + 0.5f));
 
         // Carry Weight, maxWg is the max carry weight AV (includes Strong Back/buffs).

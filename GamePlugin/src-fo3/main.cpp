@@ -45,7 +45,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #define PLUGIN_NAME "FalloutPipBoySync"
-#define PLUGIN_VERSION 32
+#define PLUGIN_VERSION 33
 
 // Write FalloutPipBoySync.log beside this DLL (Data/FOSE/Plugins/).
 #ifndef PIPBOY_VERBOSE_LOG
@@ -828,11 +828,12 @@ std::string BuildPlayerSnapshot() {
     json.keyInt("hp", (int)ceilf(curHP));
     json.keyFloat("maxHP", maxHP);
 
-    // Action Points - floor to match game HUD, fractional regen ignored for
-    // sync.
+    // Max Action Points only. Current AP is deliberately not emitted: it
+    // drains and recharges continuously (mods that spend it as sprint stamina
+    // move it every tick), and since the pipe only sends a snapshot when it
+    // differs byte-for-byte from the last one, including it resent the entire
+    // snapshot every tick for a value the device never displays.
     float maxAP = AVBase(player, kAV_ActionPoints);
-    float curAP = AVCurrent(player, kAV_ActionPoints);
-    json.keyInt("ap", (int)floorf(curAP));
     json.keyInt("maxAP", (int)(maxAP + 0.5f));
 
     // Carry Weight

@@ -57,11 +57,6 @@ const SKILLS_SOFT_REFRESH_CMD =
 // HP lives in the shared Pip-Boy header; redraw it without rebuilding pages.
 const HP_HEADER_SOFT_REFRESH_CMD = 'player.renderheader();';
 
-// AP recharges/drains continuously in real time, which without chunking means
-// a device write on almost every snapshot. Only push once AP has moved this
-// many points from the last value actually sent - see _diffAP.
-const AP_SYNC_CHUNK = 5;
-
 // Caps/Wg/HP in the ITEMS chrome - header only, no tab rebuild.
 const ITEMS_HEADER_SOFT_REFRESH_CMD = 'player.renderheader(!0);';
 
@@ -165,9 +160,6 @@ export class SyncEngine extends EventEmitter {
     // rather than on every snapshot.
     this._questsWarnedMissing = new Set();
     this._resyncEquipAfterInventory = false;
-    // Last AP value actually pushed to the device - see _diffAP. Reset
-    // alongside previousState so a full resync always pushes the current AP.
-    this._lastSentAp = undefined;
     // Bumped on save load / forced resync. A snapshot that began processing
     // under an older generation must not write its (now stale) state back into
     // previousState, or it would downgrade the next post-load full sync to an
@@ -190,7 +182,6 @@ export class SyncEngine extends EventEmitter {
     }
     this.gameMode = mode;
     this.previousState = null; // Force full sync on game mode change
-    this._lastSentAp = undefined;
     this._lastMismatchWarning = null;
     this.emit('game-mode-changed', mode);
   }
@@ -200,7 +191,6 @@ export class SyncEngine extends EventEmitter {
     if (!this.gameMode) return;
     this.gameMode = null;
     this.previousState = null;
-    this._lastSentAp = undefined;
     this._lastMismatchWarning = null;
     this.emit('game-mode-changed', null);
   }
@@ -325,7 +315,6 @@ export class SyncEngine extends EventEmitter {
       const loadOrderChanged = this.mapper.setLoadOrder(snapshot.loadOrder);
       if (loadOrderChanged && this.previousState) {
         this.previousState = null;
-        this._lastSentAp = undefined;
         this.emit('status', 'Load order updated - forcing full resync');
       }
     }
@@ -1712,44 +1701,24 @@ export class SyncEngine extends EventEmitter {
   }
 
   /**
-   * Generate action-point commands from game -> Pip-Boy.
-   * Stock firmware shows maxAP/maxAP in the STATS header; boot0 overrides when
-   * cmode is on. Values are ephemeral (!1) and refreshed via renderHeader.
-   *
-   * curAp is chunked against the last value actually sent (this._lastSentAp),
-   * not the raw delta since last snapshot - AP recharges/drains continuously,
-   * so an un-chunked diff would push on nearly every snapshot. Empty (0) and
-   * full (curMaxAp) always push immediately regardless of chunk size, so the
-   * display never sits visibly wrong at either end just because the last step
-   * into it was smaller than a chunk - this also sidesteps maxAP not being a
-   * multiple of AP_SYNC_CHUNK, since chunking is relative to the last-sent
-   * value rather than fixed absolute boundaries.
+   * Generate max-AP commands from game -> Pip-Boy.
+   * Stock firmware shows maxAP/maxAP in the STATS header, which is what the
+   * device displays: current AP is deliberately not synced. It drains and
+   * recharges continuously - mods that spend it as sprint stamina move it every
+   * snapshot - so syncing it kept the serial link busy for a number nobody
+   * reads on the device. The plugin no longer emits it either (v35+); ignoring
+   * it here as well keeps older plugin builds quiet. maxAP only moves with
+   * level/Agility/perks. Ephemeral (!1), refreshed via renderHeader.
    */
   _diffAP(player, prevPlayer) {
     const commands = [];
-    const curAp =
-      player.ap !== undefined ? Math.floor(player.ap) : undefined;
     const curMaxAp =
       player.maxAP !== undefined ? Math.round(player.maxAP) : undefined;
     const prevMaxAp =
       prevPlayer.maxAP !== undefined ? Math.round(prevPlayer.maxAP) : undefined;
 
-    if (curAp !== undefined) {
-      const lastSent = this._lastSentAp;
-      const atBound = curAp === 0 || (curMaxAp !== undefined && curAp === curMaxAp);
-      const shouldSend =
-        lastSent === undefined ||
-        (atBound && lastSent !== curAp) ||
-        Math.abs(curAp - lastSent) >= AP_SYNC_CHUNK;
-      if (shouldSend) {
-        commands.push(`player.setav('ap', ${JSON.stringify(curAp)}, !1)`);
-        this._lastSentAp = curAp;
-      }
-    }
     if (curMaxAp !== undefined && curMaxAp !== prevMaxAp) {
       commands.push(`player.setav('maxap', ${JSON.stringify(curMaxAp)}, !1)`);
-    }
-    if (commands.length > 0) {
       commands.push(HP_HEADER_SOFT_REFRESH_CMD);
     }
     return commands;
@@ -2294,7 +2263,6 @@ export class SyncEngine extends EventEmitter {
     this._deviceTorchPending = null;
     this._deviceActiveQuestPending = null;
     this._resyncEquipAfterInventory = false;
-    this._lastSentAp = undefined;
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);
       this._debounceTimer = null;
