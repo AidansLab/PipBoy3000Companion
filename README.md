@@ -120,7 +120,7 @@ cmake --build build-fo3 --config Release
 
 ## Roadmap
 - Item mod display support (+)
-- Map syncing
+- ~~Map syncing~~
 - Linux Support
 - ~~FO3 DLC~~
 - ~~Fix undiscovered factions staying hidden on pre-sync data restore~~

@@ -1,0 +1,44 @@
+{
+  "configurations": [
+    {
+      "name": "NV (xNVSE)",
+      "includePath": [
+        "${workspaceFolder}/GamePlugin/xNVSE",
+        "${workspaceFolder}/GamePlugin/xNVSE/nvse",
+        "${workspaceFolder}/GamePlugin/xNVSE/common"
+      ],
+      "defines": [
+        "WIN32",
+        "_WINDOWS",
+        "_USRDLL",
+        "RUNTIME",
+        "RUNTIME_VERSION=0x040020D0"
+      ],
+      "forcedInclude": [
+        "${workspaceFolder}/GamePlugin/xNVSE/nvse/nvse/prefix.h"
+      ],
+      "cppStandard": "c++20",
+      "intelliSenseMode": "windows-msvc-x86"
+    },
+    {
+      "name": "FO3 (FOSE)",
+      "includePath": [
+        "${workspaceFolder}/GamePlugin/FOSE/fose",
+        "${workspaceFolder}/GamePlugin/FOSE"
+      ],
+      "defines": [
+        "WIN32",
+        "_WINDOWS",
+        "_USRDLL",
+        "RUNTIME",
+        "FALLOUT_VERSION=0x01070030"
+      ],
+      "forcedInclude": [
+        "${workspaceFolder}/GamePlugin/src-fo3/fose_prefix_fix.h"
+      ],
+      "cppStandard": "c++14",
+      "intelliSenseMode": "windows-msvc-x86"
+    }
+  ],
+  "version": 4
+}

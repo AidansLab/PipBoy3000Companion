@@ -886,6 +886,18 @@ std::string BuildPlayerSnapshot() {
     }
     json.endObject();
 
+    // World position + worldspace + heading, for the Pip-Boy's live World
+    // Map marker. rotZ's compass-bearing convention is confirmed in
+    // src-nv/main.cpp's identical field (shared engine code).
+    json.keyFloat("worldX", player->posX);
+    json.keyFloat("worldY", player->posY);
+    json.keyFloat("rotZ", player->rotZ);
+    {
+      TESObjectCELL *cell = player->parentCell;
+      TESWorldSpace *ws = (cell && !cell->IsInterior()) ? cell->worldSpace : nullptr;
+      json.keyInt("worldspace", (int)(ws ? ws->refID : 0));
+    }
+
     // Skills - effective values. Fallout 3 set: Small Guns and Big Guns
     // instead of FNV's Guns, no Survival. Key names must normalize to the
     // device's F3 SKILLS.DAT display names ("Small Guns" = "smallguns").

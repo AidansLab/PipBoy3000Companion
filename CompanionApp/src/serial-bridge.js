@@ -246,8 +246,10 @@ export class SerialBridge extends EventEmitter {
    *   PIPSYNC:UNEQUIP:APPAREL:000340C8
    *   PIPSYNC:DROP:AMMO:0000434F:20
    *   PIPSYNC:TORCH:ON / PIPSYNC:TORCH:OFF
-   * when the user uses/equips/drops an item on the device. These are emitted
-   * as 'device-event' so the app can mirror the action in-game.
+   *   PIPSYNC:WMAP:OPEN / PIPSYNC:WMAP:CLOSE
+   * when the user uses/equips/drops an item on the device (or opens/closes
+   * the World Map screen). These are emitted as 'device-event' so the app
+   * can mirror the action in-game (or, for WMAP, gate live position sync).
    */
   _scanDeviceEvents(text) {
     this._lineBuffer += text;
@@ -286,6 +288,15 @@ export class SerialBridge extends EventEmitter {
 
       if (line.includes('PIPSYNC:RESTORE:PRESYNC')) {
         this.emit('device-event', { action: 'restore', category: 'presync' });
+        continue;
+      }
+
+      const wmapMatch = line.match(/PIPSYNC:WMAP:(OPEN|CLOSE)/);
+      if (wmapMatch) {
+        this.emit('device-event', {
+          action: 'wmap',
+          open: wmapMatch[1] === 'OPEN',
+        });
       }
     }
 
@@ -553,6 +564,20 @@ export class SerialBridge extends EventEmitter {
     }
 
     throw new Error(`Could not verify companion patch: ${lastErr?.message || 'unknown error'}`);
+  }
+
+  /**
+   * True when the World Map screen is already the active app on-device.
+   * Called once after connecting, since a reconnect while WMAP is already
+   * open would otherwise miss its one-time PIPSYNC:WMAP:OPEN event.
+   */
+  async isWmapOpen() {
+    try {
+      const result = await this.eval("!!(Pip.CURRENT && Pip.CURRENT.id==='WMAP')");
+      return this._parseEvalBool(result);
+    } catch (_err) {
+      return false;
+    }
   }
 
   /**

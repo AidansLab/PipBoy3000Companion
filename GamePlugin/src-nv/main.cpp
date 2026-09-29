@@ -66,7 +66,7 @@
 // Write FalloutPipBoySync.log beside this DLL (Data/NVSE/Plugins/). Flip to 1
 // to enable PipBoyLog output (e.g. the TORCH-DIAG lines) for a debug session.
 #ifndef PIPBOY_VERBOSE_LOG
-#define PIPBOY_VERBOSE_LOG 0
+#define PIPBOY_VERBOSE_LOG 1
 #endif
 
 // How often to snapshot player state (in milliseconds). Lower = less delay
@@ -1338,6 +1338,18 @@ std::string BuildPlayerSnapshot() {
       json.keyInt("LK", (int)player->avOwner.Fn_03(kAV_Luck));
         }
         json.endObject();
+
+    // World position + worldspace + heading, for the Pip-Boy's live World
+    // Map marker. rotZ uses the game's own compass-bearing convention (0 =
+    // north, clockwise), confirmed against xNVSE's GetHeadingAngle.
+    json.keyFloat("worldX", player->posX);
+    json.keyFloat("worldY", player->posY);
+    json.keyFloat("rotZ", player->rotZ);
+    {
+      TESObjectCELL *cell = player->parentCell;
+      TESWorldSpace *ws = (cell && !cell->IsInterior()) ? cell->worldSpace : nullptr;
+      json.keyUInt("worldspace", ws ? ws->refID : 0);
+    }
 
     // Skills - effective values (GetActorValue), includes equipment bonuses.
         json.key("skills");

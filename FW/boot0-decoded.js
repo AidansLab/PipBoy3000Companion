@@ -116,6 +116,19 @@
     }, 10);
   };
 
+  // Live player position + heading for the World Map screen, companion-
+  // driven while WMAP is open. Kept here at boot0's top level, like
+  // Pip.launchApp above, since WMAP.JS evals in its own scope.
+  // x/y are already in the map's 0..2048 pixel space; heading is radians,
+  // 0 = north, increasing clockwise. t = companion-side timestamp (ms) of
+  // when the game reported this position, used by WMAP.JS to pace playback.
+  Pip.companionSetMapPos = function (mapKey, x, y, heading, t) {
+    // Packed into one object - Pip.emit only forwards up to 4 args total.
+    const pos = { mapKey: mapKey, x: x, y: y, heading: heading, t: t };
+    Pip._companionMapPos = pos;
+    Pip.emit('companionMapPos', pos);
+  };
+
   // STATUS (STATS > Status) has CND / RAD / CLK / ENG tabs. Knob2 on CND edits
   // limb condition - block that in cmode so game sync stays authoritative. CLK
   // uses knob2 for global brightness (manual § CLK) and must keep working.

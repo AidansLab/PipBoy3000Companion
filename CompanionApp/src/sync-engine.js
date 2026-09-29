@@ -31,6 +31,7 @@
  */
 
 import { EventEmitter } from 'events';
+import { resolveWorldspace, worldToMapPixel } from './map-sync.js';
 
 const SYNC_FLUSH_INTERVAL_MS = 10000; // How often to call player.sync() on device
 const MAX_INVENTORY_DELTA = 50;       // If more than this many items change, do a full reset
@@ -134,6 +135,12 @@ export class SyncEngine extends EventEmitter {
     // previousState, or it would downgrade the next post-load full sync to an
     // incremental diff and leave inventory out of sync.
     this._stateGeneration = 0;
+    // World Map live-position sync - see setWmapOpen/_updateMapPosition.
+    this._wmapOpen = false;
+    this._mapSendInFlight = false;
+    this._mapSendPending = false;
+    this._latestMapPos = null; // {mapKey, x, y} resolved from the latest snapshot, or null
+    this._lastMapSent = null;
     this.stats = {
       snapshotsProcessed: 0,
       commandsSent: 0,
@@ -205,6 +212,98 @@ export class SyncEngine extends EventEmitter {
   }
 
   /**
+   * Device reported the World Map screen opening/closing (PIPSYNC:WMAP:OPEN
+   * / CLOSE). Position updates are only ever sent to the device while this
+   * is open, so a closed map never gets serial traffic for it.
+   * @param {boolean} open
+   */
+  setWmapOpen(open) {
+    const wasOpen = this._wmapOpen;
+    this._wmapOpen = !!open;
+    if (this._wmapOpen === wasOpen) return;
+
+    if (this._wmapOpen) {
+      this._lastMapSent = null;
+      this._flushMapPosition();
+    }
+  }
+
+  /**
+   * Send the latest resolved map position to the device, if it changed.
+   * Called on every game snapshot (see _updateMapPosition) rather than on a
+   * timer, so a position goes out as soon as the game reports it. At most
+   * one send is in flight: anything arriving meanwhile just marks a re-flush,
+   * which then sends only the newest position.
+   */
+  async _flushMapPosition() {
+    if (!this._wmapOpen || !this.enabled || !this.bridge.connected) return;
+    if (this._mapSendInFlight) {
+      this._mapSendPending = true;
+      return;
+    }
+    const pos = this._latestMapPos;
+    if (!pos) return;
+    // Rounded to 0.1px / ~1 degree - fine enough visually, and dedupes a
+    // stationary player against float jitter in rotZ/position.
+    const HEADING_STEP = Math.PI / 180;
+    const x = Math.round(pos.x * 10) / 10;
+    const y = Math.round(pos.y * 10) / 10;
+    const heading = Math.round(pos.heading / HEADING_STEP) * HEADING_STEP;
+    const last = this._lastMapSent;
+    if (last && last.mapKey === pos.mapKey && last.x === x && last.y === y && last.heading === heading) return;
+    this._lastMapSent = { mapKey: pos.mapKey, x, y, heading };
+    this._mapSendInFlight = true;
+    try {
+      const cmd = `Pip.companionSetMapPos(${JSON.stringify(pos.mapKey)},${x},${y},${heading.toFixed(3)},${pos.t})`;
+      await this.bridge.sendCommand(cmd);
+    } catch {
+      // Best-effort - a dropped map-position update self-corrects on the next snapshot.
+    } finally {
+      this._mapSendInFlight = false;
+    }
+    if (this._mapSendPending) {
+      this._mapSendPending = false;
+      this._flushMapPosition();
+    }
+  }
+
+  /**
+   * Resolve this snapshot's worldspace/position into a map key + pixel
+   * coordinates for the next _flushMapPosition tick. Runs on every snapshot
+   * (not just while World Map is open) so the marker is current the instant
+   * the device reports the map opening.
+   * @param {object} snapshot
+   */
+  _updateMapPosition(snapshot) {
+    const player = snapshot.player || {};
+    if (!this.gameMode || typeof player.worldspace !== 'number') {
+      this._latestMapPos = null;
+      return;
+    }
+    const resolved = resolveWorldspace(player.worldspace, this.mapper?.loadOrder, this.gameMode);
+    if (!resolved) {
+      this._latestMapPos = null;
+      return;
+    }
+    const { mapKey, transform } = resolved;
+    const pixel = worldToMapPixel(player.worldX, player.worldY, this.gameMode, mapKey, transform);
+    // heading rides along unconverted - every map transform is a uniform
+    // scale+translate, never a rotation, so it can't change the angle.
+    // t: when this position arrived from the game - the device paces
+    // playback off these stamps, so it's taken here, not at send time.
+    this._latestMapPos = pixel
+      ? {
+          mapKey,
+          x: pixel.x,
+          y: pixel.y,
+          heading: typeof player.rotZ === 'number' ? player.rotZ : 0,
+          t: Math.round(performance.now()),
+        }
+      : null;
+    if (this._wmapOpen) this._flushMapPosition();
+  }
+
+  /**
    * Process a new game state snapshot, debouncing rapid changes
    * @param {object} snapshot - The full player/inventory state from the game
    */
@@ -228,6 +327,11 @@ export class SyncEngine extends EventEmitter {
     if (snapshot.game && this.gameMode === snapshot.game) {
       this._lastMismatchWarning = null;
     }
+
+    // Resolved here, before the SYNC_DEBOUNCE_MS debounce below, so the map
+    // sees every game snapshot at its real ~100ms cadence (and stamped with
+    // its real arrival time) rather than one per 150ms debounce window.
+    this._updateMapPosition(snapshot);
 
     if (this._hasEquipChange(snapshot)) {
       if (this._debounceTimer) {
@@ -305,7 +409,12 @@ export class SyncEngine extends EventEmitter {
         await this._backupPresyncData();
       }
 
-      const commands = this._generateCommands(snapshot);
+      // Skip the expensive diff pass entirely when position is the only
+      // thing that changed since last time (see _snapshotEqualIgnoringPosition).
+      const commands =
+        !isFullSync && this._snapshotEqualIgnoringPosition(snapshot, this.previousState)
+          ? []
+          : this._generateCommands(snapshot);
 
       if (isFullSync && this.gameMode === 'FNV' && !this._getFactions(snapshot).length) {
         this.emit(
@@ -1939,6 +2048,27 @@ export class SyncEngine extends EventEmitter {
    */
   _cloneSnapshot(snapshot) {
     return JSON.parse(JSON.stringify(snapshot));
+  }
+
+  /**
+   * True if two snapshots are identical except for worldX/worldY/worldspace/
+   * rotZ. Those change on nearly every tick while the player is simply
+   * walking (or just turning in place) around, which would otherwise force
+   * a full _generateCommands() diff pass (inventory/DAM/skills/etc, plus its
+   * "Form ID x -> y" remap logging) on every one of those ticks even though
+   * nothing it cares about actually changed. _updateMapPosition() already
+   * handles position (and heading) on its own, separately - this lets the
+   * rest of the pipeline skip straight past a snapshot that's a no-op for
+   * everything else.
+   */
+  _snapshotEqualIgnoringPosition(a, b) {
+    if (!a || !b) return false;
+    const strip = (snap) => {
+      if (!snap.player) return snap;
+      const { worldX, worldY, worldspace, rotZ, ...playerRest } = snap.player;
+      return { ...snap, player: playerRest };
+    };
+    return JSON.stringify(strip(a)) === JSON.stringify(strip(b));
   }
 
   /**

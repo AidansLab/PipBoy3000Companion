@@ -27,6 +27,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { deployFixedMapsIfNeeded } from './map-deploy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -78,9 +79,14 @@ export const STORAGE_MIN_FREE_BYTES = 17 * 1024;
 // open() MUST get its mode argument - open(name) without one throws.
 // Erase failures are returned in `failed` instead of being swallowed - a
 // silent catch here cost several support round-trips.
+// Three escalating tiers, each ending in compact() + a free-space recheck:
+// (1) compact() alone, (2) also erase ERROR/debug.txt/log.txt, (3) also
+// erase the existing .boot0 (about to be replaced anyway). Tier 3 logs a
+// warning in ensureStorageSpace() since a failure before the new .boot0
+// finishes writing leaves the device on stock firmware until retried.
 const STORAGE_RECLAIM_EXPR =
-  "(()=>{var s=require('Storage');s.compact();var f=s.getFree();" +
-  `if(f>=${STORAGE_MIN_FREE_BYTES})return{free:f,cleaned:[],failed:[]};` +
+  "(()=>{var s=require('Storage');var before=s.getFree();s.compact();var f=s.getFree();" +
+  `if(f>=${STORAGE_MIN_FREE_BYTES})return{before:before,free:f,cleaned:[],failed:[],erasedBoot0:false};` +
   "var t=['ERROR','debug.txt','log.txt'];var c=[],fl=[];" +
   "s.list().forEach(x=>{" +
   "var b=x,sf=false;" +
@@ -91,8 +97,12 @@ const STORAGE_RECLAIM_EXPR =
   "else{s.erase(x);if(c.indexOf(b)<0)c.push(b)}" +
   "}catch(e){fl.push(b+': '+e.message)}" +
   "});" +
+  "s.compact();f=s.getFree();" +
+  `if(f>=${STORAGE_MIN_FREE_BYTES})return{before:before,free:f,cleaned:c,failed:fl,erasedBoot0:false};` +
+  "var eb=false;" +
+  "try{if(s.read('.boot0')!==undefined){s.erase('.boot0');eb=true}}catch(e){fl.push('.boot0: '+e.message)}" +
   "s.compact();" +
-  "return{free:s.getFree(),cleaned:c,failed:fl}})()";
+  "return{before:before,free:s.getFree(),cleaned:c,failed:fl,erasedBoot0:eb}})()";
 
 /** Storage listing with per-entry byte sizes, for the too-full error message. */
 const STORAGE_LISTING_EXPR =
@@ -131,16 +141,10 @@ function parseDeviceJson(raw) {
 }
 
 /**
- * Ensure internal Storage has room for the .boot0 patch. Always compacts
- * first (reclaims fragmented/trash bytes left by earlier erases, so the free
- * count reflects what's actually usable) before checking against
- * STORAGE_MIN_FREE_BYTES; if still short, erases ERROR/debug.txt/log.txt
- * (when present) and compacts again. Throws with a diagnostic listing if
- * Storage is still too full - failing here beats uploading the SD menus and
- * then dying on .boot0, which would leave menus and boot patch at mismatched
- * versions. The caller's earlier reset() left the Pip-Boy with no menu
- * running, so a reboot is issued before giving up, returning it to normal
- * use even though the upload itself can't proceed.
+ * Ensure internal Storage has room for the .boot0 patch via
+ * STORAGE_RECLAIM_EXPR's tiers. Throws with a diagnostic listing (after
+ * rebooting the Pip-Boy, since the caller's reset() left it without a menu)
+ * if Storage is still too full.
  * @param {import('./serial-bridge.js').SerialBridge} bridge
  * @param {Function} log
  */
@@ -154,8 +158,14 @@ export async function ensureStorageSpace(bridge, log) {
     );
   }
 
+  // compact()'s own console output never reaches this log, so these
+  // before/after numbers are the real proof of what happened instead.
+  log('info', `Storage: ${result.before} bytes free before compact, ${result.free} bytes free after.`);
   if (result.cleaned.length > 0) {
     log('info', `Storage was low - deleted ${result.cleaned.join(', ')} and compacted (${result.free} bytes free now)`);
+  }
+  if (result.erasedBoot0) {
+    log('warn', `Storage was still short after cleanup - erased the device's existing .boot0 to make room for the new one (${result.free} bytes free now). If anything fails before the new .boot0 finishes writing, the Pip-Boy will boot back to stock/unpatched firmware until you retry the flash.`);
   }
   if (Array.isArray(result.failed) && result.failed.length > 0) {
     log('warn', `Storage cleanup could not erase: ${result.failed.join('; ')}`);
@@ -220,9 +230,13 @@ export function crc32(buf) {
   return (c ^ 0xFFFFFFFF) >>> 0;
 }
 
-/** Stop menus/timers so file-upload packets are not interrupted by running FW code. */
+/**
+ * Stop menus/timers so upload packets aren't interrupted, then reset().
+ * The Pip-specific cleanup is skipped (not returned out of) when Pip is
+ * undefined, so reset()/cmode still run on stock/unpatched firmware.
+ */
 export const PREPARE_FOR_FLASH_CMD =
-  "(()=>{try{if(typeof Pip==='undefined')return;Pip.remove&&Pip.remove();Pip.audioStop&&Pip.audioStop();if(Pip._fade&&Pip._fade.timer){require('timer').remove(Pip._fade.timer);Pip._fade.timer=null}}catch(e){}typeof cmode!=='undefined'&&(cmode=!1);reset();})()";
+  "(()=>{try{if(typeof Pip!=='undefined'){Pip.remove&&Pip.remove();Pip.audioStop&&Pip.audioStop();if(Pip._fade&&Pip._fade.timer){require('timer').remove(Pip._fade.timer);Pip._fade.timer=null}}}catch(e){}typeof cmode!=='undefined'&&(cmode=!1);reset();})()";
 
 /**
  * Build upload list: menu .JS files to SD JS/, then .boot0 to Storage (boot patch last).
@@ -318,6 +332,10 @@ export async function flashFirmware(bridge, options = {}) {
     options.syncEngine.setEnabled(false);
   }
 
+  // Resolved before PREPARE_FOR_FLASH_CMD's reset() - that can leave
+  // Pip.settings.nv unpopulated until a full boot cycle re-runs.
+  const gameMode = options.syncEngine?.gameMode || await bridge.detectGameMode().catch(() => null);
+
   bridge._firmwareUploadInProgress = true;
 
   try {
@@ -405,6 +423,15 @@ export async function flashFirmware(bridge, options = {}) {
       await bridge.sendCommand(
         `if(Pip.CURRENT&&Pip.changeMenu&&[${idList}].indexOf(Pip.CURRENT.id)>=0)Pip.changeMenu()`
       );
+    }
+
+    // Ancillary to the firmware itself - a failure here must not fail an
+    // otherwise-successful flash (see map-deploy.js for its own skip logic).
+    log('info', `Checking for fixed map updates (game mode: ${gameMode || 'unknown'})...`);
+    try {
+      await deployFixedMapsIfNeeded(bridge, { log, gameMode });
+    } catch (err) {
+      log('warn', `Fixed map deployment failed (firmware itself uploaded fine): ${err.message}`);
     }
 
     log('info', 'Rebooting so .boot0 patch loads on next boot...');

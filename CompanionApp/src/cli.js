@@ -227,6 +227,12 @@ async function main() {
     if (!gameArg) {
       await autoDetectGameMode();
     }
+    // Catch up on live position sync if the World Map screen was already
+    // open before we connected - PIPSYNC:WMAP:OPEN only fires on screen
+    // entry, so we'd otherwise miss it.
+    if (await bridge.isWmapOpen()) {
+      syncEngine.setWmapOpen(true);
+    }
     if (pipeClient.connected) {
       await tryEnableSync();
     } else {
@@ -253,6 +259,12 @@ async function main() {
     if (evt.action === 'restore') {
       await syncEngine.notifyPresyncRestored();
       logSync('Pre-sync data restored on Pip-Boy (companion was disconnected)');
+      return;
+    }
+
+    if (evt.action === 'wmap') {
+      syncEngine.setWmapOpen(evt.open);
+      logSync(`World Map ${evt.open ? 'opened' : 'closed'} on Pip-Boy`);
       return;
     }
 

@@ -147,6 +147,12 @@ export class CompanionApp extends EventEmitter {
       await this.autoDetectGameMode();
     }
     this._deviceReady = true;
+    // Catch up on live position sync if the World Map screen was already
+    // open before we connected - PIPSYNC:WMAP:OPEN only fires on screen
+    // entry, so we'd otherwise miss it.
+    if (await this.bridge.isWmapOpen()) {
+      this.syncEngine.setWmapOpen(true);
+    }
     if (this.pipeClient.connected) {
       await this._tryEnableSync({
         requestResync:
@@ -296,6 +302,15 @@ export class CompanionApp extends EventEmitter {
         const cleaned = line
           .replace(/\r/g, '')
           .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
+          // Strip stray C0 control bytes - in particular the 0x06 ACK / 0x15
+          // NAK that espruinoSendPacket's file-transfer protocol expects.
+          // _handleData intercepts those to resolve pendingPacketAck but
+          // doesn't stop the same byte from also reaching emit('data', ...)
+          // when there's no pendingEval (exactly the case while packets are
+          // streaming) - undetected here because those bytes survive
+          // .trim() (it only strips whitespace), so a 1000+ packet map
+          // upload was logging one invisible "blank" device line per packet.
+          .replace(/[\x00-\x1f]/g, '')
           .trim();
         if (!cleaned || cleaned === '[J') continue;
         if (this.bridge._firmwareUploadInProgress) {
@@ -315,6 +330,12 @@ export class CompanionApp extends EventEmitter {
       if (evt.action === 'restore') {
         await this.syncEngine.notifyPresyncRestored();
         this.log('sync', 'Pre-sync data restored on Pip-Boy (companion was disconnected)');
+        return;
+      }
+
+      if (evt.action === 'wmap') {
+        this.syncEngine.setWmapOpen(evt.open);
+        this.log('sync', `World Map ${evt.open ? 'opened' : 'closed'} on Pip-Boy`);
         return;
       }
 
@@ -416,7 +437,17 @@ export class CompanionApp extends EventEmitter {
     this.syncEngine.on('error', (err) => this.log('error', `Sync: ${err.message}`));
     this.syncEngine.on('game-mode-changed', () => this._emitStatus());
 
-    this.pipeClient.on('status', (msg) => this.log('status', msg));
+    // PipeClient retries the game pipe on its own independent 3s timer the
+    // whole time the app is running, regardless of what the serial bridge is
+    // doing - during a firmware flash (which can take a while with map
+    // deployment included) its routine "Connecting.../Game not detected..."
+    // chatter has nothing to do with what's actually happening and just
+    // buries the upload log, so it's suppressed for that window the same
+    // way the device-log handler above already suppresses its own noise.
+    this.pipeClient.on('status', (msg) => {
+      if (this.bridge._firmwareUploadInProgress) return;
+      this.log('status', msg);
+    });
     this.pipeClient.on('connected', async () => {
       if (!this._deviceReady || !this._companionPatchInstalled) return;
       await this._tryEnableSync();
