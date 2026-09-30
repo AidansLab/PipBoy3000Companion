@@ -61,7 +61,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #define PLUGIN_NAME "FalloutPipBoySync"
-#define PLUGIN_VERSION 32
+#define PLUGIN_VERSION 35
 
 // Write FalloutPipBoySync.log beside this DLL (Data/NVSE/Plugins/). Flip to 1
 // to enable PipBoyLog output (e.g. the TORCH-DIAG lines) for a debug session.
@@ -1197,6 +1197,417 @@ static void ReconcileCompanionTorchAfterPipBoyClose() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// QUESTS
+// The Pip-Boy ships a static quest catalog (DATA/<game>/QUESTS.DAT) holding
+// every quest's name and the full text of its objectives, indexed
+// POSITIONALLY. The device therefore needs no strings from us - only which
+// objectives are displayed and which are completed, as bitmasks over those
+// catalog positions.
+//
+// The game keys objectives by BGSQuestObjective::objectiveId, which is a GECK
+// index (10, 20, 30 ...) and not a position. Each quest's objectives are
+// therefore sorted by objectiveId and bit N is set for the Nth. That
+// rank-order mapping is the one assumption this feature rests on; see
+// PIPBOY_QUEST_DEBUG below for how to verify it against the real catalog.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Writes FalloutPipBoyQuests.log beside this DLL: one JSON line per quest with
+// its sorted objective IDs and display text, so the rank-order assumption can
+// be diffed against the device's QUESTS.DAT. Deliberately independent of
+// PIPBOY_VERBOSE_LOG so the check doesn't require a full debug session and
+// doesn't drown in snapshot spam. Set to 0 for release builds.
+#ifndef PIPBOY_QUEST_DEBUG
+#define PIPBOY_QUEST_DEBUG 0
+#endif
+
+// BGSQuestObjective::status bits (GameForms.h: bit0 displayed, bit1 completed).
+enum {
+  kQObjStatus_Displayed = 1 << 0,
+  kQObjStatus_Completed = 1 << 1,
+};
+
+// TESQuest::flags - bit0 is startGameEnabled/isRunning, bit1 tracks completion.
+enum {
+  kQuestFlag_Running = 1 << 0,
+  kQuestFlag_Completed = 1 << 1,
+};
+
+// Flags byte emitted per quest; matches the device's QUESTS.STA row layout.
+enum {
+  kPipQuest_Running = 1 << 0,
+  kPipQuest_Complete = 1 << 1,
+  kPipQuest_Active = 1 << 2,
+};
+
+// Objectives past this cannot be represented in the 64-bit masks. The NV
+// catalog's worst case is 36 (How Little We Know), so this is headroom - but a
+// mod could exceed it, and those objectives are dropped rather than wrapping
+// onto bit 0 and marking an unrelated line complete.
+static const UInt32 kMaxObjectiveBits = 64;
+
+static std::string FormatHex64(UInt64 v) {
+  std::stringstream ss;
+  ss << std::hex << v;
+  return ss.str();
+}
+
+// Every objective the GECK defines for this quest that the DEVICE CATALOG also
+// carries, ascending by objectiveId. The resulting index is what the masks are
+// bit-indexed by, so it has to match QUESTS.DAT's obj[] array exactly.
+//
+// TESQuest::lVarOrObjectives holds BOTH objectives and script local variables
+// (the SDK says so outright at GameForms.h - "this list would contain both
+// Objectives and LocalVariables"), so entries are filtered on the back-pointer:
+// a real BGSQuestObjective points back at its owning quest, a VariableInfo will
+// not. Casting the node data straight to BGSQuestObjective* follows xNVSE's own
+// Cmd_GetNthQuestObjective.
+//
+// Objectives with no display text are then dropped, because TWC built the
+// catalog that way: comparing a 50-quest log against DATA/NV/QUESTS.DAT, every
+// discrepancy was an empty-text objective the catalog omits. Keeping them
+// shifts every later bit by one - in Volare! and Vance's Gun the empty entry
+// sits at rank 0, so the whole mask would have been off by one and marked the
+// wrong lines complete. With them dropped, 49 of 50 quests match the catalog
+// position-for-position (the 50th, Vance's Gun, has only an empty objective and
+// is absent from the catalog entirely).
+static void CollectQuestObjectiveIds(TESQuest *quest,
+                                     std::vector<UInt32> &outIds) {
+  outIds.clear();
+  if (!quest)
+    return;
+  const UInt32 count = quest->lVarOrObjectives.Count();
+  for (UInt32 i = 0; i < count; i++) {
+    BGSQuestObjective *obj =
+        (BGSQuestObjective *)quest->lVarOrObjectives.GetNthItem((SInt32)i);
+    if (!obj)
+      continue;
+    // Reading ->quest on a VariableInfo would be reading a foreign object, so
+    // guard the probe: a mismatch (or a fault) just means "not an objective".
+#if defined(_M_IX86)
+    __try {
+      if (obj->quest != quest)
+        continue;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      continue;
+    }
+#else
+    if (obj->quest != quest)
+      continue;
+#endif
+    // Not in the device catalog - see the comment above.
+    if (!obj->displayText.m_data || obj->displayText.m_data[0] == '\0')
+      continue;
+    outIds.push_back(obj->objectiveId);
+  }
+  std::sort(outIds.begin(), outIds.end());
+}
+
+#if PIPBOY_QUEST_DEBUG
+static std::set<UInt32> g_questDebugLogged;
+static FILE *g_questDebugFile = nullptr;
+
+static void QuestDebugReset() { g_questDebugLogged.clear(); }
+
+// One JSON line per quest, written once each. Paired with the catalog pulled
+// by scripts/dump-device-file.mjs, this is what settles whether catalog
+// position N corresponds to the Nth-lowest objectiveId.
+static void QuestDebugDump(TESQuest *quest, const std::vector<UInt32> &ids) {
+  if (!quest || g_questDebugLogged.count(quest->refID))
+    return;
+  g_questDebugLogged.insert(quest->refID);
+
+  if (!g_questDebugFile) {
+    char path[MAX_PATH] = {};
+    if (!g_hModule || !GetModuleFileNameA(g_hModule, path, MAX_PATH))
+      return;
+    char *slash = strrchr(path, '\\');
+    if (slash)
+      *(slash + 1) = '\0';
+    strcat_s(path, "FalloutPipBoyQuests.log");
+    g_questDebugFile = fopen(path, "a");
+    if (!g_questDebugFile)
+      return;
+  }
+
+  const char *name = GetFullName(quest);
+  JsonBuilder j;
+  j.beginObject();
+  j.keyStr("formId", FormatFormId(quest->refID));
+  j.keyStr("name", name ? name : "");
+  j.keyInt("stage", (int)quest->currentStage);
+  j.key("objectives");
+  j.beginArray();
+  for (size_t n = 0; n < ids.size(); n++) {
+    // Re-find each objective so the dump carries the text the game shows,
+    // which is what gets compared against the catalog's obj[] entries.
+    const char *text = "";
+    const UInt32 count = quest->lVarOrObjectives.Count();
+    for (UInt32 i = 0; i < count; i++) {
+      BGSQuestObjective *obj =
+          (BGSQuestObjective *)quest->lVarOrObjectives.GetNthItem((SInt32)i);
+      if (!obj || obj->quest != quest || obj->objectiveId != ids[n])
+        continue;
+      if (obj->displayText.m_data)
+        text = obj->displayText.m_data;
+      break;
+    }
+    j.arrayElement();
+    j.beginObject();
+    j.keyInt("rank", (int)n);
+    j.keyUInt("id", ids[n]);
+    j.keyStr("txt", text);
+    j.endObject();
+  }
+  j.endArray();
+  j.endObject();
+
+  fprintf(g_questDebugFile, "%s\n", j.str().c_str());
+  fflush(g_questDebugFile);
+}
+#endif // PIPBOY_QUEST_DEBUG
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FULL QUEST ENUMERATION (diagnostic)
+//
+// The snapshot only carries quests the player has DISCOVERED, so it says
+// nothing about how much of the game's quest set the device catalog covers.
+// DataHandler::questList holds every quest in the loaded plugins; dumping it
+// lets the 168-record QUESTS.DAT be measured against reality, and is the same
+// enumeration a regenerated catalog would be built from.
+//
+// Writes FalloutPipBoyAllQuests.log beside the DLL, once per load.
+// ─────────────────────────────────────────────────────────────────────────────
+#ifndef PIPBOY_ALLQUESTS_DEBUG
+#define PIPBOY_ALLQUESTS_DEBUG 1
+#endif
+
+#if PIPBOY_ALLQUESTS_DEBUG
+static bool g_allQuestsDumped = false;
+
+static void DumpAllQuests() {
+  DataHandler *dataHandler = DataHandler::Get();
+  if (!dataHandler)
+    return;
+
+  char path[MAX_PATH] = {};
+  if (!g_hModule || !GetModuleFileNameA(g_hModule, path, MAX_PATH))
+    return;
+  char *slash = strrchr(path, '\\');
+  if (slash)
+    *(slash + 1) = '\0';
+  strcat_s(path, "FalloutPipBoyAllQuests.log");
+  FILE *f = fopen(path, "w");
+  if (!f)
+    return;
+
+  // Load order first, so the generator can remap plugin high bytes to the
+  // Pip-Boy's fixed ones without needing the game running.
+  {
+    JsonBuilder j;
+    j.beginObject();
+    j.keyStr("game", "FNV");
+    j.key("loadOrder");
+    j.beginArray();
+    const ModInfo **activeMods = dataHandler->GetActiveModList();
+    const UInt32 modCount = dataHandler->modList.modInfoList.Count();
+    for (UInt32 i = 0; i < modCount; i++) {
+      const ModInfo *mod = activeMods[i];
+      if (!mod)
+        continue;
+      j.arrayElement();
+      j.beginObject();
+      j.keyInt("index", (int)i);
+      j.keyStr("name", mod->name);
+      j.endObject();
+    }
+    j.endArray();
+    j.endObject();
+    fprintf(f, "%s\n", j.str().c_str());
+  }
+
+  int total = 0, named = 0, withObjectives = 0;
+
+  for (auto iter = dataHandler->questList.Begin(); !iter.End(); ++iter) {
+    TESQuest *quest = iter.Get();
+    if (!quest)
+      continue;
+    total++;
+
+    const char *name = GetFullName(quest);
+    const bool hasName = name && name[0] != '\0' &&
+                         strcmp(name, "<no name>") != 0 &&
+                         strcmp(name, "<NULL>") != 0;
+    if (hasName)
+      named++;
+
+    std::vector<UInt32> objIds;
+    try {
+      CollectQuestObjectiveIds(quest, objIds);
+    } catch (...) {
+      objIds.clear();
+    }
+    if (!objIds.empty())
+      withObjectives++;
+
+    // Only quests that could actually be displayed are worth writing in full:
+    // a name plus at least one objective. Everything else gets a stub line so
+    // the totals still add up.
+    const bool displayable = hasName && !objIds.empty();
+
+    JsonBuilder j;
+    j.beginObject();
+    j.keyStr("formId", FormatFormId(quest->refID));
+    j.keyStr("name", hasName ? name : "");
+    j.keyInt("objectives", (int)objIds.size());
+    j.keyInt("stage", (int)quest->currentStage);
+    j.keyInt("flags", (int)quest->flags);
+    if (displayable) {
+      // Objective text in CATALOG ORDER (ascending objectiveId), matching the
+      // positional layout QUESTS.DAT uses - so a supplementary record built
+      // from this indexes identically to a stock one.
+      j.key("obj");
+      j.beginArray();
+      for (size_t n = 0; n < objIds.size(); n++) {
+        const char *text = "";
+        const UInt32 count = quest->lVarOrObjectives.Count();
+        for (UInt32 i = 0; i < count; i++) {
+          BGSQuestObjective *obj =
+              (BGSQuestObjective *)quest->lVarOrObjectives.GetNthItem((SInt32)i);
+          if (!obj || obj->quest != quest || obj->objectiveId != objIds[n])
+            continue;
+          if (obj->displayText.m_data)
+            text = obj->displayText.m_data;
+          break;
+        }
+        j.arrayElement();
+        j.valueStr(text);
+      }
+      j.endArray();
+    }
+    j.endObject();
+    fprintf(f, "%s\n", j.str().c_str());
+  }
+
+  fprintf(f,
+          "{\"summary\":true,\"total\":%d,\"named\":%d,\"withObjectives\":%d}\n",
+          total, named, withObjectives);
+  fclose(f);
+  PipBoyLog("QUESTS", "enumerated %d quests (%d named, %d with objectives)",
+            total, named, withObjectives);
+}
+#endif // PIPBOY_ALLQUESTS_DEBUG
+
+// Per-quest sync state assembled from the player's objective log.
+struct QuestSyncState {
+  TESQuest *quest;
+  UInt64 disp;
+  UInt64 done;
+  UInt32 objCount;
+};
+
+// Emit the "quests" array. Keyed and ordered by form ID rather than by the
+// game's log order: the log reorders itself as objectives are added, and any
+// reordering would make an otherwise-unchanged snapshot differ byte-wise,
+// defeating the pipe thread's send-only-on-change check.
+static void AppendQuestsJson(JsonBuilder &json, PlayerCharacter *player) {
+  json.key("quests");
+  json.beginArray();
+
+  std::map<UInt32, QuestSyncState> quests;
+  std::map<TESQuest *, std::vector<UInt32>> objectiveOrder;
+
+  for (auto iter = player->questObjectiveList.Begin(); !iter.End(); ++iter) {
+    BGSQuestObjective *obj = iter.Get();
+    if (!obj || !obj->quest)
+      continue;
+    TESQuest *quest = obj->quest;
+
+    // Hidden scripted quests carry no name and never appear in the game's own
+    // Quests tab; the device catalog has no record for them either.
+    const char *name = GetFullName(quest);
+    if (!name || name[0] == '\0')
+      continue;
+
+    auto orderIt = objectiveOrder.find(quest);
+    if (orderIt == objectiveOrder.end()) {
+      std::vector<UInt32> ids;
+      CollectQuestObjectiveIds(quest, ids);
+      orderIt = objectiveOrder.insert(std::make_pair(quest, ids)).first;
+#if PIPBOY_QUEST_DEBUG
+      QuestDebugDump(quest, orderIt->second);
+#endif
+    }
+    const std::vector<UInt32> &ids = orderIt->second;
+    if (ids.empty())
+      continue;
+
+    auto pos = std::lower_bound(ids.begin(), ids.end(), obj->objectiveId);
+    if (pos == ids.end() || *pos != obj->objectiveId)
+      continue; // objective not in the quest's own list - skip rather than guess
+    const size_t rank = (size_t)(pos - ids.begin());
+    if (rank >= kMaxObjectiveBits) {
+      PipBoyLog("QUEST", "objective rank %zu past mask width on quest %08X",
+                rank, quest->refID);
+      continue;
+    }
+
+    QuestSyncState &st = quests[quest->refID];
+    if (!st.quest) {
+      st.quest = quest;
+      st.disp = 0;
+      st.done = 0;
+      st.objCount = (UInt32)ids.size();
+    }
+    // Presence in the player's objective log IS display; the status bit is
+    // checked too so a cleared-but-still-listed objective stays unlit.
+    if (obj->status & kQObjStatus_Displayed)
+      st.disp |= (1ULL << rank);
+    if (obj->status & kQObjStatus_Completed)
+      st.done |= (1ULL << rank);
+  }
+
+  for (const auto &pair : quests) {
+    const QuestSyncState &st = pair.second;
+    if (!st.quest || st.disp == 0)
+      continue; // nothing displayed yet - the device would render an empty row
+
+    // Completed quests come back with every objective flagged done, including
+    // ones the player never saw (observed on live saves: disp=0x59d with
+    // done=0xfff). The device only renders displayed objectives, so keep done
+    // a strict subset of disp rather than making the renderer reconcile it.
+    const UInt64 done = st.done & st.disp;
+
+    int flags = 0;
+    if (st.quest->flags & kQuestFlag_Running)
+      flags |= kPipQuest_Running;
+    if (st.quest->flags & kQuestFlag_Completed)
+      flags |= kPipQuest_Complete;
+    if (player->quest == st.quest)
+      flags |= kPipQuest_Active;
+
+    json.arrayElement();
+    json.beginObject();
+    json.keyStr("formId", FormatFormId(pair.first));
+    // DIAGNOSTIC ONLY - never forwarded to the device, which reads every name
+    // from its own QUESTS.DAT. It rides the pipe (local IPC, effectively free)
+    // so the companion can name a quest the device cannot display, instead of
+    // reporting a bare form ID. Do not send this over the serial link.
+    {
+      const char *questName = GetFullName(st.quest);
+      json.keyStr("name", questName ? questName : "");
+    }
+    json.keyInt("stage", (int)st.quest->currentStage);
+    json.keyInt("flags", flags);
+    json.keyInt("objCount", (int)st.objCount);
+    json.keyStr("disp", FormatHex64(st.disp));
+    json.keyStr("done", FormatHex64(done));
+    json.endObject();
+  }
+
+  json.endArray();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // PLAYER SNAPSHOT
 // Build a JSON snapshot of the player's current state.
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1262,10 +1673,12 @@ std::string BuildPlayerSnapshot() {
         json.keyInt("hp", (int)ceilf(curHP));
         json.keyFloat("maxHP", maxHP);
 
-        // Action Points - floor to match game HUD, fractional regen ignored for sync.
+        // Max Action Points only. Current AP is deliberately not emitted: it
+        // drains and recharges continuously (mods that spend it as sprint
+        // stamina move it every tick), and since the pipe only sends a snapshot
+        // when it differs byte-for-byte from the last one, including it resent
+        // the entire snapshot ~10x/sec for a value the device never displays.
         float maxAP = player->avOwner.Fn_01(kAV_ActionPoints);
-        float curAP = player->avOwner.Fn_03(kAV_ActionPoints);
-        json.keyInt("ap", (int)floorf(curAP));
         json.keyInt("maxAP", (int)(maxAP + 0.5f));
 
         // Carry Weight, maxWg is the max carry weight AV (includes Strong Back/buffs).
@@ -1588,6 +2001,9 @@ std::string BuildPlayerSnapshot() {
         }
     }
     json.endArray();
+
+    // --- Quests ---
+    AppendQuestsJson(json, player);
 
     json.endObject();
     return json.str();
@@ -2183,6 +2599,203 @@ static ExtraDataList *FindStackByCondition(PlayerCharacter *player,
   return nullptr;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// DATA-TAB QUEST LIST REFRESH
+//
+// Setting PlayerCharacter::quest updates game data but repaints nothing, so a
+// quest activated from the device only appeared after closing and reopening the
+// in-game Pip-Boy. The quest list lives in kMenuType_Map (the DATA tab) and
+// RefreshPipBoyUI() has no path for it - the SDK has no MapMenu class and no
+// refresh address is known.
+//
+// Rather than guess at one, this drives the menu's OWN handler. A tile tree dump
+// (see below) showed the DATA sub-tabs are buttons under MM_Tabline with ids
+// Local Map 32, World Map 33, Quests 34, Notes 35, Radio 36, and that the quest
+// list is MM_QuestsList id=7. Re-issuing the Quests tab click makes the menu
+// rebuild its list through the same code path a real click uses, which picks up
+// the new active quest.
+//
+// Guarded so it only fires when the quest list is already on screen: clicking
+// the tab while the player is on World Map would yank them to a different view.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+static const UInt32 kMapTabQuests = 34;   // "Quests" tab button
+static const UInt32 kMapQuestsList = 7;   // MM_QuestsList
+
+static Tile *FindTileById(Tile *tile, UInt32 wantId, int depth = 0) {
+  if (!tile || depth > 16)
+    return nullptr;
+  Tile::Value *idVal = tile->GetValue(Tile::kTileValue_id);
+  if (idVal && (UInt32)idVal->num == wantId)
+    return tile;
+  for (auto iter = tile->childList.Begin(); !iter.End(); ++iter) {
+    Tile::ChildNode *node = iter.Get();
+    if (!node || !node->child)
+      continue;
+    if (Tile *hit = FindTileById(node->child, wantId, depth + 1))
+      return hit;
+  }
+  return nullptr;
+}
+
+static bool TileIsVisible(Tile *tile) {
+  if (!tile)
+    return false;
+  Tile::Value *v = tile->GetValue(Tile::kTileValue_visible);
+  return v && v->num != 0.0f;
+}
+
+// Rebuild the in-game DATA > Quests list so a device-set active quest shows
+// immediately. No-op unless that list is currently displayed.
+static void RefreshInGameQuestList() {
+  if (!InterfaceManager::IsMenuVisible(kMenuType_Map))
+    return;
+  Menu *mapMenu = InterfaceManager::GetMenuByType(kMenuType_Map);
+  if (!mapMenu || !mapMenu->tile)
+    return;
+
+  // Only when the quest list is the visible sub-tab.
+  Tile *questList = FindTileById(mapMenu->tile, kMapQuestsList);
+  if (!TileIsVisible(questList))
+    return;
+
+  Tile *questsTab = FindTileById(mapMenu->tile, kMapTabQuests);
+  if (!questsTab)
+    return;
+
+  // Menu::HandleClick is virtual slot 3 - the same entry point a real click
+  // goes through, so the menu does its own rebuilding and we touch no traits.
+  try {
+    mapMenu->HandleClick(kMapTabQuests, questsTab);
+    PipBoyLog("QUEST", "re-issued DATA>Quests tab click to refresh the list");
+  } catch (...) {
+    PipBoyLog("QUEST", "quest list refresh threw - ignored");
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TILE TREE DUMP (diagnostic, read-only)
+//
+// The in-game Pip-Boy does not repaint when the device sets the active quest:
+// the quest list lives in kMenuType_Map (the DATA tab - Local Map, World Map,
+// Quests, Notes, Radio), and RefreshPipBoyUI() only knows how to refresh the
+// Inventory and Stats menus. The xNVSE SDK has no MapMenu class and there is no
+// known refresh address for it, so the first step is finding out what the menu
+// is actually built from.
+//
+// This walks the menu's tile tree and writes it to FalloutPipBoyTiles.log
+// beside the DLL. It only READS tile fields - no traits are set, no menu
+// functions are called - so it cannot disturb the UI. Triggered on demand with
+// the DUMPTILES pipe command, because the tree only exists while the menu is
+// built and we want it captured with DATA > Quests actually on screen.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#ifndef PIPBOY_TILE_DEBUG
+#define PIPBOY_TILE_DEBUG 1
+#endif
+
+#if PIPBOY_TILE_DEBUG
+static FILE *g_tileDebugFile = nullptr;
+// One auto-dump per DATA-tab open, capped per session so the log stays small.
+static bool g_tileDumpDone = false;
+static UInt32 g_tileDumpDelay = 0;
+static UInt32 g_tileDumpCount = 0;
+
+// Bounded so a pathological tree can't stall the main thread or fill the disk.
+static const int kTileDumpMaxDepth = 14;
+static const int kTileDumpMaxNodes = 6000;
+
+static const char *TileTraitStr(Tile *tile, UInt32 traitId) {
+  Tile::Value *v = tile->GetValue(traitId);
+  return (v && v->str) ? v->str : nullptr;
+}
+
+static bool TileTraitNum(Tile *tile, UInt32 traitId, float *out) {
+  Tile::Value *v = tile->GetValue(traitId);
+  if (!v)
+    return false;
+  *out = v->num;
+  return true;
+}
+
+static void DumpTileRecursive(Tile *tile, int depth, int *nodeCount) {
+  if (!tile || depth > kTileDumpMaxDepth || *nodeCount >= kTileDumpMaxNodes)
+    return;
+  (*nodeCount)++;
+
+  char indent[64];
+  const int pad = (depth < 20) ? depth * 2 : 40;
+  for (int i = 0; i < pad; i++)
+    indent[i] = ' ';
+  indent[pad] = '\0';
+
+  const char *name = tile->name.m_data ? tile->name.m_data : "<unnamed>";
+
+  // `id` is what Menu::HandleClick receives, so tiles carrying one are the
+  // clickable elements - the most likely handles for forcing a refresh.
+  float idVal = 0.0f;
+  const bool hasId = TileTraitNum(tile, Tile::kTileValue_id, &idVal);
+  float visVal = 0.0f;
+  const bool hasVis = TileTraitNum(tile, Tile::kTileValue_visible, &visVal);
+  float listIdx = 0.0f;
+  const bool hasList = TileTraitNum(tile, Tile::kTileValue_listindex, &listIdx);
+  const char *str = TileTraitStr(tile, Tile::kTileValue_string);
+
+  fprintf(g_tileDebugFile, "%s%s", indent, name);
+  if (hasId)
+    fprintf(g_tileDebugFile, "  id=%d", (int)idVal);
+  if (hasList)
+    fprintf(g_tileDebugFile, "  listindex=%d", (int)listIdx);
+  if (hasVis)
+    fprintf(g_tileDebugFile, "  visible=%d", (int)visVal);
+  if (str && str[0])
+    fprintf(g_tileDebugFile, "  string=\"%.60s\"", str);
+  fprintf(g_tileDebugFile, "  children=%u\n", tile->childList.Count());
+
+  for (auto iter = tile->childList.Begin(); !iter.End(); ++iter) {
+    Tile::ChildNode *node = iter.Get();
+    if (node && node->child)
+      DumpTileRecursive(node->child, depth + 1, nodeCount);
+  }
+}
+
+static void DumpMenuTileTree(UInt32 menuType, const char *label) {
+  if (!g_tileDebugFile) {
+    char path[MAX_PATH] = {};
+    if (!g_hModule || !GetModuleFileNameA(g_hModule, path, MAX_PATH))
+      return;
+    char *slash = strrchr(path, '\\');
+    if (slash)
+      *(slash + 1) = '\0';
+    strcat_s(path, "FalloutPipBoyTiles.log");
+    g_tileDebugFile = fopen(path, "a");
+    if (!g_tileDebugFile)
+      return;
+  }
+
+  Menu *menu = InterfaceManager::GetMenuByType(menuType);
+  const bool visible = InterfaceManager::IsMenuVisible(menuType);
+  SYSTEMTIME st;
+  GetLocalTime(&st);
+  fprintf(g_tileDebugFile,
+          "\n===== %s (type 0x%X) at %02d:%02d:%02d  menu=%p visible=%d =====\n",
+          label, menuType, st.wHour, st.wMinute, st.wSecond, (void *)menu,
+          visible ? 1 : 0);
+
+  if (!menu || !menu->tile) {
+    fprintf(g_tileDebugFile, "  (menu or root tile not present)\n");
+    fflush(g_tileDebugFile);
+    return;
+  }
+
+  int nodeCount = 0;
+  DumpTileRecursive(menu->tile, 0, &nodeCount);
+  fprintf(g_tileDebugFile, "----- %d tiles dumped%s -----\n", nodeCount,
+          nodeCount >= kTileDumpMaxNodes ? " (TRUNCATED)" : "");
+  fflush(g_tileDebugFile);
+}
+#endif // PIPBOY_TILE_DEBUG
+
 static void ExecutePipBoyCommand(const std::string &line) {
   PipBoyLog("CMD-IN", "%s", line.c_str());
   if (line == "TORCH ON") {
@@ -2197,6 +2810,17 @@ static void ExecutePipBoyCommand(const std::string &line) {
     SetPipBoyLight(player, false, IsPipBoyTorchUiActive());
     return;
   }
+#if PIPBOY_TILE_DEBUG
+  // Diagnostic, read-only: capture the DATA-tab tile tree with the in-game
+  // Pip-Boy open on Quests. Handled here, before the verb/formId split below,
+  // because it takes no arguments.
+  if (line == "DUMPTILES") {
+    DumpMenuTileTree(kMenuType_Map, "MapMenu / DATA tab");
+    DumpMenuTileTree(kMenuType_Stats, "StatsMenu (for comparison)");
+    PipBoyLog("TILES", "tile tree dumped to FalloutPipBoyTiles.log");
+    return;
+  }
+#endif
 
   size_t space = line.find(' ');
   if (space == std::string::npos)
@@ -2275,6 +2899,19 @@ static void ExecutePipBoyCommand(const std::string &line) {
     }
   } else if (verb == "UNEQUIP") {
     EquipSingleItemWithInstantStats(player, false, form);
+  } else if (verb == "QUEST") {
+    // Pip-Boy picked an active quest. PlayerCharacter::quest is the same field
+    // xNVSE's Cmd_SetCurrentQuest writes, and the next snapshot re-derives the
+    // active flag from it, so no separate state to keep in step here.
+    TESQuest *quest = DYNAMIC_CAST(form, TESForm, TESQuest);
+    if (!quest) {
+      PipBoyLog("CMD-IN", "QUEST rejected - form %08X is not a quest", formId);
+      return;
+    }
+    player->quest = quest;
+    PipBoyLog("QUEST", "active quest set to %08X from device", formId);
+    // Repaint the in-game list if the player is looking at it right now.
+    RefreshInGameQuestList();
   } else if (verb == "DROP") {
     int dropCount = wantCnd > 0 ? wantCnd : 1;
     SInt32 total = GetTotalFormCount(player, form);
@@ -2500,6 +3137,9 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
             g_gameLoaded = true;
     g_saveLoadPending = true;
     g_factionStateValid = false; // re-evaluate rep for the loaded character
+#if PIPBOY_QUEST_DEBUG
+    QuestDebugReset(); // re-dump quests for the newly loaded character
+#endif
     g_postLoadSettleTicks = 60; // let container changes finish deserializing
     ResetSyncLockState(true);
     {
@@ -2512,6 +3152,9 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
             g_gameLoaded = true;
     g_saveLoadPending = true;
     g_factionStateValid = false; // re-evaluate rep for the new character
+#if PIPBOY_QUEST_DEBUG
+    QuestDebugReset(); // re-dump quests for the new character
+#endif
     g_postLoadSettleTicks = 60; // let container changes finish deserializing
     ResetSyncLockState(true);
     {
@@ -2536,6 +3179,48 @@ void MessageHandler(NVSEMessagingInterface::Message *msg) {
         case NVSEMessagingInterface::kMessage_MainGameLoop:
             if (g_gameLoaded) {
       LogMenuMaskIfChanged();
+
+#if PIPBOY_ALLQUESTS_DEBUG
+      // Once the post-load settle has finished, the form lists are populated.
+      if (!g_allQuestsDumped && g_postLoadSettleTicks == 0) {
+        g_allQuestsDumped = true;
+        try {
+          DumpAllQuests();
+        } catch (...) {
+        }
+      }
+#endif
+
+#if PIPBOY_TILE_DEBUG
+      // Auto-dump the DATA tab's tile tree once per session, a moment after it
+      // first becomes visible. Driven from the game loop rather than the
+      // DUMPTILES command because alt-tabbing PAUSES the game: the pipe thread
+      // still queues commands, but this handler stops running, so a command
+      // sent from the companion while tabbed out is not executed until focus
+      // returns. Waiting a few frames lets the menu finish building its list
+      // before the tree is walked.
+      // One dump per menu-open, up to a few per session: the DATA tab covers
+      // Local Map / World Map / Quests / Notes / Radio, and which sub-tab is
+      // showing decides what the tree contains. Dumping on each open means
+      // closing and reopening on Quests captures it without any extra step.
+      {
+        if (InterfaceManager::IsMenuVisible(kMenuType_Map)) {
+          if (!g_tileDumpDone && g_tileDumpCount < 3 && ++g_tileDumpDelay >= 45) {
+            g_tileDumpDone = true;
+            g_tileDumpCount++;
+            try {
+              DumpMenuTileTree(kMenuType_Map, "MapMenu / DATA tab (auto)");
+              if (g_tileDumpCount == 1)
+                DumpMenuTileTree(kMenuType_Stats, "StatsMenu (for comparison)");
+            } catch (...) {
+            }
+          }
+        } else {
+          g_tileDumpDelay = 0;
+          g_tileDumpDone = false; // re-arm for the next time DATA is opened
+        }
+      }
+#endif
       if (g_postLoadSettleTicks > 0)
         g_postLoadSettleTicks--;
       if (g_syncHudReadyDelay > 0)

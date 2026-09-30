@@ -846,6 +846,269 @@
     } catch (e) {}
   };
 
+  // ── QUESTS ──────────────────────────────────────────────────────────────
+  // Quest state lives in INV/<mode>/QUESTS.STA, a flat fixed-width file of our
+  // own rather than an InvFile: an 8-byte InvFile row has nowhere to put the
+  // two 64-bit objective masks. Names and objective text are never sent by the
+  // companion - DATA/<mode>/QUESTS.DAT already holds every one of them, so a
+  // row carries only ids, counters and bitmasks.
+  //
+  //   0  id u32      4 stage u8   5 flags u8   6 objCount u8   7 pad
+  //   8  dispLo u32  12 dispHi    16 doneLo    20 doneHi
+  //
+  // flags: bit0 running, bit1 complete, bit2 active.
+  // Masks are split lo/hi because Espruino's bitwise ops are 32-bit and the NV
+  // catalog has quests with 35 and 36 objectives.
+  const QROW = 24;
+  const QF_COMPLETE = 2;
+  const QF_ACTIVE = 4;
+  const questPath = () => `INV/${NV ? 'NV' : 'F3'}/QUESTS.STA`;
+
+  // "1277fd" -> [lo, hi]. Split at 8 hex chars so each half parses exactly;
+  // parseInt on the whole string would lose precision past 2^53.
+  function qhex(s) {
+    s = String(s === undefined || s === null ? '0' : s);
+    const lo = parseInt(s.slice(-8) || '0', 16) >>> 0;
+    const hi = s.length > 8 ? parseInt(s.slice(0, -8), 16) >>> 0 : 0;
+    return [lo >>> 0 || 0, hi >>> 0 || 0];
+  }
+
+  function questRows() {
+    const out = [];
+    let s;
+    try {
+      s = fs.readFileSync(questPath());
+    } catch (e) {}
+    if (!s || !s.length) return out;
+    const ab = E.toArrayBuffer(s);
+    const n = (ab.byteLength / QROW) | 0;
+    const dv = new DataView(ab);
+    for (let i = 0; i < n; i++) {
+      const o = i * QROW;
+      out.push({
+        id: dv.getUint32(o, !0),
+        stage: dv.getUint8(o + 4),
+        flags: dv.getUint8(o + 5),
+        objCount: dv.getUint8(o + 6),
+        dl: dv.getUint32(o + 8, !0),
+        dh: dv.getUint32(o + 12, !0),
+        nl: dv.getUint32(o + 16, !0),
+        nh: dv.getUint32(o + 20, !0)
+      });
+    }
+    return out;
+  }
+
+  // Completed quests sort below active ones, matching the in-game Quests tab.
+  // Partitioning (rather than sort) keeps arrival order inside each group and
+  // avoids depending on whether this Espruino's sort is stable.
+  function questOrder(rows) {
+    const live = [],
+      done = [];
+    for (let i = 0; i < rows.length; i++) {
+      (rows[i].flags & QF_COMPLETE ? done : live).push(rows[i]);
+    }
+    return live.concat(done);
+  }
+
+  function questWrite(rows) {
+    rows = questOrder(rows);
+    const buf = new ArrayBuffer(rows.length * QROW);
+    const dv = new DataView(buf);
+    let active = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const o = i * QROW,
+        r = rows[i];
+      dv.setUint32(o, r.id >>> 0, !0);
+      dv.setUint8(o + 4, r.stage & 255);
+      dv.setUint8(o + 5, r.flags & 255);
+      dv.setUint8(o + 6, r.objCount & 255);
+      dv.setUint8(o + 7, 0);
+      dv.setUint32(o + 8, r.dl >>> 0, !0);
+      dv.setUint32(o + 12, r.dh >>> 0, !0);
+      dv.setUint32(o + 16, r.nl >>> 0, !0);
+      dv.setUint32(o + 20, r.nh >>> 0, !0);
+      if (r.flags & QF_ACTIVE) active = r.id;
+    }
+    fs.writeFileSync(questPath(), rows.length ? new Uint8Array(buf) : []);
+    // The renderer reads the active quest from av 'quest', the same place
+    // stock QUESTS.JS put it, so keep the two from drifting apart. Clearing it
+    // when nothing is active matters as much as setting it: when the tracked
+    // quest completes and nothing replaces it, a stale av would leave the
+    // renderer highlighting a quest the game no longer considers active.
+    player.setav('quest', active || 0, !0, !0);
+  }
+
+  // Quest ids from the supplementary catalog (DATA/<mode>/QUESTS_EXT.TXT),
+  // which covers quests missing from the stock QUESTS.DAT - real ones it omits
+  // plus anything mod-added. Scanned once and cached; an empty result is NOT
+  // cached, so uploading the file after boot still takes effect.
+  let _extQuestIds = null;
+  function getExtQuestIds() {
+    if (_extQuestIds && _extQuestIds.length) return _extQuestIds;
+    const ids = [];
+    const take = (line) => {
+      const m = line.indexOf('"i":');
+      if (m < 0) return;
+      const v = parseInt(line.substr(m + 4), 10);
+      if (v) ids.push(v >>> 0);
+    };
+    try {
+      const f = E.openFile(`DATA/${NV ? 'NV' : 'F3'}/QUESTS_EXT.TXT`, 'r');
+      if (f) {
+        let buf = '',
+          chunk;
+        while ((chunk = f.read(1024))) {
+          buf += chunk;
+          let nl;
+          while ((nl = buf.indexOf('\n')) >= 0) {
+            take(buf.substr(0, nl));
+            buf = buf.substr(nl + 1);
+          }
+        }
+        if (buf.length) take(buf);
+        f.close();
+      }
+    } catch (e) {}
+    _extQuestIds = ids;
+    return ids;
+  }
+
+  function questIdKnown(id) {
+    return getCatIds('QUESTS').indexOf(id) >= 0 || getExtQuestIds().indexOf(id) >= 0;
+  }
+
+  // Every quest id this device can render: stock catalog plus supplement. The
+  // companion reads this so it can warn about quests it cannot display rather
+  // than dropping them silently.
+  Player.prototype.getquestcatalog = function () {
+    try {
+      const out = [],
+        cat = getCatIds('QUESTS');
+      for (let i = 0; i < cat.length; i++) out.push(cat[i]);
+      const ext = getExtQuestIds();
+      for (let i = 0; i < ext.length; i++) {
+        if (out.indexOf(ext[i]) < 0) out.push(ext[i]);
+      }
+      return out;
+    } catch (e) {
+      return [];
+    }
+  };
+
+  // [id, stage, flags, "dispHex", "doneHex"] -> row, or null if this device has
+  // no text for the quest in either catalog.
+  function questRowFromEntry(e) {
+    if (!e || e.length < 5) return null;
+    const id = Number(e[0]) >>> 0;
+    if (!id || !questIdKnown(id)) return null;
+    const d = qhex(e[3]),
+      n = qhex(e[4]);
+    return {
+      id: id,
+      stage: Number(e[1]) & 255,
+      flags: Number(e[2]) & 255,
+      objCount: Number(e[5] !== undefined ? e[5] : 0) & 255,
+      dl: d[0],
+      dh: d[1],
+      nl: n[0],
+      nh: n[1]
+    };
+  }
+
+  function questRefresh() {
+    if (typeof Pip !== 'undefined' && Pip.CURRENT && Pip.CURRENT.id === 'QUESTS') {
+      if (Pip.changeMenu) Pip.changeMenu();
+    }
+  }
+
+  let _questReconcile = null;
+
+  Player.prototype.setquestsbulk_begin = function () {
+    _questReconcile = [];
+  };
+
+  Player.prototype.setquestsbulk_chunk = function (entries) {
+    if (!_questReconcile || !entries || !entries.length) return;
+    try {
+      for (let i = 0; i < entries.length; i++) {
+        const r = questRowFromEntry(entries[i]);
+        if (r) _questReconcile.push(r);
+      }
+    } catch (e) {}
+  };
+
+  // Whatever wasn't sent between begin and end is gone - the accumulated set
+  // replaces the file wholesale, so no separate sweep is needed.
+  Player.prototype.setquestsbulk_end = function () {
+    const rows = _questReconcile;
+    _questReconcile = null;
+    if (!rows) return;
+    try {
+      questWrite(rows);
+      debug(`Reconciled quests: ${rows.length}`);
+      questRefresh();
+    } catch (e) {}
+  };
+
+  Player.prototype.setquest = function (id, stage, flags, disp, done, objCount) {
+    try {
+      const r = questRowFromEntry([id, stage, flags, disp, done, objCount]);
+      if (!r) return;
+      const rows = questRows();
+      let found = !1;
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i].id === r.id) {
+          rows[i] = r;
+          found = !0;
+          break;
+        }
+      }
+      if (!found) rows.push(r);
+      questWrite(rows);
+      questRefresh();
+    } catch (e) {}
+  };
+
+  Player.prototype.removequest = function (id) {
+    try {
+      id = Number(id) >>> 0;
+      const rows = questRows(),
+        keep = [];
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i].id !== id) keep.push(rows[i]);
+      }
+      if (keep.length === rows.length) return;
+      questWrite(keep);
+      questRefresh();
+    } catch (e) {}
+  };
+
+  // Active quest only - avoids rewriting a whole row when the player simply
+  // switched which quest is tracked.
+  Player.prototype.setactivequest = function (id) {
+    try {
+      id = Number(id) >>> 0;
+      const rows = questRows();
+      for (let i = 0; i < rows.length; i++) {
+        rows[i].flags = id && rows[i].id === id
+          ? rows[i].flags | QF_ACTIVE
+          : rows[i].flags & ~QF_ACTIVE;
+      }
+      questWrite(rows);
+      questRefresh();
+    } catch (e) {}
+  };
+
+  // Read side for QUESTS.JS: rows in display order, active flag resolved.
+  Player.prototype.getquests = function () {
+    try {
+      return questRows();
+    } catch (e) {
+      return [];
+    }
+  };
+
   Player.prototype.safeaddperk = function (p) {
     try {
       if (getCatIds('PERKS').indexOf(p) >= 0) this.addperk(p);
@@ -966,7 +1229,7 @@
     if (typeof Pip !== 'undefined' && Pip.CURRENT) {
       if (Pip.CURRENT.id === 'SPECIAL' && Pip.emit) Pip.emit('special');
       else if (Pip.MODE === 0 && Pip.CURRENT.id !== 'GENERAL' && Pip.changeMenu) Pip.changeMenu();
-      else if (['WEAPONS', 'APPAREL', 'AID', 'MISC', 'AMMO'].indexOf(Pip.CURRENT.id) >= 0 && Pip.changeMenu) Pip.changeMenu();
+      else if (['WEAPONS', 'APPAREL', 'AID', 'MISC', 'AMMO', 'QUESTS'].indexOf(Pip.CURRENT.id) >= 0 && Pip.changeMenu) Pip.changeMenu();
     }
   };
 

@@ -21,3 +21,12 @@ Thumbs.db
 FW Build/
 1.1.5/
 NEXUS.md
+
+# Firmware
+FW/stock/
+
+# Local DLL backups and captured device/plugin logs (not for the repo)
+backup/
+
+# Generated per-playthrough data (quest supplement etc) - not source
+FW/generated/

@@ -146,6 +146,15 @@ export class CompanionApp extends EventEmitter {
     if (!this.options.game) {
       await this.autoDetectGameMode();
     }
+    // Probe once per connection, after the patch check confirms boot0 is up:
+    // an older .boot0 has the item/perk methods but none of the quest ones.
+    this.syncEngine.setQuestSyncSupported(await this.bridge.hasQuestSupport());
+    // Read the device's quest catalog so quests it cannot display are reported
+    // by name rather than silently dropped. Cheap (one eval) and only needed
+    // when quest sync is actually on.
+    if (this.syncEngine.isQuestSyncSupported()) {
+      this.syncEngine.setDeviceQuestCatalog(await this.bridge.getQuestCatalogIds());
+    }
     this._deviceReady = true;
     if (this.pipeClient.connected) {
       await this._tryEnableSync({
@@ -272,6 +281,11 @@ export class CompanionApp extends EventEmitter {
       this._deviceReady = false;
       this._companionPatchInstalled = false;
       this.syncEngine.setEnabled(false);
+      // Re-probed on reconnect; the next device may be on older firmware, or
+      // be in the other game's mode with a different quest catalog.
+      this.syncEngine.setQuestSyncSupported(false);
+      this.syncEngine._questProbeRetried = false;
+      this.syncEngine.setDeviceQuestCatalog(null);
       if (!this.options.game) {
         this.syncEngine.clearGameMode();
       }
@@ -340,6 +354,20 @@ export class CompanionApp extends EventEmitter {
       const gameMode = this.syncEngine.gameMode || 'FNV';
       const gameFormId = this.mapper.resolveToGame(evt.formId, gameMode);
       const pipeFormId = formatGameFormId(gameFormId);
+
+      if (evt.action === 'quest') {
+        // The device already set its own active-quest av when the user tapped
+        // it; tell the engine so the resulting snapshot isn't echoed straight
+        // back as a redundant setactivequest.
+        this.syncEngine.notifyDeviceActiveQuest(pipeFormId);
+        if (this.pipeClient.connected) {
+          this.pipeClient.send(`QUEST ${pipeFormId}`);
+          this.log('sync', `Pip-Boy -> game: active quest ${pipeFormId}`);
+        } else if (this._companionPatchInstalled) {
+          this.log('warn', `Pip-Boy quest ${gameFormId} ignored (game not connected)`);
+        }
+        return;
+      }
 
       if (evt.action === 'use') {
         this.syncEngine.notifyDeviceConsumed(pipeFormId);

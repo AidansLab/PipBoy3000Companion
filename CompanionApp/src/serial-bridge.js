@@ -246,6 +246,7 @@ export class SerialBridge extends EventEmitter {
    *   PIPSYNC:UNEQUIP:APPAREL:000340C8
    *   PIPSYNC:DROP:AMMO:0000434F:20
    *   PIPSYNC:TORCH:ON / PIPSYNC:TORCH:OFF
+   *   PIPSYNC:QUEST:000FF5DF
    * when the user uses/equips/drops an item on the device. These are emitted
    * as 'device-event' so the app can mirror the action in-game.
    */
@@ -271,6 +272,17 @@ export class SerialBridge extends EventEmitter {
           condition: verb === 'EQUIP' && match[4] !== undefined ? parseInt(match[4], 10) : undefined,
           // DROP: how many units to drop.
           count: verb === 'DROP' && match[4] !== undefined ? parseInt(match[4], 10) : undefined,
+        });
+        continue;
+      }
+
+      // Active-quest pick. Matched separately from the item pattern above:
+      // quests carry no category segment and no trailing count.
+      const questMatch = line.match(/PIPSYNC:QUEST:([0-9A-Fa-f]{1,8})/);
+      if (questMatch) {
+        this.emit('device-event', {
+          action: 'quest',
+          formId: '0x' + questMatch[1].toLowerCase().padStart(8, '0'),
         });
         continue;
       }
@@ -545,6 +557,98 @@ export class SerialBridge extends EventEmitter {
     }
 
     throw new Error(`Could not verify companion patch: ${lastErr?.message || 'unknown error'}`);
+  }
+
+  /**
+   * True when the loaded .boot0 implements quest sync.
+   *
+   * Quest support arrived after the first public firmware, so a device on an
+   * older patch has the companion methods for items and perks but none of the
+   * quest ones. Calling an undefined function on Espruino throws into the REPL
+   * where boot0's own try/catch cannot help, so the app probes once and simply
+   * omits quest commands when unsupported. setquestsbulk_begin stands in for
+   * the whole set - they ship together.
+   */
+  async hasQuestSupport() {
+    // Probe via the `player` INSTANCE, not the `Player` class. FW.JS declares
+    // its classes with `class`/`let` at top level, which in Espruino are not
+    // globals - the same reason detectGameMode() cannot read `NV` directly and
+    // goes through Pip.settings instead. `player` is a real global (stock
+    // QUESTS.JS calls player.getav from menu scope), so reaching the method
+    // through the instance sees the prototype regardless of class visibility.
+    const expressions = [
+      "typeof player!=='undefined'&&typeof player.setquestsbulk_begin==='function'",
+      "typeof Player!=='undefined'&&typeof Player.prototype.setquestsbulk_begin==='function'",
+    ];
+
+    // Settle first and retry, matching hasCompanionPatch/detectGameMode: an
+    // eval issued immediately after the previous one can read a short or
+    // still-filling response buffer.
+    await this._sleep(250);
+
+    for (const expression of expressions) {
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const raw = await this.eval(expression);
+          const ok = this._parseEvalBool(raw);
+          if (ok) return true;
+          this.emit(
+            'status',
+            `Quest probe [${expression.slice(0, 40)}...] -> false (raw ${JSON.stringify(String(raw).trim().slice(-40))})`
+          );
+          break; // a clean false means this form resolved; try the next form
+        } catch (err) {
+          this.emit('status', `Quest probe error (attempt ${attempt}): ${err.message}`);
+          await this._sleep(200);
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Read the quest catalog's form IDs from the device.
+   *
+   * DATA/<mode>/QUESTS.DAT is fixed game data baked in by The Wand Company and
+   * it does NOT contain every quest in the game (confirmed omissions: Vance's
+   * Gun, Young Hearts). The device silently drops any quest it has no record
+   * for, because it would have no name or objective text to draw. Fetching the
+   * id list once lets the app say which quests it cannot display instead of
+   * losing them without a word.
+   *
+   * ~168 ids for NV, so roughly 1.8 KB of JSON over one eval.
+   *
+   * @returns {Promise<number[]|null>} form IDs, or null if unreadable
+   */
+  async getQuestCatalogIds() {
+    // Ask boot0 first: it returns the stock catalog PLUS the supplementary one
+    // (QUESTS_EXT.TXT), which is what the device can actually render. Reading
+    // QUESTS.DAT directly would miss the supplement and the app would filter
+    // out quests the device is perfectly able to show. Older firmware has no
+    // such method, hence the fallback.
+    const expressions = [
+      "(function(){try{return player.getquestcatalog()}catch(e){return null}})()",
+      "(function(){try{var d=new DataFile('DATA/'+(NV?'NV':'F3')+'/QUESTS.DAT');" +
+        'var a=[],i;for(i=0;i<d.ids.length;i++)a.push(d.ids[i]);' +
+        'd.close();return a}catch(e){return null}})()',
+    ];
+
+    for (const expr of expressions) {
+      try {
+        const raw = await this.eval(expr, 20000);
+        const text = String(raw).trim();
+        // The REPL may prefix banner noise; the array is last (see
+        // parseDeviceJson in flash-fw.js for the same problem).
+        const start = text.lastIndexOf('[');
+        if (start < 0) continue;
+        const parsed = JSON.parse(text.slice(start, text.lastIndexOf(']') + 1));
+        if (!Array.isArray(parsed) || parsed.length === 0) continue;
+        return parsed.map((n) => Number(n) >>> 0);
+      } catch (err) {
+        this.emit('status', `Quest catalog read failed (${err.message}), trying fallback`);
+      }
+    }
+    return null;
   }
 
   /**

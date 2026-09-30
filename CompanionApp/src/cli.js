@@ -682,7 +682,6 @@ async function handleTestCommand(subCmd, bridge, syncEngine) {
           xpNext: 25000,
           hp: 350,
           maxHP: 400,
-          ap: 90,
           maxAP: 95,
           wg: 180,
           maxWg: 275,
