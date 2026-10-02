@@ -117,9 +117,10 @@ if(MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE "/FI\"nvse/prefix.h\"")
 endif()
 
-# Windows libraries needed for Named Pipes
+# Windows libraries (ws2_32: loopback TCP to the companion app)
 target_link_libraries(${PROJECT_NAME} PRIVATE
     kernel32
+    ws2_32
 )
 
 # Set output name (no "lib" prefix)
@@ -200,6 +201,7 @@ endif()
 target_link_libraries(FalloutPipBoySyncFO3 PRIVATE
     kernel32
     user32   # main-thread pump: EnumWindows / SetTimer
+    ws2_32   # loopback TCP to the companion app
 )
 
 set_target_properties(FalloutPipBoySyncFO3 PROPERTIES

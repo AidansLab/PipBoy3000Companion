@@ -47,20 +47,182 @@
   // the array on every additemhealthpercent/removeitem/setformstacks call.
   const cats = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
 
-  // DAT catalogs are static game data, so read each category's id list from
-  // flash once and reuse it instead of reopening the DataFile on every
-  // add/remove/setformstacks call.
-  const _catIdsCache = {};
-  function getCatIds(v) {
-    let ids = _catIdsCache[v];
-    if (!ids) {
-      const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/${v}.DAT`);
-      ids = db.ids;
-      db.close();
-      _catIdsCache[v] = ids;
-    }
-    return ids;
+  // Tale of Two Wastelands (FO3 inside FNV): FO3 items live in the NV
+  // inventory files with their FO3 high byte + TTW_FLAG, and their data/images
+  // come from DATA/F3. TTW_FLAG must stay below 0x80000000 - InvFile.get()
+  // rebuilds ids with a signed `<< 24`. Pip.settings.ttw is set by the
+  // companion (see Pip.setTTW) and persisted, so it also applies offline.
+  const TTW_FLAG = 0x40000000;
+  const isTTW = () => NV && Pip.settings.ttw;
+
+  function openDat(path) {
+    const f = E.openFile(path, 'r'),
+      t = new Uint32Array(E.toArrayBuffer(f.read(8)));
+    return { f: f, n: t[0], end: 8 + 4 * t[0], len: t[1] };
   }
+  function readRec(d, i) {
+    d.f.seek(d.end + i * d.len);
+    try {
+      return JSON.parse(d.f.read(d.len));
+    } catch (e) {
+      return { txt: '== ERROR ==' };
+    }
+  }
+
+  // Lowercased item/perk name from a DAT record, for the TTW merge below.
+  // Slices "txt" straight out of the record text (much cheaper than
+  // JSON.parse per record) unless it contains an escape.
+  function recName(d, i) {
+    d.f.seek(d.end + i * d.len);
+    const s = d.f.read(d.len),
+      a = s.indexOf('"txt":"');
+    if (a < 0) return '';
+    const b = s.indexOf('"', a + 7);
+    let t = s.slice(a + 7, b);
+    if (t.indexOf('\\') >= 0 || s[b - 1] === '\\')
+      try {
+        t = JSON.parse(s).txt || '';
+      } catch (e) {}
+    return t.toLowerCase();
+  }
+
+  // Each category's DAT id list (also the menus' db.ids - see Pip.catData).
+  // With TTW on (items + perks only - TTW leaves skills/SPECIAL as NV's) the
+  // list holds both games' ids (FO3 ones flagged), MERGED by name so FO3
+  // entries sort into place instead of trailing the NV ones - InvFile sorts by
+  // idOrder position, so this is what orders every list. _catRec[i] is then
+  // entry i's record index in its own DAT (NV or F3, per the flag).
+  // Building the merge reads every record's name, so it's done once per
+  // category and saved to DATA/TTW/<cat>.ORD ([nvCount, f3Count] header, ids,
+  // record indexes); a DAT count change (firmware update) rebuilds it.
+  // Only ONE list is cached (the companion syncs one category at a time), and
+  // the open item menu's own list is reused rather than duplicated - caching
+  // every category kept several KB (more with TTW) resident on every screen,
+  // which ran Settings out of memory.
+  // Keyed on game mode + TTW: SETTINGS' Pip-Boy mode toggle flips NV without
+  // a reboot, and a stale list makes every lookup/sync use the wrong game's ids.
+  let _catV, _catIds, _catRec, _catKey;
+  function loadCat(v) {
+    const d0 = openDat(`DATA/${NV ? 'NV' : 'F3'}/${v}.DAT`),
+      d1 = isTTW() && (v === 'PERKS' || cats.indexOf(v) >= 0) ? openDat(`DATA/F3/${v}.DAT`) : null,
+      n0 = d0.n;
+    let ids, rec;
+    if (!d1) ids = new Uint32Array(E.toArrayBuffer(d0.f.read(4 * n0)));
+    else {
+      const n1 = d1.n,
+        n = n0 + n1,
+        path = `DATA/TTW/${v}.ORD`,
+        // statSync first: readFileSync throws (NO_PATH) when DATA/TTW doesn't exist yet.
+        s = fs.statSync(path) && fs.readFileSync(path),
+        ab = s && E.toArrayBuffer(s),
+        hd = ab && ab.byteLength === 8 + 6 * n && new Uint32Array(ab, 0, 2);
+      if (hd && hd[0] === n0 && hd[1] === n1) {
+        ids = new Uint32Array(ab, 8, n);
+        rec = new Uint16Array(ab, 8 + 4 * n, n);
+      } else {
+        const buf = new ArrayBuffer(8 + 6 * n),
+          a0 = new Uint32Array(E.toArrayBuffer(d0.f.read(4 * n0))),
+          a1 = new Uint32Array(E.toArrayBuffer(d1.f.read(4 * n1)));
+        new Uint32Array(buf, 0, 2).set([n0, n1]);
+        ids = new Uint32Array(buf, 8, n);
+        rec = new Uint16Array(buf, 8 + 4 * n, n);
+        // Both DATs are already name-sorted, so a streaming merge only ever
+        // needs the current name from each side.
+        let i = 0, j = 0, k = 0, na = n0 ? recName(d0, 0) : '', nb = n1 ? recName(d1, 0) : '';
+        while (k < n) {
+          if (j >= n1 || (i < n0 && na <= nb)) {
+            (ids[k] = a0[i]), (rec[k++] = i++);
+            i < n0 && (na = recName(d0, i));
+          } else {
+            (ids[k] = a1[j] + TTW_FLAG), (rec[k++] = j++);
+            j < n1 && (nb = recName(d1, j));
+          }
+        }
+        fs.statSync('DATA/TTW') || fs.mkdirSync('DATA/TTW');
+        fs.writeFileSync(path, new Uint8Array(buf));
+      }
+      d1.f.close();
+    }
+    d0.f.close();
+    (_catV = v), (_catIds = ids), (_catRec = rec);
+  }
+  function getCatIds(v) {
+    const key = (NV ? 1 : 0) | (isTTW() ? 2 : 0);
+    if (key !== _catKey) (_catV = _catIds = _catRec = void 0), (_catKey = key);
+    if (_catV === v) return _catIds;
+    // The open menu already holds this list (its idOrder) - don't load a copy.
+    // (A mode/TTW change can't leave it stale: the mode toggle is only on
+    // Settings, and Pip.setTTW rebuilds an open item menu.)
+    if (Pip.CURRENT && Pip.CURRENT.id === v && Pip.inv && Pip.inv.idOrder)
+      return Pip.inv.idOrder;
+    return loadCat(v), _catIds;
+  }
+
+  // Called by the companion on every full sync. Only writes DEVICE.JSON when
+  // the value actually changes (getCatIds drops its cache on its own). An
+  // open item menu is rebuilt so it doesn't keep using its old-mode id list.
+  Pip.setTTW = function (on) {
+    on = !!on;
+    if (!!Pip.settings.ttw === on) return;
+    on ? (Pip.settings.ttw = 1) : delete Pip.settings.ttw;
+    fs.writeFileSync('SETTINGS/DEVICE.JSON', JSON.stringify(Pip.settings));
+    Pip.CURRENT && (Pip.CURRENT.id === 'PERKS' || cats.indexOf(Pip.CURRENT.id) >= 0) && Pip.changeMenu && Pip.changeMenu();
+  };
+
+  // Drop-in for `new DataFile(...)` in the item/perk menus (ids/getId/close
+  // only). Shares getCatIds' cached list instead of loading a second copy,
+  // and only opens DATA/F3 the first time a TTW entry is actually looked up.
+  // FO3 records get TTW_FLAG added to `io` (so Pip.catImg reads DATA/F3's
+  // .IMG) and to `ammo` (so it matches the flagged FO3 ammo ids).
+  Pip.catData = function (v) {
+    getCatIds(v);
+    _catV === v || loadCat(v); // need _catRec too, not just the menu's ids
+    const ids = _catIds,
+      rec = _catRec,
+      d0 = openDat(`DATA/${NV ? 'NV' : 'F3'}/${v}.DAT`);
+    let d1;
+    return {
+      ids: ids,
+      getId: function (id) {
+        const i = ids.indexOf(id);
+        if (i < 0) return { txt: '== MISSING ==' };
+        if (!rec) return readRec(d0, i);
+        if (id < TTW_FLAG) return readRec(d0, rec[i]);
+        d1 || (d1 = openDat(`DATA/F3/${v}.DAT`));
+        const r = readRec(d1, rec[i]);
+        r.io !== void 0 && (r.io += TTW_FLAG);
+        r.ammo && (r.ammo += TTW_FLAG);
+        return r;
+      },
+      close: function () {
+        d0.f.close();
+        d1 && d1.f.close();
+      }
+    };
+  };
+
+  // Drop-in for the menus' .IMG file handle: offsets at/above TTW_FLAG (FO3
+  // records, see Pip.catData) read from DATA/F3's .IMG, opened on first use.
+  Pip.catImg = function (v) {
+    const f0 = E.openFile(`DATA/${NV ? 'NV' : 'F3'}/${v}.IMG`, 'r');
+    let f1, cur = f0;
+    return {
+      seek: function (o) {
+        if (o >= TTW_FLAG) {
+          cur = f1 || (f1 = E.openFile(`DATA/F3/${v}.IMG`, 'r'));
+          o -= TTW_FLAG;
+        } else cur = f0;
+        cur.seek(o);
+      },
+      read: function (n) {
+        return cur.read(n);
+      },
+      close: function () {
+        f0.close();
+        f1 && f1.close();
+      }
+    };
+  };
 
   function refreshInvMenu(inv) {
     if (inv.count === 0 && Pip.changeMenu) Pip.changeMenu();
@@ -524,6 +686,9 @@
         }
       }
       if (st.onMenu) st.inv.onLoaded = st.savedOnLoaded;
+      // TTW: re-sort on write so lists saved before the name-merged order
+      // (FO3 entries trailing) get fixed. Cheap - sync() sorts in place.
+      isTTW() && ((st.inv._requiresSort = !0), (st.inv._requiresSync = !0));
       debug(`Reconciled ${cat}: ${st.inv.count} kept, ${removed} removed`);
       if (st.onMenu) {
         refreshInvMenu(st.inv);
@@ -571,109 +736,106 @@
     return !1;
   };
 
-  // --- Weapon DAM (display damage) sync ---
-  // The companion computes the game's dynamic weapon damage (base x skill x
-  // condition) and mirrors it here one (formId, condition) entry at a time, in a
-  // side InvFile keyed exactly like the inventory stacks.
-  global._damCache = null;
-
-  function damInvFile() {
-    var m = NV ? 'NV' : 'F3',
-      path = 'INV/' + m + '/' + m + '_DAM.INV';
-    if (!require('fs').statSync(path)) {
+  // --- Per-item extras (game-calculated values that override the DAT) ---
+  // WEAPONS_X.INV: weapon display damage (skill/condition-adjusted).
+  // APPAREL_X.INV: armor DT (NV only - condition-adjusted, and correct under
+  // TTW, where the DAT's DT is wrong or missing).
+  // Both use InvFile's 8-byte rows keyed exactly like the inventory stacks
+  // (id + cnd), with the value in cnt. One file per category so each menu only
+  // loads its own, and an armor change never rewrites the weapon file.
+  // Deliberately NO resident cache: menus read the raw file bytes while open
+  // (Pip.xLoad - 8 bytes per entry, freed on close) instead of the old global
+  // _damCache object, which cost ~32 bytes per entry on every screen.
+  function xInvFile(cat) {
+    const path = `INV/${NV ? 'NV' : 'F3'}/${cat}_X.INV`;
+    if (!fs.statSync(path)) {
       try {
-        require('fs').writeFileSync(path, '');
+        fs.writeFileSync(path, '');
       } catch (e) {}
     }
     return new InvFile(path);
   }
+  // One-time cleanup of the old weapon-damage-only files.
+  try {
+    ['NV', 'F3'].forEach((m) => {
+      const p = `INV/${m}/${m}_DAM.INV`;
+      fs.statSync(p) && fs.unlink(p);
+    });
+  } catch (e) {}
 
-  // Apply one (id, cnd, dam) entry to an already-open DAM InvFile and mirror
-  // the single affected key into _damCache.
-  function _applyDamEntry(inv, id, cnd, dam) {
-    var wantCnd = cnd || 100,
-      inx = findInvIdCnd(inv, id, wantCnd);
-    if (inx >= 0) {
-      var it = inv.get(inx);
-      it.cnt = dam;
-      inv.set(inx, it);
-    } else {
-      inv.add({ id: id, cnt: dam, cnd: wantCnd });
+  // Menus: whole extras file as raw u32 pairs, or null if there's none.
+  Pip.xLoad = function (cat) {
+    try {
+      const p = `INV/${NV ? 'NV' : 'F3'}/${cat}_X.INV`,
+        s = fs.statSync(p) && fs.readFileSync(p);
+      return s ? new Uint32Array(E.toArrayBuffer(s)) : null;
+    } catch (e) {
+      return null;
     }
-    if (_damCache) _damCache[id + ':' + wantCnd] = dam;
-  }
-
-  Player.prototype.setdam = function (id, cnd, dam) {
-    try {
-      var inv = damInvFile();
-      _applyDamEntry(inv, id, cnd, dam);
-      inv.sync();
-    } catch (e) {}
+  };
+  // Menus: the extra value for (id, cnd), or undefined. Scans the raw rows
+  // like findInvIdCnd (no per-row object allocation).
+  Pip.xGet = function (u32, id, cnd) {
+    if (!u32) return void 0;
+    const want = cnd || 100;
+    for (let i = 0; i < u32.length; i += 2)
+      if (u32[i] === id && (((u32[i + 1] >> 16) & 255) || 100) === want) return u32[i + 1] & 65535;
+    return void 0;
   };
 
-  // Batch form: entries is [[id, cnd, dam], ...]. One file open and one flash
-  // write for the whole batch e.g a skill change touching every carried weapon
-  // costs one sync() instead of one per weapon.
-  Player.prototype.setdams = function (entries) {
+  // Batch set: entries is [[id, cnd, value], ...]. One file open and one
+  // flash write for the whole batch (e.g. a skill change touching every
+  // carried weapon).
+  Player.prototype.setx = function (cat, entries) {
     try {
-      var inv = damInvFile();
-      for (var i = 0; i < entries.length; i++) {
-        var e = entries[i];
-        if (e) _applyDamEntry(inv, e[0], e[1], e[2]);
-      }
-      inv.sync();
-    } catch (e) {}
-  };
-
-  Player.prototype.removedam = function (id, cnd) {
-    try {
-      var inv = damInvFile(),
-        wantCnd = cnd || 100,
-        inx = findInvIdCnd(inv, id, wantCnd);
-      if (inx >= 0) {
-        inv.remove(inx);
-        inv.sync();
-        if (_damCache) delete _damCache[id + ':' + wantCnd];
-      }
-    } catch (e) {}
-  };
-
-  // Batch form: entries is [[id, cnd], ...]. One file open and one flash
-  // write for the whole batch instead of one per removed weapon stack.
-  Player.prototype.removedams = function (entries) {
-    try {
-      var inv = damInvFile();
-      for (var i = 0; i < entries.length; i++) {
-        var e = entries[i];
+      const inv = xInvFile(cat);
+      for (let i = 0; i < entries.length; i++) {
+        const e = entries[i];
         if (!e) continue;
-        var wantCnd = e[1] || 100,
+        const wantCnd = e[1] || 100,
           inx = findInvIdCnd(inv, e[0], wantCnd);
         if (inx >= 0) {
-          inv.remove(inx);
-          if (_damCache) delete _damCache[e[0] + ':' + wantCnd];
-        }
+          const it = inv.get(inx);
+          it.cnt = e[2];
+          inv.set(inx, it);
+        } else inv.count < 256 && inv.add({ id: e[0], cnt: e[2], cnd: wantCnd });
       }
       inv.sync();
     } catch (e) {}
   };
 
-  // Full-sync DAM reconciliation, same mark-and-sweep pattern as
-  // setitemsbulk_begin/chunk/end above - replaces the old cleardam()+setdams()
-  // pair, which truncated *_DAM.INV and rewrote it at full size on every full
-  // sync even when no carried weapon's damage had actually changed.
-  let _damReconcile = null;
-
-  Player.prototype.setdamsbulk_begin = function () {
+  // Batch remove: entries is [[id, cnd], ...].
+  Player.prototype.removex = function (cat, entries) {
     try {
-      _damReconcile = { inv: damInvFile() };
+      const inv = xInvFile(cat);
+      for (let i = 0; i < entries.length; i++) {
+        const e = entries[i];
+        if (!e) continue;
+        const inx = findInvIdCnd(inv, e[0], e[1] || 100);
+        inx >= 0 && inv.remove(inx);
+      }
+      inv.sync();
+    } catch (e) {}
+  };
+
+  // Full-sync reconciliation (mark-and-sweep, like setitemsbulk_begin/chunk/
+  // end). Marks live in a side byte array instead of each row's fl, so rows
+  // whose value didn't change are never touched and the file is only
+  // rewritten if something actually changed. Without an idOrder, InvFile
+  // appends new rows at the end, so existing indexes stay stable.
+  let _xReconcile = null;
+
+  Player.prototype.setxbulk_begin = function (cat) {
+    try {
+      _xReconcile = { cat: cat, inv: xInvFile(cat), seen: new Uint8Array(256) };
     } catch (e) {
-      _damReconcile = null;
+      _xReconcile = null;
     }
   };
 
-  Player.prototype.setdamsbulk_chunk = function (entries) {
-    const st = _damReconcile;
-    if (!st || !entries || !entries.length) return;
+  Player.prototype.setxbulk_chunk = function (cat, entries) {
+    const st = _xReconcile;
+    if (!st || st.cat !== cat || !entries || !entries.length) return;
     try {
       for (let i = 0; i < entries.length; i++) {
         const e = entries[i];
@@ -681,45 +843,33 @@
         const wantCnd = e[1] || 100,
           inx = findInvIdCnd(st.inv, e[0], wantCnd);
         if (inx >= 0) {
-          let it = st.inv.get(inx);
-          it.cnt = e[2];
-          it.fl = 1;
-          st.inv.set(inx, it);
-        } else st.inv.add({ id: e[0], cnt: e[2], cnd: wantCnd, fl: 1 });
+          const it = st.inv.get(inx);
+          it.cnt !== e[2] && ((it.cnt = e[2]), st.inv.set(inx, it));
+          st.seen[inx] = 1;
+        } else if (st.inv.count < 256) {
+          st.inv.add({ id: e[0], cnt: e[2], cnd: wantCnd });
+          st.seen[st.inv.count - 1] = 1;
+        }
       }
     } catch (e) {}
   };
 
-  Player.prototype.setdamsbulk_end = function () {
-    const st = _damReconcile;
-    if (!st) return;
-    _damReconcile = null;
+  Player.prototype.setxbulk_end = function (cat) {
+    const st = _xReconcile;
+    if (!st || st.cat !== cat) return;
+    _xReconcile = null;
     try {
-      for (let n = st.inv.count - 1; n >= 0; n--) {
-        const it = st.inv.get(n);
-        if (!it || !it.fl) {
-          st.inv.remove(n);
-        } else {
-          it.fl = 0;
-          st.inv.set(n, it);
-        }
-      }
+      for (let n = st.inv.count - 1; n >= 0; n--) st.seen[n] || st.inv.remove(n);
       st.inv.sync();
-      if (_damCache) {
-        _damCache = {};
-        for (let n = 0; n < st.inv.count; n++) {
-          const it = st.inv.get(n);
-          _damCache[it.id + ':' + (it.cnd || 100)] = it.cnt;
-        }
-      }
     } catch (e) {}
+    this.refreshx(cat);
   };
 
-  // Nudge the open WEAPONS menu to re-read the DAM file after a batch of
-  // setdam/removedam writes (e.g. a skill change with no inventory change).
-  Player.prototype.refreshweapondam = function () {
-    if (typeof Pip !== 'undefined' && Pip.CURRENT && Pip.CURRENT.id === 'WEAPONS' && Pip.emit) {
-      Pip.emit('scroller', 'damrefresh');
+  // Nudge the open menu for `cat` to re-read its extras file. Prefix match, so
+  // a second file for the same menu (e.g. APPAREL_DR) refreshes it too.
+  Player.prototype.refreshx = function (cat) {
+    if (typeof Pip !== 'undefined' && Pip.CURRENT && Pip.CURRENT.id && cat.indexOf(Pip.CURRENT.id) === 0 && Pip.emit) {
+      Pip.emit('scroller', 'xrefresh');
     }
   };
 
@@ -729,7 +879,7 @@
       const m = NV ? 'NV' : 'F3',
         dbIds = getCatIds('PERKS');
       if (dbIds.indexOf(id) < 0) return;
-      const db = new DataFile(`DATA/${m}/PERKS.DAT`),
+      const db = Pip.catData('PERKS'),
         perkDef = db.getId(id);
       db.close();
       const wantRank = E.clip(
@@ -848,6 +998,7 @@
         } else delete want[it.id];
       }
       if (onMenu) inv.onLoaded = savedOnLoaded;
+      isTTW() && ((inv._requiresSort = !0), (inv._requiresSync = !0)); // see setitemsbulk_end
       let added = 0;
       for (const id in want) {
         inv.add({ id: Number(id), cnt: 1, cnd: 100, fl: 0 });
@@ -987,8 +1138,7 @@
     try {
       var active = [0, 0, 0, 0],
         activeCnd = [0, 0, 0, 0],
-        m = NV ? 'NV' : 'F3',
-        db = new DataFile('DATA/' + m + '/APPAREL.DAT');
+        db = Pip.catData('APPAREL');
       ids.forEach(function (id, idx) {
         var it = db.getId(id);
         if (it && it.es != null) {
@@ -1005,15 +1155,20 @@
       // which menu - or none - is on screen. Left to the menu alone, DT/DR
       // stayed stuck at 0 after the first sync until the player happened to
       // equip/unequip something from the Pip-Boy itself.
-      var total = 0;
+      var dtTotal = 0, drTotal = 0;
       for (var i = 0; i < active.length; i++) {
         if (!active[i]) continue;
         var stat = db.getId(active[i]);
-        stat = NV ? stat && stat.dt : stat && stat.dr;
-        stat && (total += stat);
+        stat && stat.dt && (dtTotal += stat.dt);
+        stat && stat.dr && (drTotal += stat.dr);
       }
       db.close();
-      this.setav(NV ? 'dt' : 'dr', total);
+      // Connected in NV, the companion sends the game's own DT/DR totals
+      // (armor condition + perks, and correct under TTW) - don't overwrite them.
+      if (!(NV && cmode)) {
+        NV && this.setav('dt', dtTotal);
+        this.setav('dr', drTotal);
+      }
       this.refreshequip();
       Pip.renderHeader && Pip.renderHeader();
     } catch (e) {}
@@ -1140,6 +1295,54 @@
 
   companionClearCmodeOnUsbDisconnect();
 
+  // --- DT/DR cycle (Tale of Two Wastelands only) ---
+  // After the user rests on anything in ITEMS for DTDR_WAIT_MS, the header's DT
+  // and the Apparel menu's DT block switch between DT and DR every
+  // DTDR_FLIP_MS, both from this one timer so they always change together.
+  // Any knob/button input (every one goes through Pip.kickIdleTimer) snaps
+  // back to DT and restarts the wait, so scrolling never flickers.
+  // DTDR_CYCLE = false turns the whole feature off (always DT, as before).
+  const DTDR_CYCLE = true;
+  const DTDR_WAIT_MS = 2500;
+  const DTDR_FLIP_MS = 3000;
+  Pip.dtdrShowDR = !1;
+  let dtdrTimer;
+  // Redraw the header + let the Apparel menu redraw its block. False when
+  // not on an ITEMS screen (then the cycle stops until the next input).
+  function dtdrDraw() {
+    if (Pip.MODE !== 1 || !Pip.CURRENT || Pip.CURRENT.fullscreen || Pip.menuChanging) return !1;
+    Pip.renderHeader();
+    Pip.emit('dtdr', Pip.dtdrShowDR);
+    h.flip();
+    return !0;
+  }
+  function dtdrTick() {
+    Pip.dtdrShowDR = !Pip.dtdrShowDR;
+    if (dtdrDraw()) dtdrTimer = setTimeout(dtdrTick, DTDR_FLIP_MS);
+    else (Pip.dtdrShowDR = !1), (dtdrTimer = void 0);
+  }
+  function dtdrRestart() {
+    dtdrTimer && clearTimeout(dtdrTimer);
+    dtdrTimer = void 0;
+    if (Pip.dtdrShowDR) (Pip.dtdrShowDR = !1), dtdrDraw();
+    // Mode isn't checked here - the button that switches to ITEMS fires this
+    // before the mode changes; dtdrDraw checks it when the wait ends.
+    isTTW() && (dtdrTimer = setTimeout(dtdrTick, DTDR_WAIT_MS));
+  }
+  // Installed at the very end of this file, outermost: the cmode no-sleep
+  // kickIdleTimer override below returns early without calling what it
+  // wraps, so wrapping inside it would never fire while connected.
+  function patchDtdrCycle() {
+    if (!DTDR_CYCLE) return !0;
+    if (typeof Pip.kickIdleTimer !== 'function') return !1;
+    const _kick = Pip.kickIdleTimer;
+    Pip.kickIdleTimer = function () {
+      dtdrRestart();
+      return _kick.apply(this, arguments);
+    };
+    return !0;
+  }
+
   // Companion header fixes: STATS AP from game sync; ITEMS caps from in-memory inv.
   function patchCompanionHeaders() {
     if (Pip._companionHeadersPatched || typeof Pip.getMode !== 'function')
@@ -1201,6 +1404,32 @@
               }
             }
           }
+          // DT/DR cycle (see DTDR_CYCLE): show DR in DT's slot.
+          if (isTTW() && Pip.dtdrShowDR) {
+            for (let ri = 0; ri < rows.length; ri++) {
+              if (rows[ri][0] === 'DT') {
+                rows[ri] = ['DR', `${player.getav('dr') || 0}`.padStart(2, ' ')];
+                break;
+              }
+            }
+          }
+          return rows;
+        };
+      }
+      // DATA: stock looks the map name up in this mode's own MAPS.JSON, so a
+      // TTW "F3/<key>" map (see WMAP.JS) would show the NV default name.
+      if (mode === 2 && m && typeof m.header === 'function') {
+        const _header = m.header;
+        m.header = function () {
+          const rows = _header.call(this),
+            k = player.getav('map');
+          if (k && k.indexOf('/') > 0) {
+            const p = k.split('/');
+            try {
+              const e = JSON.parse(fs.readFile(`MAP/${p[0]}/MAPS.JSON`))[p[1]];
+              e && e.name && rows[0] && (rows[0][1] = e.name);
+            } catch (e) {}
+          }
           return rows;
         };
       }
@@ -1258,5 +1487,13 @@
       }
       return _kickIdleTimer.apply(this, arguments);
     };
+  }
+
+  // DT/DR cycle input hook - must stay after the override above (see
+  // patchDtdrCycle).
+  if (!patchDtdrCycle()) {
+    const dtdrPatchTimer = setInterval(function () {
+      if (patchDtdrCycle()) clearInterval(dtdrPatchTimer);
+    }, 50);
   }
 })();

@@ -81,19 +81,29 @@ const INVENTORY_CATEGORIES = ['AID', 'AMMO', 'APPAREL', 'MISC', 'WEAPONS'];
 // treats them as two more INV categories instead of separate JSON files.
 const PRESYNC_CATEGORIES = [...INVENTORY_CATEGORIES, 'PERKS', 'SKILLS'];
 
-// Weapon DAM (skill/condition-adjusted display damage) lives in a side
-// *_DAM.INV file, mirrored via batched player.setdams()/setdamsbulk_* calls so
-// the device opens and flash-writes the file once per batch instead of once
-// per entry.
-// Entries per setdams command. Each `[id,cnd,dam],` triple is ~16 chars and the
+// Per-item "extras": game-calculated values that override the Pip-Boy's static
+// DAT value, one side file per category on the device (<CAT>_X.INV), mirrored
+// via batched player.setx()/removex()/setxbulk_* calls so the device opens and
+// flash-writes the file once per batch instead of once per entry.
+//   WEAPONS: dam - skill/condition-adjusted display damage
+//   APPAREL: dt  - condition-adjusted armor DT (NV only; FO3 uses DR)
+//   APPAREL: dr  - condition-adjusted armor DR (NV + TTW only - only the TTW
+//                  DT/DR cycle on the device shows it), in APPAREL_DR
+// `file` names the device file (<file>_X.INV) when a category has more than
+// one extra; `cat` is still the menu that gets refreshed.
+const ITEM_EXTRAS = [
+  { cat: 'WEAPONS', key: 'dam' },
+  { cat: 'APPAREL', key: 'dt', mode: 'FNV' },
+  { cat: 'APPAREL', file: 'APPAREL_DR', key: 'dr', mode: 'FNV', ttw: true },
+];
+// Entries per setx command. Each `[id,cnd,value],` triple is ~16 chars and the
 // serial bridge packs lines into 512-byte chunks - 24 keeps a full command
 // safely inside one chunk so it never floods the device's USB RX buffer.
-const MAX_DAM_BATCH = 24;
-// Same rationale as MAX_DAM_BATCH, for player.additemsbulk()/removeitemsbulk()
+const MAX_X_BATCH = 24;
+// Same rationale as MAX_X_BATCH, for player.additemsbulk()/removeitemsbulk()
 // batches: N items changing in the same category cost the device one flash
 // write per batch instead of one per item.
 const MAX_ITEM_BATCH = 24;
-const REFRESH_WEAPON_DAM_CMD = 'player.refreshweapondam()';
 /** Refresh open WEAPONS/APPAREL scroller after remote equip; safe if .boot0 not loaded */
 const REFRESH_EQUIP_CMD = 'player.refreshequip()';
 
@@ -283,10 +293,33 @@ export class SyncEngine extends EventEmitter {
     const resolved = resolveWorldspace(player.worldspace, this.mapper?.loadOrder, this.gameMode);
     if (!resolved) {
       this._latestMapPos = null;
+      // Interiors report worldspace 0 - logged once per stay indoors.
+      if (!player.worldspace) {
+        if (this._lastResolvedMapKey !== 'indoors') {
+          this._lastResolvedMapKey = 'indoors';
+          this.emit('status', 'World Map: player is indoors (no worldspace) - marker hidden');
+        }
+        return;
+      }
+      // Unplaceable worldspace. Logged (with its owning plugin, so missing
+      // WORLDSPACE_MAP entries are findable) each time the player moves
+      // onto one, not on every snapshot while there.
+      const unmappedKey = 'unmapped:' + player.worldspace;
+      if (this._lastResolvedMapKey !== unmappedKey) {
+        this._lastResolvedMapKey = unmappedKey;
+        const plugin = this.mapper?.loadOrder?.get((player.worldspace >>> 24) & 0xff) || 'unknown plugin';
+        const id = '0x' + (player.worldspace >>> 0).toString(16).padStart(8, '0');
+        this.emit('status', `World Map: no map for worldspace ${id} (${plugin}) - marker hidden here`);
+      }
       return;
     }
-    const { mapKey, transform } = resolved;
-    const pixel = worldToMapPixel(player.worldX, player.worldY, this.gameMode, mapKey, transform);
+    const { mapKey, calibMode, calibKey, transform } = resolved;
+    if (mapKey !== this._lastResolvedMapKey) {
+      this._lastResolvedMapKey = mapKey;
+      const id = '0x' + (player.worldspace >>> 0).toString(16).padStart(8, '0');
+      this.emit('status', `World Map: player is on ${mapKey} (worldspace ${id})`);
+    }
+    const pixel = worldToMapPixel(player.worldX, player.worldY, calibMode, calibKey, transform);
     // heading rides along unconverted - every map transform is a uniform
     // scale+translate, never a rotation, so it can't change the angle.
     // t: when this position arrived from the game - the device paces
@@ -562,8 +595,9 @@ export class SyncEngine extends EventEmitter {
       // so the firmware's own endurance/level formula (which only accounts for
       // vanilla bonuses) is overridden by getinfo() whenever a mod changes max
       // HP some other way.
-      const scalarAttrs = ['name', 'level', 'hp', 'maxHP', 'karma', 'perceptioncondition', 'endurancecondition', 'leftattackcondition', 'rightattackcondition', 'leftmobilitycondition', 'rightmobilitycondition'];
+      const scalarAttrs = ['name', 'level', 'hp', 'maxHP', 'dt', 'dr', 'karma', 'perceptioncondition', 'endurancecondition', 'leftattackcondition', 'rightattackcondition', 'leftmobilitycondition', 'rightmobilitycondition'];
       for (const attr of scalarAttrs) {
+        if (attr === 'dr' && !this._isTTW()) continue; // only the TTW DT/DR cycle shows it
         let current = player[attr];
         let previous = prevPlayer[attr];
 
@@ -596,10 +630,10 @@ export class SyncEngine extends EventEmitter {
           } else if (attr === 'name') {
             commands.push(`player.setav('name', ${JSON.stringify(player.name)}, !0)`);
           } else {
-            const ephemeral = attr === 'hp' || attr === 'maxHP';
+            const ephemeral = attr === 'hp' || attr === 'maxHP' || attr === 'dt' || attr === 'dr';
             commands.push(`player.setav('${attr}', ${JSON.stringify(current)}, ${ephemeral ? '!1' : '!0'})`);
           }
-          if (attr === 'hp' || attr === 'maxHP' || attr === 'level') {
+          if (attr === 'hp' || attr === 'maxHP' || attr === 'dt' || attr === 'dr' || attr === 'level') {
             commands.push(ITEMS_HEADER_SOFT_REFRESH_CMD);
           }
         }
@@ -652,7 +686,7 @@ export class SyncEngine extends EventEmitter {
 
     // Weapon DAM (skill/condition-adjusted) - mirror per-stack deltas. Self-gated
     // on inventory pause; placed after inventory so the rows it annotates exist.
-    commands.push(...this._diffWeaponDamage(snapshot.inventory || [], prev.inventory || []));
+    commands.push(...this._diffItemExtras(snapshot.inventory || [], prev.inventory || []));
 
     // Weapon ammo - ephemeral UI state; always sync (not gated on inventory pause)
     commands.push(...this._diffWeaponAmmo(player, prevPlayer));
@@ -729,6 +763,13 @@ export class SyncEngine extends EventEmitter {
     const commands = [];
     const player = snapshot.player || {};
 
+    // Tale of Two Wastelands: tell the device before any inventory commands,
+    // since it changes which item IDs each category accepts. Full syncs run on
+    // connect and on every load-order change, so this always stays current.
+    if (this.gameMode === 'FNV') {
+      commands.push(`Pip.setTTW&&Pip.setTTW(${this.mapper?.isTTW?.('FNV') ? '!0' : '!1'})`);
+    }
+
     if (!this._inventorySyncPaused) {
       // Set player name
       if (player.name) {
@@ -750,10 +791,11 @@ export class SyncEngine extends EventEmitter {
 
       // Set all scalar attributes (hp = true health pool from the game;
       // maxHP = actual effective max, see the comment in _generateCommands)
-      const attrs = ['hp', 'maxHP', 'karma', 'perceptioncondition', 'endurancecondition', 'leftattackcondition', 'rightattackcondition', 'leftmobilitycondition', 'rightmobilitycondition'];
+      const attrs = ['hp', 'maxHP', 'dt', 'dr', 'karma', 'perceptioncondition', 'endurancecondition', 'leftattackcondition', 'rightattackcondition', 'leftmobilitycondition', 'rightmobilitycondition'];
       for (const attr of attrs) {
+        if (attr === 'dr' && !this._isTTW()) continue; // only the TTW DT/DR cycle shows it
         if (player[attr] !== undefined) {
-          const ephemeral = attr === 'hp' || attr === 'maxHP';
+          const ephemeral = attr === 'hp' || attr === 'maxHP' || attr === 'dt' || attr === 'dr';
           const value = attr === 'hp' ? Math.ceil(player[attr])
             : attr === 'maxHP' ? Math.round(player[attr])
             : player[attr];
@@ -799,16 +841,18 @@ export class SyncEngine extends EventEmitter {
         commands.push(...this._buildSetItemsBulkCommands(cat, addBatches.get(cat) || []));
       }
 
-      // Reconcile weapon DAM (skill/condition-adjusted display damage) the
-      // same way, instead of clearing *_DAM.INV and rewriting it whole.
-      const damEntries = [];
-      for (const item of inventory) {
-        if (item.dam == null) continue;
-        const formId = this._resolveFormId(item.formId);
-        if (formId === null) continue;
-        damEntries.push(this._toDamEntry(formId, item.condition, item.dam));
+      // Reconcile the per-item extras (weapon DAM, NV armor DT) the same way,
+      // instead of clearing each file and rewriting it whole.
+      for (const { cat, file, key } of this._itemExtras()) {
+        const entries = [];
+        for (const item of inventory) {
+          if (item[key] == null) continue;
+          const formId = this._resolveFormId(item.formId);
+          if (formId === null) continue;
+          entries.push(this._toExtraEntry(formId, item.condition, item[key]));
+        }
+        commands.push(...this._buildSetXBulkCommands(file || cat, entries));
       }
-      commands.push(...this._buildSetDamsBulkCommands(damEntries));
       // SYNC-DISABLED: calculateInvWeight() writes every .INV file
       // commands.push('player.calculateInvWeight()');
 
@@ -1230,50 +1274,69 @@ export class SyncEngine extends EventEmitter {
     return commands;
   }
 
+  /** ITEM_EXTRAS entries that apply to the current game mode. */
+  _itemExtras() {
+    return ITEM_EXTRAS.filter(
+      (x) => (!x.mode || x.mode === this.gameMode) && (!x.ttw || this._isTTW())
+    );
+  }
+
+  /** Tale of Two Wastelands: NV mode with Fallout3.esm loaded. */
+  _isTTW() {
+    return this.gameMode === 'FNV' && !!this.mapper?.isTTW?.('FNV');
+  }
+
   /**
-   * Per-(formId, condition) weapon DAM sync. The plugin tags each weapon
-   * inventory stack with `dam` (its game-calculated, skill+condition-adjusted
-   * display damage); we mirror only the deltas into the device's *_DAM.INV so
-   * a single degradation or skill change updates one entry rather than the
-   * whole file. Removed stacks have their DAM entry dropped so the file does
-   * not accumulate stale rows as weapons degrade into new condition stacks.
-   * Gated on inventory pause, since DAM tracks the inventory it describes.
+   * Per-(formId, condition) extras sync (see ITEM_EXTRAS). The plugin tags
+   * each inventory stack with its game-calculated value; we mirror only the
+   * deltas into the device's <CAT>_X.INV so a single degradation or skill
+   * change updates one entry rather than the whole file. Removed stacks have
+   * their entry dropped so the file does not accumulate stale rows as items
+   * degrade into new condition stacks. Gated on inventory pause, since the
+   * extras track the inventory they describe.
    */
-  _diffWeaponDamage(current, previous) {
+  _diffItemExtras(current, previous) {
     const commands = [];
     if (this._inventorySyncPaused) return commands;
 
-    const prevMap = new Map();
-    for (const it of previous) {
-      if (it && it.dam != null) prevMap.set(this._inventoryStackKey(it), it);
-    }
-
-    const setEntries = [];
-    for (const it of current) {
-      if (!it || it.dam == null) continue;
-      const formId = this._resolveFormId(it.formId);
-      if (formId === null) continue;
-      const key = this._inventoryStackKey(it);
-      const prev = prevMap.get(key);
-      if (!prev || prev.dam !== it.dam) {
-        setEntries.push(this._toDamEntry(formId, it.condition, it.dam));
+    const refresh = new Set();
+    for (const { cat, file, key } of this._itemExtras()) {
+      const prevMap = new Map();
+      for (const it of previous) {
+        if (it && it[key] != null) prevMap.set(this._inventoryStackKey(it), it);
       }
-      prevMap.delete(key);
-    }
-    // Batched so a skill change (which re-computes DAM for every carried
-    // weapon at once) costs one device file open + flash write per batch
-    // instead of one per weapon stack.
-    commands.push(...this._buildSetDamBatchCommands(setEntries));
 
-    const removeEntries = [];
-    for (const it of prevMap.values()) {
-      const formId = this._resolveFormId(it.formId);
-      if (formId === null) continue;
-      removeEntries.push([formId, this._normalizeItemCondition(it.condition)]);
-    }
-    commands.push(...this._buildRemoveDamBatchCommands(removeEntries));
+      const setEntries = [];
+      for (const it of current) {
+        if (!it || it[key] == null) continue;
+        const formId = this._resolveFormId(it.formId);
+        if (formId === null) continue;
+        const stackKey = this._inventoryStackKey(it);
+        const prev = prevMap.get(stackKey);
+        if (!prev || prev[key] !== it[key]) {
+          setEntries.push(this._toExtraEntry(formId, it.condition, it[key]));
+        }
+        prevMap.delete(stackKey);
+      }
 
-    if (commands.length) commands.push(REFRESH_WEAPON_DAM_CMD);
+      const removeEntries = [];
+      for (const it of prevMap.values()) {
+        const formId = this._resolveFormId(it.formId);
+        if (formId === null) continue;
+        removeEntries.push([formId, this._normalizeItemCondition(it.condition)]);
+      }
+
+      // Batched so a skill change (which re-computes DAM for every carried
+      // weapon at once) costs one device file open + flash write per batch
+      // instead of one per stack.
+      const catCommands = [
+        ...this._buildXBatchCommands('setx', file || cat, setEntries),
+        ...this._buildXBatchCommands('removex', file || cat, removeEntries),
+      ];
+      if (catCommands.length) refresh.add(cat);
+      commands.push(...catCommands);
+    }
+    for (const cat of refresh) commands.push(`player.refreshx('${cat}')`);
     return commands;
   }
 
@@ -1830,62 +1893,42 @@ export class SyncEngine extends EventEmitter {
     return `player.setformstacks(${formId},[${list}])`;
   }
 
-  _toDamEntry(formId, condition, dam) {
+  _toExtraEntry(formId, condition, value) {
     return [
       formId,
       this._normalizeItemCondition(condition),
-      Math.max(0, Math.round(dam)),
+      // Stored in the device row's 16-bit count field.
+      Math.min(65535, Math.max(0, Math.round(value))),
     ];
   }
 
   /**
-   * Batch form of setdam: `entries` is an array of [formId, cnd, dam] triples,
-   * split into player.setdams() commands of ≤MAX_DAM_BATCH entries each so the
-   * device opens and flash-writes *_DAM.INV once per batch rather than once
-   * per weapon stack (flash writes are the slowest device operation).
+   * Split extras entries ([formId,cnd,value] for setx, [formId,cnd] for
+   * removex) into player.<fn>('<cat>',[...]) commands of ≤MAX_X_BATCH entries,
+   * so the device opens and flash-writes the file once per batch rather than
+   * once per stack (flash writes are the slowest device operation).
    */
-  _buildSetDamBatchCommands(entries) {
+  _buildXBatchCommands(fn, cat, entries) {
     const commands = [];
-    for (let i = 0; i < entries.length; i += MAX_DAM_BATCH) {
-      const slice = entries.slice(i, i + MAX_DAM_BATCH);
-      commands.push(
-        `player.setdams([${slice.map((e) => `[${e[0]},${e[1]},${e[2]}]`).join(',')}])`
-      );
+    for (let i = 0; i < entries.length; i += MAX_X_BATCH) {
+      const slice = entries.slice(i, i + MAX_X_BATCH);
+      commands.push(`player.${fn}('${cat}',[${slice.map((e) => `[${e.join(',')}]`).join(',')}])`);
     }
     return commands;
   }
 
   /**
-   * Full-sync DAM reconciliation: entries is the complete desired *_DAM.INV
-   * contents, split into a begin/chunk x N/end sequence (device diffs in place
-   * - see setdamsbulk_begin/chunk/end) instead of clearing the file and
-   * rewriting it whole on every full sync.
+   * Full-sync extras reconciliation: entries is the complete desired contents
+   * of <cat>_X.INV, split into a begin/chunk x N/end sequence (device diffs in
+   * place and only writes if something changed - see setxbulk_begin/chunk/end)
+   * instead of clearing the file and rewriting it whole on every full sync.
    */
-  _buildSetDamsBulkCommands(entries) {
-    const commands = ['player.setdamsbulk_begin()'];
-    for (let i = 0; i < entries.length; i += MAX_DAM_BATCH) {
-      const slice = entries.slice(i, i + MAX_DAM_BATCH);
-      commands.push(
-        `player.setdamsbulk_chunk([${slice.map((e) => `[${e[0]},${e[1]},${e[2]}]`).join(',')}])`
-      );
-    }
-    commands.push('player.setdamsbulk_end()');
-    return commands;
-  }
-
-  /**
-   * Batch form of removedam: entries are [formId,cnd] pairs, split into
-   * player.removedams() commands of ≤MAX_DAM_BATCH entries each.
-   */
-  _buildRemoveDamBatchCommands(entries) {
-    const commands = [];
-    for (let i = 0; i < entries.length; i += MAX_DAM_BATCH) {
-      const slice = entries.slice(i, i + MAX_DAM_BATCH);
-      commands.push(
-        `player.removedams([${slice.map((e) => `[${e[0]},${e[1]}]`).join(',')}])`
-      );
-    }
-    return commands;
+  _buildSetXBulkCommands(cat, entries) {
+    return [
+      `player.setxbulk_begin('${cat}')`,
+      ...this._buildXBatchCommands('setxbulk_chunk', cat, entries),
+      `player.setxbulk_end('${cat}')`,
+    ];
   }
 
   /**

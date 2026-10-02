@@ -7,6 +7,15 @@
   const l = JSON.parse(fs.readFile(`MAP/${NV ? 'NV' : 'F3'}/MAPS.JSON`)),
     i = Object.keys(l),
     a = { x: 16, y: BR.y, w: 450, h: BR.h };
+  // TTW: the Capital Wasteland and FO3 DLC maps are listed too, as "F3/<key>"
+  // (read from MAP/F3 - see mapPath).
+  if (NV && Pip.settings.ttw)
+    try {
+      Object.keys(JSON.parse(fs.readFile('MAP/F3/MAPS.JSON'))).forEach((k) => i.push('F3/' + k));
+    } catch (e) {}
+  // A saved key from a list this mode/TTW state doesn't have (e.g. TTW since
+  // turned off) - fall back rather than open an undefined map.
+  i.indexOf(n) < 0 && (n = 'WMAP');
   let c,
     r,
     s = i.indexOf(n),
@@ -124,8 +133,12 @@
   }
   function v() {
     syncScanEffect();
-    const srcW = 2048 >> o,
-      px = 0 | p,
+    const srcW = 2048 >> o;
+    // Keep the camera inside this map at this zoom. A saved locx/locy from a
+    // larger zoom (or another map) otherwise puts alignedPX past srcW, giving
+    // blitFile a zero/negative width ("Width too large") on open.
+    (p = Math.max(0, Math.min(p, srcW - a.w))), (d = Math.max(0, Math.min(d, srcW - a.h)));
+    const px = 0 | p,
       py = 0 | d,
       mz = markerAtZoom();
     let sx, sy, showArrow = false, bx0, by0, bx1, by1;
@@ -236,10 +249,14 @@
       player.setav('locz', e));
   }
   function m(t, l) {
-    const i = 1 << o;
-    let a = `MAP/${NV ? 'NV' : 'F3'}/${t}${i > 1 ? '_' + i : ''}${l ? '_ICON' : ''}.MAP`;
+    const i = 1 << o,
+      // "F3/<key>" (TTW) reads from that folder instead of this mode's own.
+      sl = t.indexOf('/'),
+      dir = sl > 0 ? t.slice(0, sl) : NV ? 'NV' : 'F3',
+      k = sl > 0 ? t.slice(sl + 1) : t;
+    let a = `MAP/${dir}/${k}${i > 1 ? '_' + i : ''}${l ? '_ICON' : ''}.MAP`;
     (fs.statSync(a) ||
-      (a = `MAP/${NV ? 'NV' : 'F3'}/WMAP${l ? '_ICON' : ''}.MAP`),
+      (a = `MAP/${dir}/WMAP${l ? '_ICON' : ''}.MAP`),
       e && e.close(),
       (e = E.openFile(a, 'r')),
       (bgValid = !1), // new file/zoom/icons - the fast path's background is stale

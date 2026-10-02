@@ -82,7 +82,7 @@ ${C.bold}USAGE:${C.reset}
 ${C.bold}OPTIONS:${C.reset}
   --port <COM#>    Specify the Pip-Boy serial port (e.g., COM3)
   --game <mode>    Set game mode: F3 (Fallout 3) or FNV (New Vegas)
-  --no-game        Skip connecting to game pipe (manual mode only)
+  --no-game        Skip connecting to the game (manual mode only)
   --help, -h       Show this help message
 
 ${C.bold}INTERACTIVE COMMANDS:${C.reset}
@@ -378,7 +378,7 @@ async function main() {
   });
   pipeClient.on('error', (err) => {
     if (err.code !== 'ENOENT') {
-      logError(`Pipe: ${err.message}`);
+      logError(`Game connection: ${err.message}`);
     }
   });
 

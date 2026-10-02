@@ -75,6 +75,12 @@ const FO3_PIPBOY_PLUGIN_HIGH_BYTE = {
   'zeta.esm': 0x05,
 };
 
+// Tale of Two Wastelands runs FO3's plugins inside FNV. Their items keep
+// their FO3 Pip-Boy high byte with this bit added, so the device (in NV mode)
+// can tell them apart and look them up in DATA/F3. Must stay below 0x80: the
+// firmware's InvFile.get() rebuilds ids with a signed `<< 24`.
+const TTW_PIPBOY_FLAG = 0x40;
+
 const PIPBOY_PLUGIN_HIGH_BYTE_BY_MODE = {
   F3: FO3_PIPBOY_PLUGIN_HIGH_BYTE,
   FNV: FNV_PIPBOY_PLUGIN_HIGH_BYTE,
@@ -237,6 +243,11 @@ export class FormIdMapper {
     return true;
   }
 
+  /** True when Tale of Two Wastelands is loaded (FO3's master inside FNV). */
+  isTTW(gameMode) {
+    return gameMode === 'FNV' && this.loadOrderByName.has('fallout3.esm');
+  }
+
   _resolveByLoadOrder(gameFormId, gameMode) {
     const table = PIPBOY_PLUGIN_HIGH_BYTE_BY_MODE[gameMode];
     if (!table || this.loadOrder.size === 0) return null;
@@ -249,7 +260,11 @@ export class FormIdMapper {
     const pluginName = this.loadOrder.get(gameModIndex);
     if (!pluginName) return null;
 
-    const highByte = pipboyHighByteForPlugin(pluginName, gameModIndex, gameMode);
+    let highByte = pipboyHighByteForPlugin(pluginName, gameModIndex, gameMode);
+    if (highByte === null && this.isTTW(gameMode) && pluginName in FO3_PIPBOY_PLUGIN_HIGH_BYTE) {
+      // fallout3.esm's FO3 byte is "its own index", which natively is 0x00.
+      highByte = TTW_PIPBOY_FLAG | (FO3_PIPBOY_PLUGIN_HIGH_BYTE[pluginName] ?? 0);
+    }
     if (highByte === null) return null;
 
     return buildFormId(highByte, localId);
@@ -264,6 +279,16 @@ export class FormIdMapper {
 
     const localId = id & 0x00ffffff;
     const pipboyModIndex = (id >>> 24) & 0xff;
+
+    if (pipboyModIndex & TTW_PIPBOY_FLAG && this.isTTW(gameMode)) {
+      const fo3Byte = pipboyModIndex & ~TTW_PIPBOY_FLAG;
+      for (const [pluginName, fixed] of Object.entries(FO3_PIPBOY_PLUGIN_HIGH_BYTE)) {
+        if ((fixed ?? 0) !== fo3Byte) continue;
+        const gameModIndex = this.loadOrderByName.get(pluginName);
+        return gameModIndex === undefined ? null : buildFormId(gameModIndex, localId);
+      }
+      return null;
+    }
 
     for (const pluginName of Object.keys(table)) {
       const gameModIndex = this.loadOrderByName.get(pluginName);
@@ -381,6 +406,7 @@ export {
   FNV_PIPBOY_PLUGIN_HIGH_BYTE,
   FNV_PIPBOY_PLUGIN_OFFSETS,
   FO3_PIPBOY_PLUGIN_HIGH_BYTE,
+  TTW_PIPBOY_FLAG,
   normalizePluginName,
   parseFormId,
   buildFormId,

@@ -19,25 +19,38 @@
 /**
  * pipe-client.js
  * 
- * Windows Named Pipe client that connects to the FOSE/NVSE game plugin.
- * The game plugin creates a named pipe and writes JSON snapshots of the
- * player's current state. This client reads those snapshots and emits
+ * Client for the FOSE/NVSE game plugin's sync connection. The game plugin
+ * listens on a loopback TCP port (127.0.0.1 only) and writes JSON snapshots
+ * of the player's current state. This client reads those snapshots and emits
  * them for the sync engine to process.
+ *
+ * TCP rather than a Windows named pipe so the app can also run natively on
+ * Linux while the game runs under Wine/Proton: Wine maps Winsock onto real
+ * host sockets, but a Wine named pipe is only visible inside its own prefix.
+ * The port can be overridden with the PIPBOY_SYNC_PORT environment variable
+ * (set the same value for the game, e.g. in Steam launch options).
  * 
- * Auto-reconnects if the game is restarted or the pipe is broken.
+ * Auto-reconnects if the game is restarted or the connection is broken.
  */
 
 import { EventEmitter } from 'events';
 import net from 'net';
 
-const PIPE_NAME = '\\\\.\\pipe\\FalloutPipBoySync';
+const SYNC_HOST = '127.0.0.1';
+const DEFAULT_SYNC_PORT = 30101; // must match SYNC_PORT_DEFAULT in the plugins
 const RECONNECT_DELAY_MS = 3000;
 const MAX_BUFFER_SIZE = 1024 * 1024; // 1MB max buffer
+
+function syncPortFromEnv() {
+  const p = parseInt(process.env.PIPBOY_SYNC_PORT, 10);
+  return p > 0 && p < 65536 ? p : 0;
+}
 
 export class PipeClient extends EventEmitter {
   constructor(options = {}) {
     super();
-    this.pipeName = options.pipeName || PIPE_NAME;
+    this.host = options.host || SYNC_HOST;
+    this.port = options.port || syncPortFromEnv() || DEFAULT_SYNC_PORT;
     this.client = null;
     this.connected = false;
     this.autoReconnect = options.autoReconnect !== false;
@@ -48,14 +61,16 @@ export class PipeClient extends EventEmitter {
   }
 
   /**
-   * Connect to the game plugin's named pipe
+   * Connect to the game plugin's sync port
    */
   connect() {
     if (this._destroyed) return;
 
-    this.emit('status', `Connecting to game pipe: ${this.pipeName}`);
+    this.emit('status', `Connecting to game: ${this.host}:${this.port}`);
 
-    this.client = net.createConnection(this.pipeName, () => {
+    this.client = net.createConnection({ host: this.host, port: this.port }, () => {
+      // Snapshots/commands are small - send them now, not after Nagle's delay
+      this.client.setNoDelay(true);
       this.connected = true;
       this.buffer = '';
       this.emit('connected');
@@ -73,14 +88,17 @@ export class PipeClient extends EventEmitter {
     });
 
     this.client.on('error', (err) => {
-      if (err.code === 'ENOENT') {
-        // Pipe doesn't exist yet - game isn't running
+      if (err.code === 'ECONNREFUSED') {
+        // Nothing listening yet - game isn't running
         this.emit('status', 'Game not detected. Waiting for Fallout to start...');
-      } else {
+      } else if (err.code !== 'ECONNRESET' || !this.connected) {
+        // (A reset while connected is just the game closing - reported below.)
         this.emit('error', err);
       }
 
+      const wasConnected = this.connected;
       this.connected = false;
+      if (wasConnected) this.emit('disconnected');
       this._scheduleReconnect();
     });
 
@@ -132,7 +150,7 @@ export class PipeClient extends EventEmitter {
   }
 
   /**
-   * Send a command line to the game plugin (pipe is duplex).
+   * Send a command line to the game plugin (the connection is duplex).
    * Used to mirror Pip-Boy-initiated actions (use/equip items) in-game.
    * @param {string} line - e.g. "USE 0x0001519e"
    * @returns {boolean} true if the line was written
@@ -146,7 +164,7 @@ export class PipeClient extends EventEmitter {
   }
 
   /**
-   * Drop and re-open the pipe so the game plugin pushes a fresh snapshot
+   * Drop and re-open the connection so the game plugin pushes a fresh snapshot
    * (it only writes when the snapshot changes or the client reconnects).
    */
   async reconnect() {
@@ -169,7 +187,7 @@ export class PipeClient extends EventEmitter {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.removeListener('connected', onConnected);
-        reject(new Error('Game pipe reconnect timed out'));
+        reject(new Error('Game reconnect timed out'));
       }, 15000);
 
       const onConnected = () => {
@@ -217,11 +235,11 @@ export class PipeClient extends EventEmitter {
   }
 
   /**
-   * Check if the pipe is available (game is running)
+   * Check if the game plugin is listening (game is running)
    */
   async isPipeAvailable() {
     return new Promise((resolve) => {
-      const testClient = net.createConnection(this.pipeName, () => {
+      const testClient = net.createConnection({ host: this.host, port: this.port }, () => {
         testClient.destroy();
         resolve(true);
       });

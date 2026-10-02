@@ -1,7 +1,7 @@
 (function () {
-  const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/PERKS.DAT`),
+  const db = Pip.catData('PERKS'),
     inv = new InvFile(`INV/${NV ? 'NV' : 'F3'}/PERKS.INV`, { idOrder: db.ids }),
-    imgs = E.openFile(`DATA/${NV ? 'NV' : 'F3'}/PERKS.IMG`, 'r');
+    imgs = Pip.catImg('PERKS');
   let descScroll, active, editIndex, editItem, owned = !0;
   function itemCount(c) {
     return c !== void 0 ? c : inv.count;

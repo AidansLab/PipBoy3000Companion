@@ -427,9 +427,9 @@ export async function flashFirmware(bridge, options = {}) {
 
     // Ancillary to the firmware itself - a failure here must not fail an
     // otherwise-successful flash (see map-deploy.js for its own skip logic).
-    log('info', `Checking for fixed map updates (game mode: ${gameMode || 'unknown'})...`);
+    log('info', 'Checking for fixed map updates (Fallout 3 + New Vegas)...');
     try {
-      await deployFixedMapsIfNeeded(bridge, { log, gameMode });
+      await deployFixedMapsIfNeeded(bridge, { log });
     } catch (err) {
       log('warn', `Fixed map deployment failed (firmware itself uploaded fine): ${err.message}`);
     }

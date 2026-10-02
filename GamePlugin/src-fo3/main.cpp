@@ -20,7 +20,7 @@
  * main.cpp - FOSE Plugin for Fallout 3 Pip-Boy 3000 Sync
  *
  * This plugin hooks into Fallout 3 via FOSE to read the player's
- * stats and inventory, then writes JSON snapshots to a Windows Named Pipe
+ * stats and inventory, then writes JSON snapshots over a loopback TCP socket
  * for the companion app to consume.
  */
 
@@ -36,6 +36,8 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 
 #include "fo3_engine.h"
@@ -65,8 +67,8 @@
 // kMessage_MainGameLoop - see fo3_engine.h).
 #define PUMP_INTERVAL_MS 50
 
-// Named pipe path
-#define PIPE_NAME "\\\\.\\pipe\\FalloutPipBoySync"
+// Default loopback TCP port for the companion app (see SyncPort()).
+#define SYNC_PORT_DEFAULT 30101
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ACTOR VALUES (Fallout 3 - same numbering family as FNV, FNV later renamed
@@ -2007,15 +2009,86 @@ static void OnMainGameLoop() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// NAMED PIPE SERVER (Background Thread)
-// Creates a duplex named pipe: writes player snapshots to the companion app
-// and reads Pip-Boy-initiated commands (use/equip/unequip) back from it.
+// COMPANION SYNC SERVER (Background Thread)
+// Loopback TCP server (one client): writes player snapshots to the
+// companion app and reads Pip-Boy-initiated commands (use/equip/unequip)
+// back from it.
 // Identical protocol to the NV plugin. Also (re)tries attaching the
 // main-thread pump until the game window exists.
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// Loopback TCP endpoint for the companion app. TCP (not a named pipe) so the
+// app can also run natively on Linux while the game runs under Wine/Proton:
+// Wine maps Winsock onto real host sockets, but a Wine named pipe is only
+// visible inside its own prefix. Bound to 127.0.0.1 only - never reachable
+// from the network. Override the port with the PIPBOY_SYNC_PORT environment
+// variable (must match the companion app's).
+static int SyncPort() {
+  char buf[16];
+  DWORD n = GetEnvironmentVariableA("PIPBOY_SYNC_PORT", buf, sizeof(buf));
+  if (n > 0 && n < sizeof(buf)) {
+    int p = atoi(buf);
+    if (p > 0 && p < 65536)
+      return p;
+  }
+  return SYNC_PORT_DEFAULT;
+}
+
+static SOCKET OpenSyncListener(int port) {
+  SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if (s == INVALID_SOCKET)
+    return s;
+  // Stop another process from binding the same port alongside us.
+  // Best-effort: ignored where unsupported.
+  BOOL excl = TRUE;
+  setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *)&excl,
+             sizeof(excl));
+  sockaddr_in addr = {};
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  addr.sin_port = htons((u_short)port);
+  if (bind(s, (sockaddr *)&addr, sizeof(addr)) == SOCKET_ERROR ||
+      listen(s, 1) == SOCKET_ERROR) {
+    int err = WSAGetLastError();
+    closesocket(s);
+    WSASetLastError(err);
+    return INVALID_SOCKET;
+  }
+  return s;
+}
+
+// send() may write only part of a buffer - loop until all of it is out.
+// False means the client is gone.
+static bool SendAll(SOCKET s, const char *p, size_t len) {
+  while (len > 0) {
+    int n = send(s, p, (int)(len > 65536 ? 65536 : len), 0);
+    if (n == SOCKET_ERROR || n <= 0)
+      return false;
+    p += n;
+    len -= (size_t)n;
+  }
+  return true;
+}
+
+// >0 when s has data (or EOF/an incoming connection) ready, 0 on timeout,
+// <0 on error.
+static int SocketReadable(SOCKET s, long timeoutMs) {
+  fd_set r;
+  FD_ZERO(&r);
+  FD_SET(s, &r);
+  timeval tv = {timeoutMs / 1000, (timeoutMs % 1000) * 1000};
+  return select(0, &r, NULL, NULL, &tv);
+}
+
 void PipeServerThread() {
-  PipBoyLog("PIPE", "Pipe server thread started");
+  PipBoyLog("PIPE", "Sync server thread started");
+  WSADATA wsa;
+  if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+    PipBoyLog("PIPE", "WSAStartup failed - companion sync disabled");
+    return;
+  }
+  const int port = SyncPort();
+  SOCKET listener = INVALID_SOCKET;
   bool pumpLogged = false;
   while (g_running) {
     if (FO3TryInstallMainThreadPump(OnMainGameLoop, PUMP_INTERVAL_MS) &&
@@ -2024,130 +2097,129 @@ void PipeServerThread() {
       PipBoyLog("PUMP", "main-thread pump attached (hwnd found)");
     }
 
-    // Create pipe instance
-    HANDLE hPipe = CreateNamedPipeA(PIPE_NAME, PIPE_ACCESS_DUPLEX,
-                                    PIPE_TYPE_BYTE | PIPE_WAIT,
-                                    1,     // Max instances
-                                    65536, // Out buffer size (64KB)
-                                    4096,  // In buffer size (commands)
-                                    0,     // Default timeout
-                                    NULL   // Default security
-    );
-
-    if (hPipe == INVALID_HANDLE_VALUE) {
-      PipBoyLog("PIPE", "CreateNamedPipe failed, retrying");
-      Sleep(5000);
-      continue;
+    if (listener == INVALID_SOCKET) {
+      listener = OpenSyncListener(port);
+      if (listener == INVALID_SOCKET) {
+        PipBoyLog("PIPE", "listen on 127.0.0.1:%d failed (error %d), retrying",
+                  port, WSAGetLastError());
+        Sleep(5000);
+        continue;
+      }
+      PipBoyLog("PIPE", "Listening on 127.0.0.1:%d", port);
     }
 
-    // Wait for the companion app to connect (blocking)
-    BOOL connected =
-        ConnectNamedPipe(hPipe, NULL)
-            ? TRUE
-            : (GetLastError() == ERROR_PIPE_CONNECTED ? TRUE : FALSE);
+    // Wait for the companion app to connect, waking to check g_running
+    int ready = SocketReadable(listener, 250);
+    if (ready < 0) {
+      closesocket(listener);
+      listener = INVALID_SOCKET;
+      Sleep(1000);
+      continue;
+    }
+    if (ready == 0)
+      continue;
+    SOCKET client = accept(listener, NULL, NULL);
+    if (client == INVALID_SOCKET)
+      continue;
+    // Snapshots/commands are small - send them now, not after Nagle's delay
+    BOOL noDelay = TRUE;
+    setsockopt(client, IPPROTO_TCP, TCP_NODELAY, (const char *)&noDelay,
+               sizeof(noDelay));
 
-    if (connected) {
-      PipBoyLog("PIPE", "Client connected");
-      // Watchdog bookkeeping: if the pump never ticks while a client is
-      // connected and a game is loaded, say so loudly instead of failing
-      // silently (the pump is our only main-thread execution context).
-      LONG lastPumpTicks = FO3PumpTicks();
-      DWORD lastPumpCheck = GetTickCount();
+    PipBoyLog("PIPE", "Client connected");
+    // Watchdog bookkeeping: if the pump never ticks while a client is
+    // connected and a game is loaded, say so loudly instead of failing
+    // silently (the pump is our only main-thread execution context).
+    LONG lastPumpTicks = FO3PumpTicks();
+    DWORD lastPumpCheck = GetTickCount();
 
-      std::string lastSent;
-      std::string readBuffer;
-      while (g_running) {
-        if (FO3TryInstallMainThreadPump(OnMainGameLoop, PUMP_INTERVAL_MS) &&
-            !pumpLogged) {
-          pumpLogged = true;
-          PipBoyLog("PUMP", "main-thread pump attached (hwnd found)");
+    std::string lastSent;
+    std::string readBuffer;
+    while (g_running) {
+      if (FO3TryInstallMainThreadPump(OnMainGameLoop, PUMP_INTERVAL_MS) &&
+          !pumpLogged) {
+        pumpLogged = true;
+        PipBoyLog("PUMP", "main-thread pump attached (hwnd found)");
+      }
+      {
+        DWORD now = GetTickCount();
+        if (now - lastPumpCheck >= 5000) {
+          LONG ticks = FO3PumpTicks();
+          if (g_gameLoaded && ticks == lastPumpTicks)
+            PipBoyLog("PUMP", "WARNING: main-thread pump has not ticked in "
+                              "5s - commands/snapshots stalled");
+          lastPumpTicks = ticks;
+          lastPumpCheck = now;
         }
-        {
-          DWORD now = GetTickCount();
-          if (now - lastPumpCheck >= 5000) {
-            LONG ticks = FO3PumpTicks();
-            if (g_gameLoaded && ticks == lastPumpTicks)
-              PipBoyLog("PUMP", "WARNING: main-thread pump has not ticked in "
-                                "5s - commands/snapshots stalled");
-            lastPumpTicks = ticks;
-            lastPumpCheck = now;
-          }
-        }
+      }
 
-        if (g_saveLoadPending.exchange(false)) {
-          const char *loadMsg = "{\"event\":\"saveLoad\"}\n";
-          DWORD written = 0;
-          WriteFile(hPipe, loadMsg, (DWORD)strlen(loadMsg), &written, NULL);
-          PipBoyLog("PIPE-OUT", "saveLoad event");
-          lastSent.clear();
-        }
+      if (g_saveLoadPending.exchange(false)) {
+        const char *loadMsg = "{\"event\":\"saveLoad\"}\n";
+        if (!SendAll(client, loadMsg, strlen(loadMsg)))
+          break; // Client disconnected
+        PipBoyLog("PIPE-OUT", "saveLoad event");
+        lastSent.clear();
+      }
 
-        if (g_mainMenuPending.exchange(false)) {
-          const char *mainMenuMsg = "{\"event\":\"mainMenu\"}\n";
-          DWORD written = 0;
-          WriteFile(hPipe, mainMenuMsg, (DWORD)strlen(mainMenuMsg), &written,
-                    NULL);
-          PipBoyLog("PIPE-OUT", "mainMenu event");
-          lastSent.clear();
-          {
-            std::lock_guard<std::mutex> lock(g_snapshotMutex);
-            g_latestSnapshot.clear();
-          }
-        }
-
-        std::string snapshot;
+      if (g_mainMenuPending.exchange(false)) {
+        const char *mainMenuMsg = "{\"event\":\"mainMenu\"}\n";
+        if (!SendAll(client, mainMenuMsg, strlen(mainMenuMsg)))
+          break; // Client disconnected
+        PipBoyLog("PIPE-OUT", "mainMenu event");
+        lastSent.clear();
         {
           std::lock_guard<std::mutex> lock(g_snapshotMutex);
-          snapshot = g_latestSnapshot;
+          g_latestSnapshot.clear();
         }
+      }
 
-        if (!snapshot.empty() && snapshot != lastSent) {
-          PipBoyLogSnapshotOut(snapshot);
-          lastSent = snapshot;
-          snapshot += "\n"; // Newline delimiter for the client parser
-          DWORD written;
-          BOOL ok = WriteFile(hPipe, snapshot.c_str(), (DWORD)snapshot.size(),
-                              &written, NULL);
-          if (!ok)
-            break; // Client disconnected
-        }
+      std::string snapshot;
+      {
+        std::lock_guard<std::mutex> lock(g_snapshotMutex);
+        snapshot = g_latestSnapshot;
+      }
 
-        // Drain any incoming commands (non-blocking peek + read)
-        DWORD bytesAvailable = 0;
-        if (!PeekNamedPipe(hPipe, NULL, 0, NULL, &bytesAvailable, NULL)) {
-          break; // Pipe broken - client disconnected
-        }
-        if (bytesAvailable > 0) {
-          char buf[1024];
-          DWORD bytesRead = 0;
-          if (ReadFile(hPipe, buf, sizeof(buf) - 1, &bytesRead, NULL) &&
-              bytesRead > 0) {
-            readBuffer.append(buf, bytesRead);
+      if (!snapshot.empty() && snapshot != lastSent) {
+        PipBoyLogSnapshotOut(snapshot);
+        lastSent = snapshot;
+        snapshot += "\n"; // Newline delimiter for the client parser
+        if (!SendAll(client, snapshot.c_str(), snapshot.size()))
+          break; // Client disconnected
+      }
 
-            // Queue complete newline-delimited command lines
-            size_t newline;
-            while ((newline = readBuffer.find('\n')) != std::string::npos) {
-              std::string line = readBuffer.substr(0, newline);
-              readBuffer.erase(0, newline + 1);
-              if (!line.empty() && line.back() == '\r')
-                line.pop_back();
-              PipBoyLog("PIPE-IN", "%s", line.c_str());
-              if (line == "SYNC_LOCK") {
-                g_syncLockRequested = true;
-                PipBoyLog("SYNC", "SYNC_LOCK received");
-              } else if (line == "SYNC_UNLOCK") {
-                g_syncLockRequested = false;
-                PipBoyLog("SYNC", "SYNC_UNLOCK received");
-              } else if (!line.empty()) {
-                std::lock_guard<std::mutex> lock(g_commandMutex);
-                g_commandQueue.push_back(line);
-              }
-            }
+      // Drain any incoming commands (non-blocking check + read)
+      int readable = SocketReadable(client, 0);
+      if (readable < 0)
+        break; // Socket broken - client disconnected
+      if (readable > 0) {
+        char buf[1024];
+        int bytesRead = recv(client, buf, sizeof(buf) - 1, 0);
+        if (bytesRead <= 0)
+          break; // Client closed the connection
+        readBuffer.append(buf, bytesRead);
+
+        // Queue complete newline-delimited command lines
+        size_t newline;
+        while ((newline = readBuffer.find('\n')) != std::string::npos) {
+          std::string line = readBuffer.substr(0, newline);
+          readBuffer.erase(0, newline + 1);
+          if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+          PipBoyLog("PIPE-IN", "%s", line.c_str());
+          if (line == "SYNC_LOCK") {
+            g_syncLockRequested = true;
+            PipBoyLog("SYNC", "SYNC_LOCK received");
+          } else if (line == "SYNC_UNLOCK") {
+            g_syncLockRequested = false;
+            PipBoyLog("SYNC", "SYNC_UNLOCK received");
+          } else if (!line.empty()) {
+            std::lock_guard<std::mutex> lock(g_commandMutex);
+            g_commandQueue.push_back(line);
           }
         }
-
-        Sleep(PIPE_POLL_INTERVAL_MS);
       }
+
+      Sleep(PIPE_POLL_INTERVAL_MS);
     }
 
     // Companion disconnected - drop any sync lock so the player isn't left
@@ -2156,10 +2228,12 @@ void PipeServerThread() {
     g_syncLockRequested = false;
     PipBoyLog("PIPE", "Client disconnected");
 
-    DisconnectNamedPipe(hPipe);
-    CloseHandle(hPipe);
+    shutdown(client, SD_BOTH);
+    closesocket(client);
   }
-  PipBoyLog("PIPE", "Pipe server thread stopped");
+  if (listener != INVALID_SOCKET)
+    closesocket(listener);
+  PipBoyLog("PIPE", "Sync server thread stopped");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2305,7 +2379,7 @@ __declspec(dllexport) bool FOSEPlugin_Load(const FOSEInterface *fose) {
 
   LookupGameCommands();
 
-  // Start the Named Pipe server on a background thread
+  // Start the companion sync server on a background thread
   g_pipeThread = std::thread(PipeServerThread);
   g_pipeThread.detach();
   PipBoyLog("LOAD", "Plugin loaded (version %d)", PLUGIN_VERSION);

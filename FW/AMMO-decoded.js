@@ -1,8 +1,8 @@
 (function (params) {
   params || (params = {});
-  const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/AMMO.DAT`),
+  const db = Pip.catData('AMMO'),
     inv = new InvFile(`INV/${NV ? 'NV' : 'F3'}/AMMO.INV`, { idOrder: db.ids }),
-    imgs = E.openFile(`DATA/${NV ? 'NV' : 'F3'}/AMMO.IMG`, 'r');
+    imgs = Pip.catImg('AMMO');
   // Ammo selection (companion mode only): the game tells us which ammo the
   // equipped weapon can use (ammoUsable) and which is loaded right now
   // (ammoActive). We mark the active one, dim the ones the weapon can't use,

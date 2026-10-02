@@ -87,6 +87,12 @@ const WORLDSPACE_MAP = {
   F3: {
     'fallout3.esm': {
       0x00003c: { mapKey: 'WMAP', scale: 1, offsetX: 0, offsetY: 0, centerX: 0, centerY: 4096 }, // Wasteland (root)
+      // Tale of Two Wastelands' Capital Wasteland: TTW's converted Fallout3.esm
+      // adds this as a new worldspace in place of vanilla's Wasteland (0x3C);
+      // vanilla FO3 has no 0x07EA1F, so this can't match outside TTW. Uses the
+      // vanilla Wasteland transform, assuming TTW kept the same cell grid
+      // (confirmed by player position only, not ESM data).
+      0x07ea1f: { mapKey: 'WMAP', scale: 1, offsetX: 0, offsetY: 0, centerX: 0, centerY: 4096 }, // TTWWasteland
       0x000a74: { mapKey: 'WMAP', scale: 1, offsetX: 0, offsetY: 0, centerX: 0, centerY: -14336 }, // MegatonWorld
       0x018de6: { mapKey: 'WMAP', scale: 0.5, offsetX: 2048, offsetY: 6076, centerX: 55296, centerY: -20480 }, // DCworld01 (Chevy Chase)
       0x01a25d: { mapKey: 'WMAP', scale: 0.3499999940395355, offsetX: -4000, offsetY: 10000, centerX: 34816, centerY: -45056 }, // DCworld18 (Arlington National Cemetery)
@@ -171,22 +177,34 @@ function clamp(v, min, max) {
  * @param {number} worldspaceFormId - 0 means indoors/no worldspace
  * @param {Map<number,string>} loadOrder - gameModIndex -> normalized plugin name (FormIdMapper.loadOrder)
  * @param {'F3'|'FNV'} gameMode
- * @returns {{mapKey: string, transform: {scale:number, offsetX:number, offsetY:number, centerX:number, centerY:number}}|null}
+ * @returns {{mapKey: string, calibMode: 'F3'|'FNV', calibKey: string, transform: {scale:number, offsetX:number, offsetY:number, centerX:number, centerY:number}}|null}
+ *   mapKey is what the device opens; calibMode/calibKey pick the
+ *   MAP_CALIBRATION entry for worldToMapPixel (they differ from gameMode/
+ *   mapKey only for TTW, below).
  */
 export function resolveWorldspace(worldspaceFormId, loadOrder, gameMode) {
   if (!worldspaceFormId) return null;
-  const pluginTable = WORLDSPACE_MAP[gameMode];
-  if (!pluginTable || !loadOrder) return null;
+  if (!WORLDSPACE_MAP[gameMode] || !loadOrder) return null;
   const modIndex = (worldspaceFormId >>> 24) & 0xff;
   const pluginName = loadOrder.get(modIndex);
   if (!pluginName) return null;
-  const localTable = pluginTable[pluginName];
+  let tableMode = gameMode;
+  let localTable = WORLDSPACE_MAP[gameMode][pluginName];
+  // Tale of Two Wastelands: FO3's plugins loaded in FNV. Their worldspaces
+  // keep FO3's form IDs, so they resolve through the F3 table/calibration,
+  // and the device reads the map from its F3 folder ("F3/<key>").
+  if (!localTable && gameMode === 'FNV' && WORLDSPACE_MAP.F3[pluginName]) {
+    tableMode = 'F3';
+    localTable = WORLDSPACE_MAP.F3[pluginName];
+  }
   if (!localTable) return null; // untracked plugin - true interior or unaudited
   const localFormId = worldspaceFormId & 0x00ffffff;
   const entry = localTable[localFormId];
   if (!entry) return null; // tracked plugin, unrecognized worldspace - treat like a true interior
   return {
-    mapKey: entry.mapKey,
+    mapKey: tableMode === gameMode ? entry.mapKey : `F3/${entry.mapKey}`,
+    calibMode: tableMode,
+    calibKey: entry.mapKey,
     transform: { scale: entry.scale, offsetX: entry.offsetX, offsetY: entry.offsetY, centerX: entry.centerX, centerY: entry.centerY },
   };
 }

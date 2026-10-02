@@ -5,9 +5,9 @@
   // know that answer, so the device would show it consumed regardless.
   // Blocked outright while connected; only reachable via the game's own
   // inventory menu, where the real dialog and its answer are unambiguous.
-  const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/AID.DAT`),
+  const db = Pip.catData('AID'),
     inv = new InvFile(`INV/${NV ? 'NV' : 'F3'}/AID.INV`, { idOrder: db.ids }),
-    imgs = E.openFile(`DATA/${NV ? 'NV' : 'F3'}/AID.IMG`, 'r'),
+    imgs = Pip.catImg('AID'),
     clampScrollerSelection = (count) => {
       if (count <= 0) return;
       const maxIdx = count - 1;

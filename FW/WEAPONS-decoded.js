@@ -1,45 +1,19 @@
 (function (params) {
   params || (params = {});
-  const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/WEAPONS.DAT`),
-    ammoDb = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/AMMO.DAT`),
+  const db = Pip.catData('WEAPONS'),
+    ammoDb = Pip.catData('AMMO'),
     inv = new InvFile(`INV/${NV ? 'NV' : 'F3'}/WEAPONS.INV`, {
       idOrder: db.ids
     }),
     ammoInv = new InvFile(`INV/${NV ? 'NV' : 'F3'}/AMMO.INV`),
     ammoIds = ammoInv.ids(),
-    imgs = E.openFile(`DATA/${NV ? 'NV' : 'F3'}/WEAPONS.IMG`, 'r');
-  // Dynamic DAM: the companion mirrors the game's skill/condition-adjusted weapon
-  // damage into a side *_DAM.INV (damage stored in each entry's cnt), keyed by
-  // (formId, condition). Load it into a lookup so getItem can override the static
-  // DAT damage; reloaded on sync events that may change it. Falls back to DAT.
-  const damFile = `INV/${NV ? 'NV' : 'F3'}/${NV ? 'NV' : 'F3'}_DAM.INV`;
-  const loadDamMap = () => {
-    // Fast path: boot0 keeps global._damCache in sync after every setdam/
-    // removedam/cleardam write. _damCache is declared via global._damCache (not
-    // var) so this IIFE and WEAPONS.JS share the exact same reference.
-    if (typeof _damCache !== 'undefined' && _damCache !== null) return _damCache;
-    // First load (boot before any setdam call, or after a failed clear): read
-    // from flash once and prime the shared cache so future damrefresh events hit
-    // the fast path.
-    const m = {};
-    try {
-      if (!require('fs').statSync(damFile)) {
-        try {
-          require('fs').writeFileSync(damFile, '');
-        } catch (e) {}
-      }
-      const di = new InvFile(damFile);
-      for (let i = 0; i < di.count; i++) {
-        const e = di.get(i);
-        if (e) m[e.id + ':' + (e.cnd || 100)] = e.cnt;
-      }
-    } catch (e) {}
-    // Write back to the global so setdam/removedam/cleardam and future calls to
-    // loadDamMap all converge on the same object.
-    global._damCache = m;
-    return m;
-  };
-  let damMap = loadDamMap();
+    imgs = Pip.catImg('WEAPONS');
+  let ammoNames;
+  // Dynamic DAM: game-calculated (skill/condition-adjusted) weapon damage the
+  // companion mirrors into WEAPONS_X.INV, keyed by (formId, condition). Held
+  // as raw bytes only while this menu is open (see Pip.xLoad); falls back to
+  // the DAT damage when there's no entry.
+  let xs = Pip.xLoad('WEAPONS');
   let active = player.getav('equippedWeap');
   let activeCnd = player.getav('equippedWeapCnd');
   const cndMode = () => cmode;
@@ -97,14 +71,27 @@
       if (v.part === 0) item.activ = !0;
       else if (v.part !== 1 && matches) item.activ = !0;
       item.cnd = it.cnd;
-      const dyn = damMap[it.id + ':' + (it.cnd || 100)];
+      const dyn = Pip.xGet(xs, it.id, it.cnd);
       if (dyn != null) item.dam = dyn;
       const dispCnt = v.part === 0 ? 1 : v.part === 1 ? it.cnt - 1 : it.cnt;
       item.dispCnt = dispCnt;
       if (dispCnt > 1) item.txt = `${item.txt} (${dispCnt})`;
       if (item.ammo) {
-        const ammo = ammoDb.getId(item.ammo),
-          i = ammoIds.indexOf(item.ammo),
+        const ammo = ammoDb.getId(item.ammo);
+        let i = ammoIds.indexOf(item.ammo);
+        // TTW: FO3 weapons (flagged ammo id) fire the NV version of their
+        // ammo. Fallout3.esm ammo (0x40 high byte) usually shares its form ID
+        // with the NV ammo (e.g. .44 Magnum 0x0002937E), so try the unflagged
+        // id first, then match by name. Names are built once per menu, only
+        // if needed.
+        if (i < 0 && item.ammo >= 0x40000000) {
+          if (item.ammo >>> 24 === 0x40) i = ammoIds.indexOf(item.ammo - 0x40000000);
+          if (i < 0) {
+            ammoNames || (ammoNames = ammoIds.map((id) => ammoDb.getId(id).txt));
+            i = ammoNames.indexOf(ammo.txt);
+          }
+        }
+        const
           am = ammoInv.get(i),
           ac = E.clip((am ? am.cnt : 0) - item.cl, 0, am ? am.cnt : 0);
         item.ammo = `${ammo.stxt ? ammo.stxt : ammo.txt} (${(am ? am.cnt : 0) - ac}/${ac})`;
@@ -221,9 +208,9 @@
       scroller.updateItemCount(virt.length);
       if (virt.length !== prevLen) scroller.render({ listOnly: !0 });
     } else if (action === 'render') scroller.render(arg);
-    else if (action === 'damrefresh') {
+    else if (action === 'xrefresh') {
       // DAM values changed (degradation/skill) - re-read and repaint the rows.
-      damMap = loadDamMap();
+      xs = Pip.xLoad('WEAPONS');
       scroller.render({ listOnly: !1 });
     } else if (action === 'refresh') {
       virt = buildVirt();

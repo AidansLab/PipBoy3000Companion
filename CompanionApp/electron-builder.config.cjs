@@ -23,6 +23,11 @@ module.exports = {
       from: "../fixed-maps",
       to: "fixed-maps",
       filter: ["**/*.MAP"]
+    },
+    {
+      from: "../fixed-maps-f3",
+      to: "fixed-maps-f3",
+      filter: ["**/*.MAP"]
     }
   ],
   win: {

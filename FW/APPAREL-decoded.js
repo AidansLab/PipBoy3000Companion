@@ -1,10 +1,10 @@
 (function (params) {
   params || (params = {});
-  const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/APPAREL.DAT`),
+  const db = Pip.catData('APPAREL'),
     inv = new InvFile(`INV/${NV ? 'NV' : 'F3'}/APPAREL.INV`, {
       idOrder: db.ids
     }),
-    imgs = E.openFile(`DATA/${NV ? 'NV' : 'F3'}/APPAREL.IMG`, 'r');
+    imgs = Pip.catImg('APPAREL');
   function normalizeActive(raw) {
     if (!raw || typeof raw.length !== 'number') return [0, 0, 0, 0];
     return [raw[0] || 0, raw[1] || 0, raw[2] || 0, raw[3] || 0];
@@ -14,6 +14,33 @@
   const readActiveCnd = () =>
     cndMode() ? player.getav('equippedApparelCnd') || [] : [];
   let activeCnd = readActiveCnd();
+  // NV: game-calculated armor DT (condition-adjusted, correct under TTW) the
+  // companion mirrors into APPAREL_X.INV. Raw bytes, held only while this
+  // menu is open (see Pip.xLoad); falls back to the DAT DT.
+  let xs = NV ? Pip.xLoad('APPAREL') : null,
+    // DR is only ever shown by the TTW DT/DR cycle (boot0).
+    xsDr = NV && Pip.settings.ttw ? Pip.xLoad('APPAREL_DR') : null;
+  const dtOf = (id, cnd, item) => {
+    const x = Pip.xGet(xs, id, cnd);
+    return x != null ? x : item && item.dt;
+  };
+  const drOf = (id, cnd, item) => {
+    const x = Pip.xGet(xsDr, id, cnd);
+    return x != null ? x : item && item.dr;
+  };
+  // The DT block: NV shows DT, or DR while boot0's DT/DR cycle is on DR
+  // (Pip.dtdrShowDR); FO3 only has DR.
+  let shownItem;
+  const renderDtDr = (item) => {
+    const dr = !NV || Pip.dtdrShowDR;
+    Pip.renderBlock(210, 192, 80, dr ? 'DR' : 'DT', (dr ? item.dr : item.dt) || '--');
+  };
+  const onDtdr = () => {
+    if (!shownItem) return;
+    h.clearRect(210, 193, 289, 218); // just the block's text, under its top line
+    renderDtDr(shownItem);
+  };
+  NV && Pip.settings.ttw && Pip.on('dtdr', onDtdr);
   // Virtual rows: a worn item from a multi-count stack is split off in-game, so
   // show the equipped copy as its own 1-count row with the remaining (cnt-1)
   // directly below it. Only while connected (cmode); disconnected stays 1:1.
@@ -43,12 +70,20 @@
   const vAt = (n) => virt[n] || { realN: n, part: -1 };
   const updateDtDr = () => {
     if (NV) {
-      let newDT = 0;
-      for (let i = 0; i < active.length; i++) {
-        const item = db.getId(active[i]);
-        item && item.dt && (newDT += item.dt);
+      // Connected: the game sends its own total DT (incl. perks) - keep it.
+      if (!cmode) {
+        let newDT = 0, newDR = 0;
+        for (let i = 0; i < active.length; i++) {
+          if (!active[i]) continue;
+          const item = db.getId(active[i]),
+            dt = dtOf(active[i], activeCnd[i], item),
+            dr = drOf(active[i], activeCnd[i], item);
+          dt && (newDT += dt);
+          dr && (newDR += dr);
+        }
+        player.setav('dt', newDT);
+        player.setav('dr', newDR);
       }
-      player.setav('dt', newDT);
     } else {
       let newDR = 0;
       for (let i = 0; i < active.length; i++) {
@@ -74,6 +109,7 @@
       if (v.part === 0) item.activ = !0;
       else if (v.part !== 1 && slotMatch) item.activ = !0;
       item.cnd = it.cnd;
+      NV && ((item.dt = dtOf(it.id, it.cnd, item)), (item.dr = drOf(it.id, it.cnd, item)));
       const dispCnt = v.part === 0 ? 1 : v.part === 1 ? it.cnt - 1 : it.cnt;
       item.dispCnt = dispCnt;
       if (dispCnt > 1) item.txt = `${item.txt} (${dispCnt})`;
@@ -81,13 +117,8 @@
     },
     width: 185,
     render: (item) => {
-      (Pip.renderBlock(
-        210,
-        192,
-        80,
-        NV ? 'DT' : 'DR',
-        (NV ? item.dt : item.dr) || '--'
-      ),
+      ((shownItem = item),
+        renderDtDr(item),
         Pip.renderBlock(296, 192, 80, 'WG', item.wt || '--'),
         Pip.renderBlock(382, 192, 80, 'VAL', Math.round(item.val * Math.pow((item.cnd / 100), 1.5) * (item.dispCnt || 1)) || '--'),
         Pip.renderBlock(210, 220, 80, 'CND', ''),
@@ -189,7 +220,11 @@
       scroller.updateItemCount(virt.length);
       if (virt.length !== prevLen) scroller.render({ listOnly: !0 });
     } else if (action === 'render') scroller.render(arg);
-    else if (action === 'refresh') {
+    else if (action === 'xrefresh') {
+      xs = NV ? Pip.xLoad('APPAREL') : null;
+      xsDr = NV && Pip.settings.ttw ? Pip.xLoad('APPAREL_DR') : null;
+      scroller.render({ listOnly: !1 });
+    } else if (action === 'refresh') {
       virt = buildVirt();
       scroller.updateItemCount(virt.length);
       scroller.render(arg);
@@ -212,6 +247,7 @@
       id: 'APPAREL',
       remove: () => {
         (Pip.removeListener('scroller', onScroller),
+          Pip.removeListener('dtdr', onDtdr),
           delete Pip.inv,
           scroller.remove(),
           player.sync(),

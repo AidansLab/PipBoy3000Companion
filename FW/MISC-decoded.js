@@ -1,8 +1,8 @@
 (function (params) {
   params || (params = {});
-  const db = new DataFile(`DATA/${NV ? 'NV' : 'F3'}/MISC.DAT`),
+  const db = Pip.catData('MISC'),
     inv = new InvFile(`INV/${NV ? 'NV' : 'F3'}/MISC.INV`, { idOrder: db.ids }),
-    imgs = E.openFile(`DATA/${NV ? 'NV' : 'F3'}/MISC.IMG`, 'r');
+    imgs = Pip.catImg('MISC');
   let apps = [];
   try {
     fs.readdirSync('APPINFO').forEach((f) => {

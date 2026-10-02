@@ -23,14 +23,14 @@ Sync your **Fallout: New Vegas** and **Fallout 3** player stats and inventory to
 ## How It Works
 
 ```
-┌──────────────────┐    Named Pipe     ┌──────────────────┐    USB Serial    ┌──────────────────┐
+┌──────────────────┐  TCP (localhost)  ┌──────────────────┐    USB Serial    ┌──────────────────┐
 │   Fallout 3/NV   │ ───────────────── │  Companion App   │ ──────────────── │  Pip-Boy 3000    │
 │  (FOSE/NVSE DLL) │  JSON snapshots   │    (Node.js)     │    JS commands   │   (Espruino)     │
 └──────────────────┘                   └──────────────────┘                  └──────────────────┘
 ```
 
 1. **Game Plugin** (C++ DLL) hooks into Fallout via FOSE/xNVSE, reads player state on update
-2. **Companion App** (Node.js) receives JSON snapshots over a Windows Named Pipe, diffs against previous state
+2. **Companion App** (Node.js) receives JSON snapshots over a local TCP connection (127.0.0.1, port 30101), diffs against previous state
 3. **Pip-Boy commands** Espruino commands are sent over USB serial to update the device
 
 ### You can find an in depth feature walkthrough [here](https://www.youtube.com/watch?v=HOHzIO06UVo)
@@ -67,6 +67,7 @@ Sync your **Fallout: New Vegas** and **Fallout 3** player stats and inventory to
 - YUP is known to cause issues because it changes Form IDs on some vanilla items.
 - XP does not sync on every change, and only updates on a full sync, load sync, or on level up.
 - Bleak Venom is not usable from the Pip-Boy due to issues with how the game handles usage.
+- Version 1.1.0 added support for Tale of Two Wastelands, however, due to the nature of the Pip-Boy, restored cut items, and custom items will not show on the Pip-Boy. Also, slots 40-45 of your mod order should not be populated with mods that add items.
 
 ## Building From Source
 
@@ -108,7 +109,7 @@ cmake -S . -B build-nv -A Win32 -DBUILD_FO3_PLUGIN=OFF
 cmake --build build-nv --config Release
 ```
 - Or open `build-nv\FalloutPipBoySync.sln` and Build -> Build Solution
-- The DLL will be built to `build-nv\Release\FalloutPipBoySyncNV.dll` (install to `Data\NVSE\Plugins\`)
+- The DLL will be built to `build-nv\Release\Pip-Boy_Sync_NV_by_Aidans_Lab.dll` (install to `Data\NVSE\Plugins\`)
 
 ### Fallout 3 (FOSE)
 ```bash
@@ -116,14 +117,34 @@ cmake -S . -B build-fo3 -A Win32 -DBUILD_NV_PLUGIN=OFF
 cmake --build build-fo3 --config Release
 ```
 - Or open `build-fo3\FalloutPipBoySync.sln` and Build -> Build Solution
-- The DLL will be built to `build-fo3\Release\FalloutPipBoySyncF3.dll` (install to `Data\FOSE\Plugins\`)
+- The DLL will be built to `build-fo3\Release\Pip-Boy_Sync_F3_by_Aidans_Lab.dll` (install to `Data\FOSE\Plugins\`)
+
+### Notes Before Contributing
+Contributing is fully encouraged, but before opening a PR, there are a few tests you should run to make sure it's ready for release. Make sure your PR includes the following:
+- Memory usage before and after your addition(s) in STATS, ITEMS, and DATA
+- The built size of any firmware file you changed (printed by `npm run build-fw`), before and after
+- A rough estimation of the impact on initial and live sync speed, and/or extra data being pushed
+- A detailed explanation of what your addition(s) does, and how it does it
+
+Also make sure to confirm you've tested:
+- Both Fallout 3 and New Vegas modes, including switching modes in Settings without rebooting
+- TTW compatibility, if your addition(s) touches anything game sync related
+- A full sync (connecting, loading a save) as well as live changes while playing
+- The Pip-Boy while disconnected, including pre-sync data restore
+- No errors in the companion log or on the device while using the Pip-Boy
+
+Guidelines:
+- Keep memory resident on the Pip-Boy to a minimum - avoid global caches, and free anything a menu loads when it closes
+- Only write to the SD card when something actually changed
+- Verify game engine behavior against the game itself, not just the script extender headers
+- Don't commit any of The Wand Company's stock data files, or assets
 
 ## Roadmap
-- Item mod display support (+)
 - ~~Map syncing~~
 - Linux Support
 - ~~FO3 DLC~~
 - ~~Fix undiscovered factions staying hidden on pre-sync data restore~~
+- ~~TTW support~~
 
 ### Credits
 
@@ -132,6 +153,7 @@ cmake --build build-fo3 --config Release
 - Script extenders: [xNVSE](https://www.nexusmods.com/newvegas/mods/67883) and [FOSE](https://fose.silverlock.org/) teams
 - Helpful Resources: [JIP-LN-NVSE](https://github.com/jazzisparis/JIP-LN-NVSE) and [Command Extender](https://www.nexusmods.com/fallout3/mods/23682)
 - Testers: Special thanks to [Theeohn](https://www.youtube.com/channel/UCEPD_e4JH7xFLzdrPGUM_Gg) and Jim D for initial testing, as well as BeanutPudder, Ferehn, and Lore for later testing.
+- Special thanks to Nikita and Klaus for initial investigations into TTW support.
 
 ## License
 

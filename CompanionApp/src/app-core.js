@@ -215,7 +215,7 @@ export class CompanionApp extends EventEmitter {
       }
       await this.pipeClient.reconnect();
     } catch (err) {
-      this.log('warn', `Could not refresh game pipe: ${err.message}`);
+      this.log('warn', `Could not refresh game connection: ${err.message}`);
       const snap = this.pipeClient.lastSnapshot;
       if (snap) {
         this.syncEngine.forceFullSync();
@@ -486,7 +486,7 @@ export class CompanionApp extends EventEmitter {
     });
     this.pipeClient.on('error', (err) => {
       if (err.code !== 'ENOENT') {
-        this.log('error', `Pipe: ${err.message}`);
+        this.log('error', `Game connection: ${err.message}`);
       }
     });
   }
