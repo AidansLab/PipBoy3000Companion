@@ -81,6 +81,76 @@ const FO3_PIPBOY_PLUGIN_HIGH_BYTE = {
 // firmware's InvFile.get() rebuilds ids with a signed `<< 24`.
 const TTW_PIPBOY_FLAG = 0x40;
 
+// Game items the Pip-Boy's DAT knows under a different form ID, as
+// [gamePlugin, gameLocalId, datPlugin, datLocalId] (plugins by lowercase file
+// name; the DAT's plugin can differ from the game item's). Game -> Pip-Boy
+// always sends the DAT's ID; Pip-Boy -> game sends the DAT's item if the
+// player holds it, otherwise whichever listed variant they hold (see
+// setHeldItems), otherwise the DAT's item. Variants of one item have the same
+// name and are never meant to be held together except where noted below.
+//   Neural Interface Suit: the DAT only has the in-simulation suit
+//     (DLC02ArmorSimSuit 00A6C0); leaving the sim swaps it for the otherwise
+//     identical DLC02ArmorSimSuit2 (00BB28).
+//   Operation Anchorage rewards: the DAT has the Capital Wasteland versions
+//     (...Wasteland); inside the simulation the player holds the sim versions
+//     of the same items (e.g. DLC02WeapGaussRifle 003A04 vs 00C07D).
+//   Anchorage sim copies of base-game and Zeta items: the sim hands the player
+//     its own DLC02* copy of e.g. the 10mm Pistol; the DAT only has the
+//     original.
+//   Other duplicates (several records, one name): head wraps, Merc outfits,
+//     the Armored Vault 101 Jumpsuit, Broken Steel's Composite Recon Helmet,
+//     Zeta's Sheriff's Hat. Players can hold these together - e.g. head wraps
+//     of different colours - so they share one Pip-Boy row (counts are merged
+//     by the sync engine).
+const ID_ALIASES = [
+  // Neural Interface Suit (post-sim -> sim)
+  ['anchorage.esm', 0x00bb28, 'anchorage.esm', 0x00a6c0],
+  // Anchorage rewards (sim -> wasteland)
+  ['anchorage.esm', 0x003a04, 'anchorage.esm', 0x00c07d], // Gauss Rifle
+  ['anchorage.esm', 0x003f44, 'anchorage.esm', 0x00c07b], // Trench Knife
+  ['anchorage.esm', 0x00b554, 'anchorage.esm', 0x00c07c], // Jingwei's Shocksword
+  ['anchorage.esm', 0x003a02, 'anchorage.esm', 0x00c18f], // Chinese Stealth Armor
+  ['anchorage.esm', 0x003af9, 'anchorage.esm', 0x00c18b], // Winterized Combat Armor
+  ['anchorage.esm', 0x003afc, 'anchorage.esm', 0x00c18c], // Winterized Combat Helmet
+  ['anchorage.esm', 0x001f09, 'anchorage.esm', 0x00c18d], // Winterized T-51b Power Armor
+  ['anchorage.esm', 0x001f08, 'anchorage.esm', 0x00c18e], // Winterized T-51b Power Helmet
+  // Anchorage sim copies of base-game items
+  ['anchorage.esm', 0x003f49, 'fallout3.esm', 0x00434f], // 10mm Pistol
+  ['anchorage.esm', 0x003f4a, 'fallout3.esm', 0x004350], // Silenced 10mm Pistol
+  ['anchorage.esm', 0x003f72, 'fallout3.esm', 0x004321], // 10mm Submachine Gun
+  ['anchorage.esm', 0x003f3e, 'fallout3.esm', 0x01ffec], // Assault Rifle
+  ['anchorage.esm', 0x003f3f, 'fallout3.esm', 0x00080b], // Chinese Assault Rifle
+  ['anchorage.esm', 0x003f40, 'fallout3.esm', 0x02b3cb], // Chinese Officer's Sword
+  ['anchorage.esm', 0x003f41, 'fallout3.esm', 0x004325], // Chinese Pistol
+  ['anchorage.esm', 0x003f42, 'fallout3.esm', 0x00432d], // Flamer
+  ['anchorage.esm', 0x003f43, 'fallout3.esm', 0x004330], // Frag Grenade
+  ['anchorage.esm', 0x003f45, 'fallout3.esm', 0x00433c], // Frag Mine
+  ['anchorage.esm', 0x003f46, 'fallout3.esm', 0x004340], // Missile Launcher
+  ['anchorage.esm', 0x003f47, 'fallout3.esm', 0x00433f], // Minigun
+  ['anchorage.esm', 0x003f48, 'fallout3.esm', 0x004353], // Sniper Rifle
+  ['anchorage.esm', 0x00c6f0, 'fallout3.esm', 0x004347], // Power Fist
+  ['anchorage.esm', 0x00c7c2, 'fallout3.esm', 0x004327], // Combat Shotgun
+  ['anchorage.esm', 0x00cbfc, 'fallout3.esm', 0x004336], // Laser Rifle
+  ['anchorage.esm', 0x00cdde, 'fallout3.esm', 0x020426], // Combat Helmet
+  ['anchorage.esm', 0x00c1ca, 'fallout3.esm', 0x0340d2], // Chinese Jumpsuit
+  ['anchorage.esm', 0x00ad7b, 'zeta.esm', 0x00ab6d], // General Chase's Overcoat
+  // Other duplicates
+  ['fallout3.esm', 0x06c587, 'fallout3.esm', 0x034121], // Armored Vault 101 Jumpsuit
+  ['brokensteel.esm', 0x0088b5, 'fallout3.esm', 0x0cb5fb], // Composite Recon Helmet
+  ['zeta.esm', 0x003305, 'fallout3.esm', 0x02dd80], // Sheriff's Hat
+  ['fallout3.esm', 0x074334, 'fallout3.esm', 0x074296], // Head Wrap (dark gray)
+  ['fallout3.esm', 0x074335, 'fallout3.esm', 0x074296], // Head Wrap (plaid)
+  ['fallout3.esm', 0x074336, 'fallout3.esm', 0x074296], // Head Wrap (gray)
+  ['fallout3.esm', 0x0cb606, 'fallout3.esm', 0x034122], // Merc Charmer Outfit
+  ['fallout3.esm', 0x0cb607, 'fallout3.esm', 0x034123], // Merc Troublemaker Outfit
+  ['fallout3.esm', 0x0cb608, 'fallout3.esm', 0x034124], // Merc Adventurer Outfit
+  ['fallout3.esm', 0x0cb60a, 'fallout3.esm', 0x0a3045], // Merc Grunt Outfit
+  ['fallout3.esm', 0x0cb60b, 'fallout3.esm', 0x0c5d34], // Merc Cruiser Outfit
+];
+const aliasKey = (plugin, localId) => `${plugin}:${localId}`;
+const ALIAS_BY_GAME = new Map(ID_ALIASES.map((a) => [aliasKey(a[0], a[1]), a]));
+const ALIASED_ITEMS = new Set(ID_ALIASES.flatMap((a) => [aliasKey(a[0], a[1]), aliasKey(a[2], a[3])]));
+
 const PIPBOY_PLUGIN_HIGH_BYTE_BY_MODE = {
   F3: FO3_PIPBOY_PLUGIN_HIGH_BYTE,
   FNV: FNV_PIPBOY_PLUGIN_HIGH_BYTE,
@@ -158,6 +228,61 @@ export class FormIdMapper {
     this.loadOrder = new Map();
     this.loadOrderByName = new Map();
     this.loadOrderSignature = '';
+
+    // Game IDs (uint32) of ID_ALIASES items (either variant) the player holds.
+    this.heldAliased = new Set();
+  }
+
+  /**
+   * Record which aliased item variants the player holds, from a game snapshot,
+   * so a Pip-Boy action on the shared device item reaches the right game item.
+   */
+  setHeldItems(snapshot) {
+    const held = new Set();
+    const note = (formId) => {
+      const id = parseFormId(formId);
+      if (id === null) return;
+      const pluginName = this.loadOrder.get((id >>> 24) & 0xff);
+      if (pluginName && ALIASED_ITEMS.has(aliasKey(pluginName, id & 0x00ffffff))) held.add(id);
+    };
+    for (const item of snapshot?.inventory || []) note(item.formId);
+    const player = snapshot?.player;
+    for (const src of [snapshot, player]) {
+      if (Array.isArray(src?.equippedapparel)) src.equippedapparel.forEach(note);
+      note(src?.equippedweap);
+    }
+    this.heldAliased = held;
+  }
+
+  /**
+   * The Pip-Boy form ID (high byte included) for a plugin's local ID, or null
+   * when that plugin has no Pip-Boy byte in this game mode.
+   */
+  _pipboyId(pluginName, gameModIndex, localId, gameMode) {
+    let highByte = pipboyHighByteForPlugin(pluginName, gameModIndex, gameMode);
+    if (highByte === null && this.isTTW(gameMode) && pluginName in FO3_PIPBOY_PLUGIN_HIGH_BYTE) {
+      // fallout3.esm's FO3 byte is "its own index", which natively is 0x00.
+      highByte = TTW_PIPBOY_FLAG | (FO3_PIPBOY_PLUGIN_HIGH_BYTE[pluginName] ?? 0);
+    }
+    return highByte === null ? null : buildFormId(highByte, localId);
+  }
+
+  /**
+   * Pip-Boy -> game: the aliased variant the player holds for this device
+   * item, as a game form ID. Null when none applies (the DAT's own item is
+   * held, or no variant is) and the normal mapping should be used.
+   */
+  _heldVariantFor(pipboyId, gameMode) {
+    for (const [fromPlugin, fromLocal, toPlugin, toLocal] of ID_ALIASES) {
+      const toIndex = this.loadOrderByName.get(toPlugin);
+      if (this._pipboyId(toPlugin, toIndex, toLocal, gameMode) !== pipboyId) continue;
+      if (toIndex !== undefined && this.heldAliased.has(buildFormId(toIndex, toLocal))) return null;
+      const fromIndex = this.loadOrderByName.get(fromPlugin);
+      if (fromIndex === undefined) continue;
+      const gameId = buildFormId(fromIndex, fromLocal);
+      if (this.heldAliased.has(gameId)) return gameId;
+    }
+    return null;
   }
 
   /**
@@ -255,19 +380,20 @@ export class FormIdMapper {
     const id = parseFormId(gameFormId);
     if (id === null) return null;
 
-    const localId = id & 0x00ffffff;
     const gameModIndex = (id >>> 24) & 0xff;
     const pluginName = this.loadOrder.get(gameModIndex);
     if (!pluginName) return null;
+    const localId = id & 0x00ffffff;
 
-    let highByte = pipboyHighByteForPlugin(pluginName, gameModIndex, gameMode);
-    if (highByte === null && this.isTTW(gameMode) && pluginName in FO3_PIPBOY_PLUGIN_HIGH_BYTE) {
-      // fallout3.esm's FO3 byte is "its own index", which natively is 0x00.
-      highByte = TTW_PIPBOY_FLAG | (FO3_PIPBOY_PLUGIN_HIGH_BYTE[pluginName] ?? 0);
+    // Aliased item: use the DAT's plugin and ID (which can be another plugin).
+    const alias = ALIAS_BY_GAME.get(aliasKey(pluginName, localId));
+    if (alias) {
+      const aliasIndex = this.loadOrderByName.get(alias[2]) ?? gameModIndex;
+      const aliased = this._pipboyId(alias[2], aliasIndex, alias[3], gameMode);
+      if (aliased !== null) return aliased;
     }
-    if (highByte === null) return null;
 
-    return buildFormId(highByte, localId);
+    return this._pipboyId(pluginName, gameModIndex, localId, gameMode);
   }
 
   _resolveToGameByLoadOrder(pipboyFormId, gameMode) {
@@ -279,6 +405,9 @@ export class FormIdMapper {
 
     const localId = id & 0x00ffffff;
     const pipboyModIndex = (id >>> 24) & 0xff;
+
+    const variant = this._heldVariantFor(id, gameMode);
+    if (variant !== null) return variant;
 
     if (pipboyModIndex & TTW_PIPBOY_FLAG && this.isTTW(gameMode)) {
       const fo3Byte = pipboyModIndex & ~TTW_PIPBOY_FLAG;
@@ -402,6 +531,7 @@ export class FormIdMapper {
 }
 
 export {
+  ID_ALIASES,
   ITEM_CATEGORIES,
   FNV_PIPBOY_PLUGIN_HIGH_BYTE,
   FNV_PIPBOY_PLUGIN_OFFSETS,

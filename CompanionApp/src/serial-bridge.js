@@ -43,6 +43,36 @@ const KNOWN_PRODUCTS = [
   '5740', // STM32 Virtual COM Port
 ];
 
+// Linux: the Pip-Boy shows up as /dev/ttyACM*, which regular users can't open
+// by default, and ModemManager may probe it first. One udev rule fixes both:
+// `uaccess` grants the logged-in user access (no group membership needed) and
+// ID_MM_DEVICE_IGNORE keeps ModemManager away. Mirrored in the README.
+const LINUX_UDEV_FIX =
+  `echo 'SUBSYSTEM=="tty", ATTRS{idVendor}=="${KNOWN_VENDORS[0]}", ATTRS{idProduct}=="${KNOWN_PRODUCTS[0]}", ` +
+  `TAG+="uaccess", ENV{ID_MM_DEVICE_IGNORE}="1"' | sudo tee /etc/udev/rules.d/99-pipboy.rules ` +
+  `&& sudo udevadm control --reload && sudo udevadm trigger`;
+
+/**
+ * Error for a failed port open. On Linux, permission and busy errors get the
+ * fix appended, since the raw "Permission denied" gives no hint what to do.
+ */
+export function describeOpenError(path, err, platform = process.platform) {
+  let message = `Failed to open ${path}: ${err.message}`;
+  if (platform === 'linux') {
+    if (/EACCES|permission denied/i.test(err.message)) {
+      message +=
+        `\n` +
+        `Linux is not allowing access to ${path}. Run this once in a terminal, ` +
+        `then unplug and replug the Pip-Boy:\n  ${LINUX_UDEV_FIX}`;
+    } else if (/EBUSY|resource busy|locked/i.test(err.message)) {
+      message +=
+        `\n${path} is in use by another program (often ModemManager - the udev rule ` +
+        `from the README keeps it away - or another Pip-Boy tool).`;
+    }
+  }
+  return new Error(message);
+}
+
 const DEFAULT_BAUD_RATE = 19200;
 const COMMAND_SPACING_MS = 25;       // Min time between commands
 const AUDIO_GUARD_MS = 350;          // Hold commands after device equip/use so audio plays cleanly
@@ -100,7 +130,7 @@ export class SerialBridge extends EventEmitter {
 
   /**
    * Connect to the Pip-Boy
-   * @param {string} [comPort] - Optional COM port override, otherwise auto-detects
+   * @param {string} [comPort] - Optional serial port override (COM3, /dev/ttyACM0), otherwise auto-detects
    */
   async connect(comPort) {
     const targetPort = comPort || this.comPort;
@@ -123,7 +153,7 @@ export class SerialBridge extends EventEmitter {
       this.emit('ports-found', allPorts);
       throw new Error(
         `No Pip-Boy auto-detected. Available ports: ${allPorts.map(p => p.path).join(', ')}. ` +
-        'Use --port <COM#> to specify manually.'
+        'Use --port <port> (e.g. COM3, or /dev/ttyACM0 on Linux) to specify manually.'
       );
     }
 
@@ -164,7 +194,7 @@ export class SerialBridge extends EventEmitter {
       this.port.on('error', (err) => {
         this.emit('error', err);
         if (!this.connected) {
-          reject(err);
+          reject(describeOpenError(path, err));
         }
       });
 
@@ -181,7 +211,7 @@ export class SerialBridge extends EventEmitter {
 
       this.port.open((err) => {
         if (err) {
-          reject(new Error(`Failed to open ${path}: ${err.message}`));
+          reject(describeOpenError(path, err));
         }
       });
     });

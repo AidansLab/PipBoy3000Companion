@@ -39,5 +39,20 @@ module.exports = {
     ],
     signAndEditExecutable: false,
     artifactName: "${productName}.${ext}"
+  },
+  linux: {
+    // Single-file AppImage, the Windows portable build's counterpart; also
+    // runs on the Steam Deck. The serialport native binding is NAPI and ships
+    // linux-x64/arm64 prebuilds, so no compile step is needed (the build:linux
+    // script passes --config.npmRebuild=false for that reason).
+    target: [
+      {
+        target: "AppImage",
+        arch: ["x64"]
+      }
+    ],
+    icon: "build/icon.png",
+    category: "Utility",
+    artifactName: "${productName}.${ext}"
   }
 };

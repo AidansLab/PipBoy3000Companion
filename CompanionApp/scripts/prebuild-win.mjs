@@ -17,8 +17,10 @@
  */
 
 /**
- * Stop a running packaged build and clear the output folder before rebuilding.
- * Avoids electron-builder failing when app.asar is locked by a prior instance.
+ * Stop a running packaged build and clear the Windows build output before
+ * rebuilding. Avoids electron-builder failing when app.asar is locked by a
+ * prior instance. Only the Windows artifacts are removed, so a Linux build
+ * (AppImage, linux-unpacked) sharing the release folder survives.
  */
 
 import { execSync } from 'child_process';
@@ -37,11 +39,6 @@ function tryExec(command) {
   }
 }
 
-function removeDir(dir) {
-  if (!fs.existsSync(dir)) return;
-  fs.rmSync(dir, { recursive: true, force: true });
-}
-
 tryExec('taskkill /F /IM "Pip-Boy_Sync.exe" /T');
 
 // Give Windows a moment to release file handles.
@@ -50,10 +47,20 @@ while (Date.now() < waitUntil) {
   // busy wait
 }
 
+const windowsOutputs = [
+  'win-unpacked',
+  'Pip-Boy_Sync.exe',
+  'builder-debug.yml',
+  'builder-effective-config.yaml',
+];
+
 try {
-  removeDir(outputDir);
+  for (const name of windowsOutputs) {
+    const target = path.join(outputDir, name);
+    if (fs.existsSync(target)) fs.rmSync(target, { recursive: true, force: true });
+  }
 } catch (err) {
-  console.warn(`[prebuild] Could not remove ${outputDir}: ${err.message}`);
+  console.warn(`[prebuild] Could not clear Windows output in ${outputDir}: ${err.message}`);
   console.warn('[prebuild] Close any running Pip-Boy Sync window and retry.');
   process.exit(1);
 }

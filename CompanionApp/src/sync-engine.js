@@ -427,6 +427,7 @@ export class SyncEngine extends EventEmitter {
         this.emit('status', 'Load order updated - forcing full resync');
       }
     }
+    this.mapper?.setHeldItems?.(snapshot);
 
     // Use snapshot game id when mode not set yet (e.g. before Pip-Boy detection).
     if (!this.gameMode && snapshot.game) {
@@ -1167,17 +1168,33 @@ export class SyncEngine extends EventEmitter {
         rebuildForms.add(gameFormId);
       }
 
+      // Several game forms can share one Pip-Boy form (ID aliases, e.g. the
+      // sim and wasteland copies of an item, or differently coloured head
+      // wraps). Their rows live together on the device, so rebuild them as one.
+      if (rebuildForms.size) {
+        const rebuildPip = new Set([...rebuildForms].map((g) => this._resolveFormId(g)));
+        for (const map of [currentMap, previousMap]) {
+          for (const it of map.values()) {
+            if (rebuildForms.has(it.formId)) continue;
+            const pip = this._resolveFormId(it.formId);
+            if (pip !== null && rebuildPip.has(pip)) rebuildForms.add(it.formId);
+          }
+        }
+      }
+
+      const rebuiltPip = new Set();
       for (const gameFormId of rebuildForms) {
         const formId = this._resolveFormId(gameFormId);
-        let type = null;
+        if (rebuiltPip.has(formId)) continue;
+        rebuiltPip.add(formId);
         const stacks = [];
+        const byCnd = new Map();
         for (const it of currentMap.values()) {
-          if (it.formId !== gameFormId) continue;
-          if (type === null) type = it.type;
-          stacks.push({
-            cnt: it.count || 1,
-            cnd: this._normalizeItemCondition(it.condition),
-          });
+          if (this._resolveFormId(it.formId) !== formId) continue;
+          const cnd = this._normalizeItemCondition(it.condition);
+          const merged = byCnd.get(cnd);
+          if (merged) merged.cnt += it.count || 1;
+          else stacks.push(byCnd.set(cnd, { cnt: it.count || 1, cnd }).get(cnd));
         }
         // Intentionally do NOT add to _lastChangedCategories here.
         // setformstacks sorts the INV inline (dbIds is already cached, no extra
@@ -1869,6 +1886,16 @@ export class SyncEngine extends EventEmitter {
    * a category the player emptied.
    */
   _buildSetItemsBulkCommands(cat, entries) {
+    // The device sets (not adds) each entry's count, so stacks that land on the
+    // same Pip-Boy id + condition (ID aliases) must be summed here.
+    const merged = new Map();
+    for (const e of entries) {
+      const k = `${e[0]}:${e[2]}`;
+      const m = merged.get(k);
+      if (m) m[1] += e[1];
+      else merged.set(k, [e[0], e[1], e[2]]);
+    }
+    entries = [...merged.values()];
     const commands = [`player.setitemsbulk_begin('${cat}')`];
     for (let i = 0; i < entries.length; i += MAX_ITEM_BATCH) {
       const slice = entries.slice(i, i + MAX_ITEM_BATCH);

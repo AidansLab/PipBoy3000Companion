@@ -80,7 +80,7 @@ ${C.bold}USAGE:${C.reset}
   node src/cli.js [options]
 
 ${C.bold}OPTIONS:${C.reset}
-  --port <COM#>    Specify the Pip-Boy serial port (e.g., COM3)
+  --port <port>    Specify the Pip-Boy serial port (e.g., COM3 or /dev/ttyACM0)
   --game <mode>    Set game mode: F3 (Fallout 3) or FNV (New Vegas)
   --no-game        Skip connecting to the game (manual mode only)
   --help, -h       Show this help message
@@ -388,7 +388,7 @@ async function main() {
     await bridge.connect(portArg);
   } catch (err) {
     logWarn(`Auto-connect failed: ${err.message}`);
-    logStatus('Use "connect" or "connect <COM#>" to connect manually');
+    logStatus('Use "connect" or "connect <port>" to connect manually');
   }
 
   // ─── Connect to game pipe (unless --no-game) ────────────────────────────
